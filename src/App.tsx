@@ -1,15 +1,15 @@
 import { useState, useEffect } from "react";
-import { TopBar } from "./components/TopBar";
-import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
-import { ProjectsView } from "./components/ProjectsView";
-import { WorkspaceView } from "./components/WorkspaceView";
-import { AuthView } from "./components/AuthView";
-import { ProfileView } from "./components/ProfileView";
-import { AIAssistant } from "./components/AIAssistant";
-import { OnboardingFlow } from "./components/OnboardingFlow";
+import { TopBar } from "./components/layout/TopBar";
+import { WorkspaceSidebar } from "./components/layout/WorkspaceSidebar";
+import { ProjectsView } from "./pages/ProjectsView";
+import { WorkspaceView } from "./pages/WorkspaceView";
+import { AuthView } from "./pages/AuthView";
+import { ProfileView } from "./pages/ProfileView";
+import { AIAssistant } from "./components/features/ai/AIAssistant";
+import { OnboardingFlow } from "./pages/OnboardingFlow";
 import { Toaster } from "./components/ui/sonner";
-import { toast } from "sonner@2.0.3";
-import { PinnedChartsProvider } from "./components/PinnedChartsContext";
+import { toast } from "sonner";
+import { PinnedChartsProvider } from "./context/PinnedChartsContext";
 
 const mockProjects = [
   { id: 1, name: "E-Commerce Analytics" },

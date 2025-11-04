@@ -10,7 +10,7 @@
  */
 
 import { Loader2 } from 'lucide-react';
-
+import React from "react";
 interface LoadingSpinnerProps {
   /** Size variant of the spinner */
   size?: 'sm' | 'md' | 'lg' | 'xl';

@@ -12,7 +12,7 @@
  * />
  */
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, X } from 'lucide-react';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';

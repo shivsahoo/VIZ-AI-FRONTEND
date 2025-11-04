@@ -14,7 +14,7 @@
  */
 
 import { ReactNode } from 'react';
-
+import React from "react";
 interface EmptyStateProps {
   /** Icon to display (Lucide React icon recommended) */
   icon: ReactNode;
