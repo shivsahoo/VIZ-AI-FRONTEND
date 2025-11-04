@@ -150,7 +150,7 @@ export function ChartCard({
               fill="#8884d8"
               dataKey={dataKeys.primary}
             >
-              {data.map((entry, index) => (
+              {data.map((_, index) => (
                 <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
               ))}
             </Pie>

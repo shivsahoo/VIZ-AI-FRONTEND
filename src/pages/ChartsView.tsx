@@ -4,6 +4,10 @@ import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
+import { GradientButton } from "../components/shared/GradientButton";
+import { StatusBadge } from "../components/shared/StatusBadge";
+import { ActionButtonGroup } from "../components/shared/ActionButtonGroup";
+import { SkeletonGrid } from "../components/shared/SkeletonCard";
 import { usePinnedCharts } from "../context/PinnedChartsContext";
 import {
   Select,
@@ -544,54 +548,48 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                   <Plus className="w-3.5 h-3.5" />
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onEditChart) {
-                    onEditChart({
-                      name: chart.name,
-                      type: chart.type,
-                      description: chart.dataSource
-                    });
+              <ActionButtonGroup
+                actions={[
+                  {
+                    icon: <Edit2 />,
+                    onClick: (e) => {
+                      e?.stopPropagation();
+                      if (onEditChart) {
+                        onEditChart({
+                          name: chart.name,
+                          type: chart.type,
+                          description: chart.dataSource
+                        });
+                      }
+                      if (onOpenAIAssistant) {
+                        onOpenAIAssistant();
+                      }
+                    },
+                    label: "Edit chart",
+                    variant: "ghost"
+                  },
+                  {
+                    icon: <Trash2 />,
+                    onClick: (e) => {
+                      e?.stopPropagation();
+                      setChartToDelete(chart);
+                    },
+                    label: "Delete chart",
+                    variant: "ghost",
+                    className: "hover:text-destructive"
+                  },
+                  {
+                    icon: <Pin className={isPinned(chart.id) ? 'fill-primary/20 rotate-45' : ''} />,
+                    onClick: (e) => {
+                      e?.stopPropagation();
+                      handleTogglePin(chart);
+                    },
+                    label: isPinned(chart.id) ? "Unpin chart" : "Pin chart",
+                    variant: "ghost",
+                    className: isPinned(chart.id) ? 'text-primary hover:text-primary/80 opacity-100' : 'hover:text-primary'
                   }
-                  if (onOpenAIAssistant) {
-                    onOpenAIAssistant();
-                  }
-                }}
-                className="h-7 w-7 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
-                title="Edit chart"
-              >
-                <Edit2 className="w-3.5 h-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setChartToDelete(chart);
-                }}
-                className="h-7 w-7 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleTogglePin(chart);
-                }}
-                className={`h-7 w-7 ${
-                  isPinned(chart.id)
-                    ? 'text-primary hover:text-primary/80'
-                    : 'text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100'
-                } transition-opacity`}
-                title={isPinned(chart.id) ? "Unpin chart" : "Pin chart"}
-              >
-                <Pin className={`w-3.5 h-3.5 ${isPinned(chart.id) ? 'fill-primary/20 rotate-45' : ''}`} />
-              </Button>
+                ]}
+              />
             </div>
           </div>
         </div>
@@ -604,16 +602,12 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         {/* Status Badge at Bottom */}
         {chart.status === 'published' && dashboard && (
           <div className="px-4 pb-3">
-            <Badge variant="outline" className="text-xs border-success/30 text-success bg-success/10">
-              {dashboard.name}
-            </Badge>
+            <StatusBadge status="published" label={dashboard.name} />
           </div>
         )}
         {chart.status === 'draft' && (
           <div className="px-4 pb-3">
-            <Badge variant="outline" className="text-xs border-warning/30 text-warning bg-warning/10">
-              Draft
-            </Badge>
+            <StatusBadge status="draft" />
           </div>
         )}
       </Card>
@@ -637,22 +631,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           </div>
 
           {/* Skeleton grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <Card key={i} className="p-6 border-2 border-border card-shadow">
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-muted/50 animate-pulse" />
-                    <div className="flex-1 space-y-2">
-                      <div className="h-4 bg-muted/50 rounded animate-pulse w-3/4" />
-                      <div className="h-3 bg-muted/30 rounded animate-pulse w-1/2" />
-                    </div>
-                  </div>
-                  <div className="h-64 bg-muted/30 rounded-lg animate-pulse" />
-                </div>
-              </Card>
-            ))}
-          </div>
+          <SkeletonGrid count={6} variant="chart" />
         </div>
       </div>
     );
@@ -671,14 +650,14 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           </div>
           
           {/* Compact Generation Controls */}
-          <Button
+          <GradientButton
             onClick={handleGenerateCharts}
             size="sm"
-            className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white h-9"
+            className="h-9"
           >
             <Sparkles className="w-3.5 h-3.5 mr-1.5" />
             Generate Charts
-          </Button>
+          </GradientButton>
         </div>
 
         {/* Generated Charts Section */}

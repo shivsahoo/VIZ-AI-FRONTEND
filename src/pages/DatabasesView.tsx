@@ -3,6 +3,8 @@ import { useState } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import { GradientButton } from "../components/shared/GradientButton";
+import { StatusBadge } from "../components/shared/StatusBadge";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -140,12 +142,6 @@ export function DatabasesView() {
     // Reset form
     setConnectionName("");
     setHost("");
-    setPort("");
-    setDatabase("");
-    setUsername("");
-    setPassword("");
-    setUseSSL(false);
-    setAdditionalParams("");
     setSelectedDatabase(null);
     setEditDialogOpen(false);
   };
@@ -164,13 +160,13 @@ export function DatabasesView() {
             <h2 className="text-2xl text-foreground mb-1">Database Connections</h2>
             <p className="text-muted-foreground">Manage your PostgreSQL and MySQL connections</p>
           </div>
-          <Button 
+          <GradientButton 
             onClick={() => setShowConnectionFlow(true)}
-            className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all"
+            className="shadow-lg hover:shadow-xl transition-all"
           >
             <Plus className="w-4 h-4 mr-2" />
             Add Connection
-          </Button>
+          </GradientButton>
         </div>
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -242,20 +238,9 @@ export function DatabasesView() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">{db.host}</TableCell>
                     <TableCell>
-                      <Badge 
-                        className={
-                          db.status === 'connected' 
-                            ? 'bg-success/10 text-success border-success/20' 
-                            : 'bg-destructive/10 text-destructive border-destructive/20'
-                        }
-                      >
-                        {db.status === 'connected' ? (
-                          <Check className="w-3 h-3 mr-1" />
-                        ) : (
-                          <X className="w-3 h-3 mr-1" />
-                        )}
-                        {db.status}
-                      </Badge>
+                      <StatusBadge 
+                        status={db.status === 'connected' ? 'connected' : 'disconnected'}
+                      />
                     </TableCell>
                     <TableCell className="text-muted-foreground">{db.lastChecked}</TableCell>
                     <TableCell>
@@ -428,13 +413,12 @@ export function DatabasesView() {
               <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button 
+              <GradientButton 
                 onClick={handleUpdateConnection}
-                className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
               >
                 <Database className="w-4 h-4 mr-2" />
                 Update Connection
-              </Button>
+              </GradientButton>
             </DialogFooter>
           </DialogContent>
         </Dialog>

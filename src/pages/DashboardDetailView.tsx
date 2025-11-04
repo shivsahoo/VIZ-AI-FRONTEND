@@ -3,6 +3,7 @@ import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles } from "lucide-react
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import { GradientButton } from "../components/shared/GradientButton";
 import { ChartCard } from "../components/features/charts/ChartCard";
 import { usePinnedCharts } from "../context/PinnedChartsContext";
 import {
@@ -145,13 +146,12 @@ export function DashboardDetailView({ dashboardName, onBack, onOpenAIAssistant, 
               <Download className="w-4 h-4 mr-2" />
               Export
             </Button>
-            <Button 
+            <GradientButton 
               onClick={onOpenAIAssistant}
-              className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
             >
               <Sparkles className="w-4 h-4 mr-2" />
               Create Chart
-            </Button>
+            </GradientButton>
           </div>
         </div>
 

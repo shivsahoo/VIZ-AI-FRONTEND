@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
+import type { MouseEvent } from "react";
 import { Pin, TrendingUp, TrendingDown, BarChart3, Lightbulb, Plus, ArrowRight, Clock, Sparkles, Star } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import { GradientButton } from "../components/shared/GradientButton";
 import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, AreaChart, Area, ResponsiveContainer, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
 import { CustomChartTooltip } from "../components/features/charts/ChartTooltip";
@@ -466,17 +468,16 @@ export function HomeDashboardView({ onNavigate, onOpenAIAssistant }: HomeDashboa
 
                     {/* Hover Action Button */}
                     <div className="absolute bottom-4 right-4 z-10">
-                      <Button 
-                        variant="default"
+                      <GradientButton 
                         size="sm"
-                        className="h-8 text-xs opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg"
-                        onClick={(e) => {
+                        className="h-8 text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                        onClick={(e: MouseEvent) => {
                           e.stopPropagation();
                           setSelectedChart(chart);
                         }}
                       >
                         View Details <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                      </Button>
+                      </GradientButton>
                     </div>
                   </Card>
                 );

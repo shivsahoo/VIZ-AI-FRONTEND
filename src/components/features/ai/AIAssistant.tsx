@@ -3,7 +3,7 @@ import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, Plus, Che
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { Badge } from "../../ui/badge";
-import { toast } from "sonner";
+import { GradientButton } from "../../shared/GradientButton";
 import { ChartPreviewDialog } from "../charts/ChartPreviewDialog";
 
 interface Message {
@@ -425,14 +425,14 @@ export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart
                                   )}
                                 </button>
 
-                                <Button
+                                <GradientButton
                                   onClick={() => handleCreateChart(suggestion)}
                                   size="sm"
-                                  className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white gap-2"
+                                  className="gap-2"
                                 >
                                   <Plus className="w-4 h-4" />
                                   Create
-                                </Button>
+                                </GradientButton>
                               </div>
 
                               {isExpanded && (
@@ -536,14 +536,14 @@ export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart
                 disabled={isGenerating}
                 className="flex-1 px-4 py-3 bg-input-background border border-border rounded-lg outline-none focus:ring-2 focus:ring-accent text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
               />
-              <Button
+              <GradientButton
                 onClick={handleSend}
                 disabled={!input.trim() || isGenerating}
                 size="icon"
-                className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white flex-shrink-0 h-11 w-11"
+                className="flex-shrink-0 h-11 w-11"
               >
                 <Send className="w-5 h-5" />
-              </Button>
+              </GradientButton>
             </div>
           </div>
         )}

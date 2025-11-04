@@ -3,6 +3,7 @@ import { Plus, Database, LayoutDashboard, TrendingUp, Sparkles, Clock, Users as 
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import { GradientButton } from "../components/shared/GradientButton";
 import { OnboardingFlow } from "./OnboardingFlow";
 import { toast } from "sonner";
 
@@ -128,13 +129,13 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
             <h2 className="text-2xl text-foreground mb-1">Your Projects</h2>
             <p className="text-muted-foreground">Select a project to view analytics and insights</p>
           </div>
-          <Button 
+          <GradientButton 
             onClick={() => setShowNewProjectFlow(true)}
-            className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all"
+            className="shadow-lg hover:shadow-xl transition-all"
           >
             <Plus className="w-4 h-4 mr-2" />
             New Project
-          </Button>
+          </GradientButton>
         </div>
 
         {/* Projects Grid */}

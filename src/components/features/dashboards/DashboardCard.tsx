@@ -1,7 +1,7 @@
 import { type MouseEvent } from "react";
 import { LayoutDashboard, Clock, BarChart3, Users, Trash2 } from "lucide-react";
-import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
+import { ActionButtonGroup } from "../../shared/ActionButtonGroup";
 import { LineChart, Line, BarChart, Bar, AreaChart, Area, ResponsiveContainer } from "recharts";
 
 interface Dashboard {
@@ -134,14 +134,21 @@ export function DashboardCard({
         </div>
 
         {/* Delete Action - Top Right */}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onDelete}
-          className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <Trash2 className="w-4 h-4" />
-        </Button>
+        <ActionButtonGroup
+          actions={[
+            {
+              icon: <Trash2 />,
+              onClick: (e) => {
+                e?.stopPropagation();
+                onDelete(e as MouseEvent);
+              },
+              label: "Delete dashboard",
+              variant: "ghost",
+              className: "hover:text-destructive"
+            }
+          ]}
+          className="absolute top-3 right-3"
+        />
       </div>
     );
   }
@@ -153,14 +160,21 @@ export function DashboardCard({
       onClick={onClick}
     >
       {/* Delete Action - Top Right */}
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onDelete}
-        className="absolute top-3 right-3 h-8 w-8 z-10 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-      >
-        <Trash2 className="w-4 h-4" />
-      </Button>
+      <ActionButtonGroup
+        actions={[
+          {
+            icon: <Trash2 />,
+            onClick: (e) => {
+              e?.stopPropagation();
+              onDelete(e as MouseEvent);
+            },
+            label: "Delete dashboard",
+            variant: "ghost",
+            className: "hover:text-destructive"
+          }
+        ]}
+        className="absolute top-3 right-3 z-10"
+      />
 
       <div className="p-5 space-y-4">
         {/* Dashboard Header */}

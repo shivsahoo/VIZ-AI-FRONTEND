@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
-import { Plus, LayoutDashboard, Search, Grid3x3, List } from "lucide-react";
-import { Button } from "../components/ui/button";
+import { Plus, LayoutDashboard, Search } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
+import { GradientButton } from "../components/shared/GradientButton";
+import { ViewModeToggle } from "../components/shared/ViewModeToggle";
+import { SkeletonGrid } from "../components/shared/SkeletonCard";
 import { DashboardCreationBot } from "../components/features/dashboards/DashboardCreationBot";
 import { DashboardCard } from "../components/features/dashboards/DashboardCard";
 import { toast } from "sonner";
@@ -91,26 +93,7 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard 
           </div>
 
           {/* Skeleton grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <Card key={i} className="p-5 border-border">
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-muted/50 animate-pulse" />
-                    <div className="flex-1 space-y-2">
-                      <div className="h-5 bg-muted/50 rounded animate-pulse w-3/4" />
-                      <div className="h-4 bg-muted/30 rounded animate-pulse w-full" />
-                      <div className="h-4 bg-muted/30 rounded animate-pulse w-2/3" />
-                    </div>
-                  </div>
-                  <div className="pt-3 border-t border-border">
-                    <div className="h-4 bg-muted/30 rounded animate-pulse w-1/2" />
-                  </div>
-                  <div className="h-4 bg-muted/30 rounded animate-pulse w-1/3" />
-                </div>
-              </Card>
-            ))}
-          </div>
+          <SkeletonGrid count={6} variant="dashboard" />
         </div>
       </div>
     );
@@ -128,14 +111,14 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard 
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button
+            <GradientButton
               onClick={handleCreateDashboard}
               size="sm"
-              className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white h-9"
+              className="h-9"
             >
               <Plus className="w-4 h-4 mr-1.5" />
               Create Dashboard
-            </Button>
+            </GradientButton>
           </div>
         </div>
 
@@ -152,14 +135,13 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard 
                   {searchQuery ? "Try adjusting your search" : "Create your first dashboard to get started"}
                 </p>
                 {!searchQuery && (
-                  <Button
+                  <GradientButton
                     onClick={handleCreateDashboard}
                     size="sm"
-                    className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
                   >
                     <Plus className="w-4 h-4 mr-2" />
                     Create Dashboard
-                  </Button>
+                  </GradientButton>
                 )}
               </div>
             </div>
@@ -178,22 +160,7 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard 
                     className="pl-8 h-9 border-border text-sm"
                   />
                 </div>
-                <Button
-                  variant={viewMode === 'grid' ? 'default' : 'outline'}
-                  size="icon"
-                  onClick={() => setViewMode('grid')}
-                  className={`h-9 w-9 ${viewMode === 'grid' ? 'bg-primary text-primary-foreground' : 'border-border'}`}
-                >
-                  <Grid3x3 className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant={viewMode === 'list' ? 'default' : 'outline'}
-                  size="icon"
-                  onClick={() => setViewMode('list')}
-                  className={`h-9 w-9 ${viewMode === 'list' ? 'bg-primary text-primary-foreground' : 'border-border'}`}
-                >
-                  <List className="w-4 h-4" />
-                </Button>
+                <ViewModeToggle value={viewMode} onChange={setViewMode} />
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -201,7 +168,7 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard 
                 <DashboardCard
                   key={dashboard.id}
                   dashboard={dashboard}
-                  viewMode="grid"
+                  viewMode={viewMode}
                   onDelete={(e) => {
                     e.stopPropagation();
                     setDashboardToDelete(dashboard);
@@ -225,22 +192,7 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard 
                     className="pl-8 h-9 border-border text-sm"
                   />
                 </div>
-                <Button
-                  variant={viewMode === 'grid' ? 'default' : 'outline'}
-                  size="icon"
-                  onClick={() => setViewMode('grid')}
-                  className={`h-9 w-9 ${viewMode === 'grid' ? 'bg-primary text-primary-foreground' : 'border-border'}`}
-                >
-                  <Grid3x3 className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant={viewMode === 'list' ? 'default' : 'outline'}
-                  size="icon"
-                  onClick={() => setViewMode('list')}
-                  className={`h-9 w-9 ${viewMode === 'list' ? 'bg-primary text-primary-foreground' : 'border-border'}`}
-                >
-                  <List className="w-4 h-4" />
-                </Button>
+                <ViewModeToggle value={viewMode} onChange={setViewMode} />
               </div>
             </div>
             <Card className="border-border overflow-hidden">

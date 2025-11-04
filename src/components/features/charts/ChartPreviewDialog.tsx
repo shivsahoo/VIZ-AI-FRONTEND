@@ -1,5 +1,4 @@
-import { useState, useRef, useEffect } from "react";
-import { X, Plus, ChevronDown, LayoutDashboard } from "lucide-react";
+import { Plus, ChevronDown, LayoutDashboard } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -8,6 +7,7 @@ import {
   DialogDescription,
 } from "../../ui/dialog";
 import { Button } from "../../ui/button";
+import { GradientButton } from "../../shared/GradientButton";
 import { Badge } from "../../ui/badge";
 import {
   DropdownMenu,
@@ -94,8 +94,6 @@ const mockAreaData = [
 ];
 
 export function ChartPreviewDialog({ isOpen, onClose, chart, onAddToDashboard, onSaveAsDraft, isExistingChart = false, chartStatus }: ChartPreviewDialogProps) {
-  const [selectedDashboard, setSelectedDashboard] = useState<number | null>(null);
-
   if (!chart) return null;
 
   const handleAddToDashboard = (dashboardId: number) => {
@@ -206,11 +204,11 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, onAddToDashboard, o
           
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white gap-2">
+              <GradientButton className="gap-2">
                 <Plus className="w-4 h-4" />
                 Add to Dashboard
                 <ChevronDown className="w-4 h-4" />
-              </Button>
+              </GradientButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-[250px]">
               <div className="px-2 py-1.5 text-xs text-muted-foreground">
