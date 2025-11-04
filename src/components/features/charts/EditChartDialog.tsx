@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { Wand2, Loader2 } from "lucide-react";
 import {
   Dialog,

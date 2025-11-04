@@ -1,4 +1,4 @@
-import { type MouseEvent } from "react";
+import React, { type MouseEvent } from "react";
 import { LayoutDashboard, Clock, BarChart3, Users, Trash2 } from "lucide-react";
 import { Card } from "../../ui/card";
 import { ActionButtonGroup } from "../../shared/ActionButtonGroup";

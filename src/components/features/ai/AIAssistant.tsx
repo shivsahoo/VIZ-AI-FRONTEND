@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, Plus, ChevronDown, ChevronUp, Code, Database, Check } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";

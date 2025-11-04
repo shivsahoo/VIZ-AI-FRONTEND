@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Bot, Send, Sparkles, Database, Check, Loader2 } from "lucide-react";
