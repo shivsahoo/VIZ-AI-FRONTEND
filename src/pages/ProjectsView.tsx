@@ -1,90 +1,193 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, Database, LayoutDashboard, TrendingUp, Sparkles, Clock, Users as UsersIcon, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { GradientButton } from "../components/shared/GradientButton";
 import { OnboardingFlow } from "./OnboardingFlow";
+import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import { toast } from "sonner";
+import { getProjects, createProject, type Project as ApiProject } from "../services/api";
 
-const mockProjects = [
-  {
-    id: 1,
-    name: "E-Commerce Analytics",
-    description: "Customer behavior and sales performance tracking",
-    dashboards: 12,
-    databases: 3,
-    team: 8,
-    lastActive: "2 hours ago",
-    gradient: "from-blue-500/10 to-cyan-500/10",
-    iconBg: "from-blue-500 to-cyan-500"
-  },
-  {
-    id: 2,
-    name: "Marketing Intelligence",
-    description: "Campaign performance and ROI analysis",
-    dashboards: 8,
-    databases: 2,
-    team: 5,
-    lastActive: "5 hours ago",
-    gradient: "from-purple-500/10 to-pink-500/10",
-    iconBg: "from-purple-500 to-pink-500"
-  },
-  {
-    id: 3,
-    name: "Financial Reporting",
-    description: "Revenue metrics and financial forecasting",
-    dashboards: 15,
-    databases: 4,
-    team: 12,
-    lastActive: "1 day ago",
-    gradient: "from-emerald-500/10 to-teal-500/10",
-    iconBg: "from-emerald-500 to-teal-500"
-  },
-  {
-    id: 4,
-    name: "Product Analytics",
-    description: "User engagement and feature adoption metrics",
-    dashboards: 10,
-    databases: 2,
-    team: 6,
-    lastActive: "3 hours ago",
-    gradient: "from-orange-500/10 to-red-500/10",
-    iconBg: "from-orange-500 to-red-500"
-  }
-];
+// Helper function to format time ago
+const formatTimeAgo = (dateString: string): string => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
 
-const stats = [
-  { label: "Total Projects", value: "4", icon: LayoutDashboard },
-  { label: "Active Dashboards", value: "45", icon: TrendingUp },
-  { label: "Data Sources", value: "11", icon: Database },
-  { label: "Team Members", value: "31", icon: UsersIcon }
-];
+  if (diffMins < 60) return `${diffMins} minutes ago`;
+  if (diffHours < 24) return `${diffHours} hours ago`;
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return date.toLocaleDateString();
+};
+
+// Helper function to get gradient colors based on index
+const getProjectGradient = (index: number): { gradient: string; iconBg: string } => {
+  const gradients = [
+    { gradient: "from-blue-500/10 to-cyan-500/10", iconBg: "from-blue-500 to-cyan-500" },
+    { gradient: "from-purple-500/10 to-pink-500/10", iconBg: "from-purple-500 to-pink-500" },
+    { gradient: "from-emerald-500/10 to-teal-500/10", iconBg: "from-emerald-500 to-teal-500" },
+    { gradient: "from-orange-500/10 to-red-500/10", iconBg: "from-orange-500 to-red-500" },
+    { gradient: "from-indigo-500/10 to-purple-500/10", iconBg: "from-indigo-500 to-purple-500" },
+    { gradient: "from-rose-500/10 to-pink-500/10", iconBg: "from-rose-500 to-pink-500" },
+  ];
+  return gradients[index % gradients.length];
+};
+
+// UI Project type (extends API Project with display fields)
+interface UIProject extends ApiProject {
+  dashboards?: number;
+  databases?: number;
+  team?: number;
+  lastActive?: string;
+  gradient: string;
+  iconBg: string;
+}
 
 interface ProjectsViewProps {
-  onProjectSelect: (projectName: string) => void;
+  onProjectSelect: (projectName: string, projectId?: string) => void;
 }
 
 export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
   const [showNewProjectFlow, setShowNewProjectFlow] = useState(false);
+  const [projects, setProjects] = useState<UIProject[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleNewProjectComplete = (projectData: {
+  // Fetch projects on mount
+  useEffect(() => {
+    fetchProjects();
+  }, []);
+
+  const fetchProjects = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await getProjects();
+      if (response.success && response.data) {
+        // Map API projects to UI format
+        const uiProjects: UIProject[] = response.data.map((project, index) => {
+          const colors = getProjectGradient(index);
+          return {
+            ...project,
+            dashboards: project.dashboardCount || 0,
+            databases: project.databaseCount || 0,
+            team: project.memberCount || 0,
+            lastActive: formatTimeAgo(project.createdAt),
+            gradient: colors.gradient,
+            iconBg: colors.iconBg,
+          };
+        });
+        setProjects(uiProjects);
+      } else {
+        setError(response.error?.message || "Failed to fetch projects");
+        toast.error(response.error?.message || "Failed to load projects");
+      }
+    } catch (err: any) {
+      const errorMessage = err.message || "An error occurred while fetching projects";
+      setError(errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleNewProjectComplete = async (projectData: {
     name: string;
     description: string;
     context: Record<string, string>;
     database: any;
   }) => {
+    try {
+      // Create project via API
+      const response = await createProject({
+        name: projectData.name,
+        description: projectData.description,
+      });
+
+      if (response.success && response.data) {
+        toast.success(`Project "${projectData.name}" created successfully!`);
+        
+        // Add new project to list with UI formatting
+        const colors = getProjectGradient(projects.length);
+        const newProject: UIProject = {
+          ...response.data,
+          dashboards: 0,
+          databases: 0,
+          team: 1,
+          lastActive: "just now",
+          gradient: colors.gradient,
+          iconBg: colors.iconBg,
+        };
+        setProjects([newProject, ...projects]);
+        
     setShowNewProjectFlow(false);
-    toast.success(`Project "${projectData.name}" created successfully!`);
     // Automatically select the newly created project
-    onProjectSelect(projectData.name);
+        onProjectSelect(projectData.name, response.data.id);
+      } else {
+        toast.error(response.error?.message || "Failed to create project");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while creating project");
+    }
   };
+
+  // Calculate stats from real data
+  const stats = [
+    { 
+      label: "Total Projects", 
+      value: projects.length.toString(), 
+      icon: LayoutDashboard 
+    },
+    { 
+      label: "Active Dashboards", 
+      value: projects.reduce((sum, p) => sum + (p.dashboards || 0), 0).toString(), 
+      icon: TrendingUp 
+    },
+    { 
+      label: "Data Sources", 
+      value: projects.reduce((sum, p) => sum + (p.databases || 0), 0).toString(), 
+      icon: Database 
+    },
+    { 
+      label: "Team Members", 
+      value: projects.reduce((sum, p) => sum + (p.team || 0), 0).toString(), 
+      icon: UsersIcon 
+    }
+  ];
 
   // If creating a new project, show the full onboarding flow
   if (showNewProjectFlow) {
     return (
       <div className="min-h-full bg-background">
         <OnboardingFlow onComplete={handleNewProjectComplete} />
+      </div>
+    );
+  }
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-full bg-background flex items-center justify-center">
+        <LoadingSpinner size="lg" text="Loading projects..." />
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error && projects.length === 0) {
+    return (
+      <div className="min-h-full bg-background flex items-center justify-center">
+        <Card className="p-8 max-w-md">
+          <div className="text-center">
+            <h3 className="text-lg font-semibold text-foreground mb-2">Failed to Load Projects</h3>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <Button onClick={fetchProjects}>Try Again</Button>
+          </div>
+        </Card>
       </div>
     );
   }
@@ -139,12 +242,23 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         </div>
 
         {/* Projects Grid */}
+        {projects.length === 0 ? (
+          <Card className="p-12 text-center border border-border">
+            <LayoutDashboard className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+            <h3 className="text-xl font-semibold text-foreground mb-2">No projects yet</h3>
+            <p className="text-muted-foreground mb-6">Create your first project to get started</p>
+            <GradientButton onClick={() => setShowNewProjectFlow(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Create Your First Project
+            </GradientButton>
+          </Card>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {mockProjects.map((project) => (
+            {projects.map((project) => (
             <Card 
               key={project.id}
               className="group relative overflow-hidden border border-border hover:border-primary/30 hover:shadow-xl transition-all duration-300 cursor-pointer bg-card"
-              onClick={() => onProjectSelect(project.name)}
+                onClick={() => onProjectSelect(project.name, project.id)}
             >
               <div className="p-6">
                 {/* Icon & Title */}
@@ -157,7 +271,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
                       {project.name}
                     </h3>
                     <p className="text-sm text-muted-foreground leading-relaxed">
-                      {project.description}
+                        {project.description || "No description"}
                     </p>
                   </div>
                   <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all flex-shrink-0" />
@@ -167,22 +281,22 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
                 <div className="flex items-center gap-4 py-3 px-4 rounded-lg bg-muted/50 border border-border/50">
                   <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                     <LayoutDashboard className="w-4 h-4" />
-                    <span>{project.dashboards}</span>
+                      <span>{project.dashboards || 0}</span>
                   </div>
                   <div className="w-px h-4 bg-border"></div>
                   <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                     <Database className="w-4 h-4" />
-                    <span>{project.databases}</span>
+                      <span>{project.databases || 0}</span>
                   </div>
                   <div className="w-px h-4 bg-border"></div>
                   <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                     <UsersIcon className="w-4 h-4" />
-                    <span>{project.team}</span>
+                      <span>{project.team || 0}</span>
                   </div>
                   <div className="flex-1"></div>
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Clock className="w-3.5 h-3.5" />
-                    <span>{project.lastActive}</span>
+                      <span>{project.lastActive || "Unknown"}</span>
                   </div>
                 </div>
               </div>
@@ -192,6 +306,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
             </Card>
           ))}
         </div>
+        )}
 
       </div>
     </div>

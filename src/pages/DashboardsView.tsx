@@ -5,15 +5,8 @@ import { Input } from "../components/ui/input";
 import { GradientButton } from "../components/shared/GradientButton";
 import { ViewModeToggle } from "../components/shared/ViewModeToggle";
 import { SkeletonGrid } from "../components/shared/SkeletonCard";
-import { DashboardCreationBot } from "../components/features/dashboards/DashboardCreationBot";
 import { DashboardCard } from "../components/features/dashboards/DashboardCard";
 import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from "../components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +19,7 @@ import {
 } from "../components/ui/alert-dialog";
 
 interface Dashboard {
-  id: number;
+  id: number | string;
   name: string;
   description: string;
   charts: number;
@@ -34,7 +27,7 @@ interface Dashboard {
   category?: string;
   icon: any;
   createdById?: number;
-  projectId?: number;
+  projectId?: number | string;
   status?: 'active' | 'archived';
   collaborators?: number;
 }
@@ -43,22 +36,20 @@ interface DashboardsViewProps {
   dashboards: Dashboard[];
   onViewDashboard?: (dashboardName: string) => void;
   onCreateDashboard?: () => void;
+  isLoading?: boolean;
 }
 
-export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard }: DashboardsViewProps) {
-  const [isLoading, setIsLoading] = useState(true);
+export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard, isLoading: externalIsLoading }: DashboardsViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [dashboardToDelete, setDashboardToDelete] = useState<Dashboard | null>(null);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 1500);
-    return () => clearTimeout(timer);
-  }, []);
+  // Use external loading state if provided, otherwise use local state (for backward compatibility)
+  const isLoading = externalIsLoading !== undefined ? externalIsLoading : false;
 
   const handleCreateDashboard = () => {
-    setIsCreateDialogOpen(true);
+    // Notify parent to open the creation dialog
+    onCreateDashboard?.();
   };
 
   const handleDeleteDashboard = () => {
@@ -213,29 +204,6 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard 
             </Card>
           </>
         )}
-
-        {/* Create Dashboard Dialog */}
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogContent className="max-w-5xl border-border p-0">
-            <div className="sr-only">
-              <DialogTitle>Create New Dashboard</DialogTitle>
-              <DialogDescription>
-                Use the AI assistant to create a new dashboard by providing a name, selecting databases, and describing your requirements.
-              </DialogDescription>
-            </div>
-            <DashboardCreationBot
-              isOpen={isCreateDialogOpen}
-              onClose={() => {
-                setIsCreateDialogOpen(false);
-              }}
-              onCreate={(name, description) => {
-                toast.success(`Dashboard "${name}" created successfully!`);
-                setIsCreateDialogOpen(false);
-                onCreateDashboard?.();
-              }}
-            />
-          </DialogContent>
-        </Dialog>
 
         {/* Delete Confirmation Dialog */}
         <AlertDialog open={!!dashboardToDelete} onOpenChange={() => setDashboardToDelete(null)}>

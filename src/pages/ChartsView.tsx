@@ -36,6 +36,7 @@ import {
 } from "../components/ui/alert-dialog";
 import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
 import { toast } from "sonner";
+import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, type Chart as ApiChart } from "../services/api";
 import {
   LineChart as RechartsLine,
   Line,
@@ -55,7 +56,7 @@ import {
 } from "recharts";
 
 interface Chart {
-  id: number;
+  id: number | string;
   name: string;
   type: 'line' | 'bar' | 'pie' | 'area';
   dataSource: string;
@@ -65,8 +66,9 @@ interface Chart {
   status: 'draft' | 'published';
   dashboardId?: number;
   createdById?: number;
-  projectId?: number;
+  projectId?: number | string;
   isGenerated?: boolean;
+  isFavorite?: boolean;
 }
 
 interface ChartSuggestion {
@@ -77,6 +79,7 @@ interface ChartSuggestion {
   query: string;
   reasoning: string;
   dashboards?: string[];
+  dataSource?: string;
 }
 
 interface Dashboard {
@@ -212,7 +215,7 @@ const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3
 
 interface ChartsViewProps {
   currentUser?: { id: number; name: string; email: string };
-  projectId?: number;
+  projectId?: number | string;
   onChartCreated?: (chart: Chart) => void;
   pendingChartFromAI?: {
     name: string;
@@ -227,9 +230,35 @@ interface ChartsViewProps {
   onEditChart?: (chart: { name: string; type: 'line' | 'bar' | 'pie' | 'area'; description?: string }) => void;
 }
 
+// Helper function to format time ago
+const formatTimeAgo = (dateString: string): string => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins} minutes ago`;
+  if (diffHours < 24) return `${diffHours} hours ago`;
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return date.toLocaleDateString();
+};
+
+// Helper function to convert chart ID to number for PinnedChartData
+const chartIdToNumber = (id: string | number): number => {
+  if (typeof id === 'number') return id;
+  // Try to parse as integer first
+  const parsed = parseInt(id, 10);
+  if (!isNaN(parsed)) return parsed;
+  // If parsing fails (e.g., UUID), create a numeric hash
+  return id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+};
+
 export function ChartsView({ currentUser, projectId, onChartCreated, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart }: ChartsViewProps) {
   const { isPinned, togglePin } = usePinnedCharts();
-  const [charts, setCharts] = useState<Chart[]>(initialCharts);
+  const [charts, setCharts] = useState<Chart[]>([]);
   const [generatedCharts, setGeneratedCharts] = useState<Chart[]>([]);
   const [chartToDelete, setChartToDelete] = useState<Chart | null>(null);
   const [previewChart, setPreviewChart] = useState<ChartSuggestion | null>(null);
@@ -241,43 +270,176 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
   const [chartToAddToDashboard, setChartToAddToDashboard] = useState<Chart | null>(null);
   const [selectedDashboardForAdd, setSelectedDashboardForAdd] = useState("");
+  const [isGeneratingCharts, setIsGeneratingCharts] = useState(false);
+  const [showGenerateDialog, setShowGenerateDialog] = useState(false);
+  const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [selectedDatabaseForGenerate, setSelectedDatabaseForGenerate] = useState("");
+  const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
 
-  // Simulate initial loading
+  // Fetch charts when projectId is available
   useEffect(() => {
-    const timer = setTimeout(() => {
+    if (projectId) {
+      fetchCharts();
+      fetchDatabases();
+      fetchDashboards();
+    } else {
       setIsLoadingCharts(false);
-    }, 1800);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Handle pending chart from AI Assistant
-  useEffect(() => {
-    if (pendingChartFromAI) {
-      const newChart: Chart = {
-        id: Math.max(...charts.map(c => c.id), 0) + 1,
-        name: pendingChartFromAI.name,
-        type: pendingChartFromAI.type,
-        dataSource: pendingChartFromAI.dataSource,
-        createdAt: new Date().toISOString().split('T')[0],
-        lastUpdated: "Just now",
-        query: pendingChartFromAI.query,
-        status: pendingChartFromAI.status,
-        dashboardId: pendingChartFromAI.dashboardId,
-        createdById: currentUser?.id,
-        projectId: projectId
-      };
-
-      setCharts(prev => [newChart, ...prev]);
-      
-      if (pendingChartFromAI.status === 'draft') {
-        toast.success(`Chart "${pendingChartFromAI.name}" saved as draft!`);
-      } else {
-        toast.success(`Chart "${pendingChartFromAI.name}" added to dashboard!`);
-      }
-      
-      onChartFromAIProcessed?.();
     }
-  }, [pendingChartFromAI, charts, currentUser, projectId, onChartFromAIProcessed]);
+  }, [projectId]);
+
+  const fetchDatabases = async () => {
+    if (!projectId) return;
+    
+    try {
+      const response = await getDatabases(String(projectId));
+      if (response.success && response.data) {
+        setDatabases(response.data.map(db => ({
+          id: db.id,
+          name: db.name,
+          type: db.type,
+        })));
+      }
+    } catch (err: any) {
+      // Silently fail - databases not critical for charts view
+      console.error("Failed to fetch databases:", err);
+    }
+  };
+
+  const fetchDashboards = async () => {
+    if (!projectId) return;
+    
+    try {
+      const response = await getDashboards(String(projectId));
+      if (response.success && response.data) {
+        setDashboards(response.data.map(dashboard => ({
+          id: dashboard.id,
+          name: dashboard.name,
+        })));
+      }
+    } catch (err: any) {
+      // Silently fail - dashboards not critical for charts view
+      console.error("Failed to fetch dashboards:", err);
+    }
+  };
+
+  const fetchCharts = async () => {
+    if (!projectId) return;
+    
+    setIsLoadingCharts(true);
+    try {
+      const response = await getCharts(String(projectId));
+      if (response.success && response.data) {
+        // Map API charts to UI format
+        const uiCharts: Chart[] = response.data.map((chart) => ({
+          id: chart.id,
+          name: chart.name,
+          type: chart.type,
+          dataSource: chart.databaseId ? `Database ${chart.databaseId}` : "Unknown Database",
+          createdAt: chart.createdAt,
+          lastUpdated: formatTimeAgo(chart.updatedAt || chart.createdAt),
+          query: chart.query,
+          status: 'published' as const, // API doesn't provide status, default to published
+          createdById: currentUser?.id,
+          projectId: chart.projectId || projectId,
+          isGenerated: false,
+          isFavorite: (chart as any).isFavorite || false, // Include favorite status if available
+        }));
+        setCharts(uiCharts);
+      } else {
+        toast.error(response.error?.message || "Failed to load charts");
+        // Fallback to empty array on error
+        setCharts([]);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while fetching charts");
+      setCharts([]);
+    } finally {
+      setIsLoadingCharts(false);
+    }
+  };
+
+  // Handle pending chart from AI Assistant - create via API
+  useEffect(() => {
+    if (pendingChartFromAI && projectId) {
+      handleCreateChartFromAI(pendingChartFromAI);
+    }
+  }, [pendingChartFromAI, projectId]);
+
+  const handleCreateChartFromAI = async (chartData: {
+    name: string;
+    type: 'line' | 'bar' | 'pie' | 'area';
+    dataSource: string;
+    query: string;
+    status: 'draft' | 'published';
+    dashboardId?: number;
+  }) => {
+    if (!projectId) {
+      toast.error("Project ID is required to create a chart");
+      return;
+    }
+
+    try {
+      // Extract database ID from dataSource if it's in format "Database {id}"
+      // Support both UUID format and numeric IDs
+      let databaseId: string | undefined;
+      const dbIdMatch = chartData.dataSource.match(/Database ([^\s]+)/);
+      if (dbIdMatch) {
+        databaseId = dbIdMatch[1];
+      } else {
+        // If not in "Database {id}" format, check if dataSource is the ID directly
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (chartData.dataSource && uuidRegex.test(chartData.dataSource)) {
+          databaseId = chartData.dataSource;
+        }
+      }
+
+      if (!databaseId) {
+        toast.error("Database connection ID is required. Please select a database when creating the chart.");
+        return;
+      }
+
+      const response = await createChart(String(projectId), {
+        name: chartData.name,
+        type: chartData.type,
+        query: chartData.query,
+        databaseId: databaseId,
+        config: {},
+      });
+
+      if (response.success && response.data) {
+        // Map API chart to UI format
+        const newChart: Chart = {
+          id: response.data.id,
+          name: response.data.name,
+          type: response.data.type,
+          dataSource: chartData.dataSource,
+          createdAt: response.data.createdAt,
+          lastUpdated: "just now",
+          query: response.data.query,
+          status: chartData.status,
+          dashboardId: chartData.dashboardId,
+          createdById: currentUser?.id,
+          projectId: response.data.projectId || projectId,
+          isGenerated: true,
+        };
+
+        setCharts(prev => [newChart, ...prev]);
+        onChartCreated?.(newChart);
+        
+        if (chartData.status === 'draft') {
+          toast.success(`Chart "${chartData.name}" saved as draft!`);
+        } else {
+          toast.success(`Chart "${chartData.name}" added to dashboard!`);
+        }
+        
+        onChartFromAIProcessed?.();
+      } else {
+        toast.error(response.error?.message || "Failed to create chart");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while creating chart");
+    }
+  };
 
   const handleDeleteChart = () => {
     if (!chartToDelete) return;
@@ -288,25 +450,53 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     setChartToDelete(null);
   };
 
-  const handleTogglePin = (chart: Chart) => {
-    const dashboard = mockDashboards.find(d => d.id === chart.dashboardId);
-    const pinnedChartData = {
-      id: chart.id,
-      name: chart.name,
-      description: `${chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} chart from ${chart.dataSource}`,
-      lastUpdated: chart.lastUpdated,
-      chartType: chart.type,
-      category: chart.type.charAt(0).toUpperCase() + chart.type.slice(1),
-      dashboardName: dashboard?.name || 'No Dashboard',
-      dataSource: chart.dataSource
-    };
+  const handleTogglePin = async (chart: Chart) => {
+    // Ensure chart.id is a string (UUID) for API call
+    const chartId = typeof chart.id === 'string' ? chart.id : String(chart.id);
     
-    togglePin(pinnedChartData);
-    
-    if (isPinned(chart.id)) {
-      toast.success(`"${chart.name}" unpinned from Home Dashboard`);
-    } else {
-      toast.success(`"${chart.name}" pinned to Home Dashboard`);
+    try {
+      const response = await updateFavoriteChart(chartId);
+      if (response.success && response.data) {
+        const newFavoriteStatus = response.data.is_favorite;
+        
+        // Update local chart state
+        const updateChartFavorite = (prevCharts: Chart[]) => 
+          prevCharts.map(c => c.id === chart.id ? { ...c, isFavorite: newFavoriteStatus } : c);
+        
+        setCharts(updateChartFavorite);
+        setGeneratedCharts(updateChartFavorite);
+        
+        // Also update context for UI consistency
+        const dashboard = mockDashboards.find(d => d.id === chart.dashboardId);
+        const numericId = chartIdToNumber(chart.id);
+        const pinnedChartData = {
+          id: numericId,
+          name: chart.name,
+          description: `${chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} chart from ${chart.dataSource}`,
+          lastUpdated: chart.lastUpdated,
+          chartType: chart.type,
+          category: chart.type.charAt(0).toUpperCase() + chart.type.slice(1),
+          dashboardName: dashboard?.name || 'No Dashboard',
+          dataSource: chart.dataSource
+        };
+        
+        // Update context based on new favorite status
+        if (newFavoriteStatus && !isPinned(numericId)) {
+          // Pin if not already pinned in context
+          togglePin(pinnedChartData);
+        } else if (!newFavoriteStatus && isPinned(numericId)) {
+          // Unpin if currently pinned in context
+          togglePin(pinnedChartData);
+        }
+        
+        toast.success(newFavoriteStatus 
+          ? `"${chart.name}" pinned to Home Dashboard`
+          : `"${chart.name}" unpinned from Home Dashboard`);
+      } else {
+        toast.error(response.error?.message || "Failed to update favorite status");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while updating favorite status");
     }
   };
 
@@ -316,54 +506,166 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       ? [mockDashboards.find(d => d.id === chart.dashboardId)?.name].filter(Boolean) as string[]
       : [];
     
-    const chartAsSuggestion: ChartSuggestion = {
+    const chartAsSuggestion: ChartSuggestion & { dataSource?: string } = {
       id: `existing-${chart.id}`,
       name: chart.name,
       type: chart.type,
       description: `${chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} chart from ${chart.dataSource}`,
       query: chart.query || "",
       reasoning: `This is an existing chart from your ${chart.dataSource} database.`,
-      dashboards: chartDashboards
+      dashboards: chartDashboards,
+      dataSource: chart.dataSource
     };
     setPreviewChart(chartAsSuggestion);
   };
 
   const handleGenerateCharts = () => {
-    // Open AI Assistant slider for prompt-based generation
-    // Database selection happens within the chatbot
+    // Always open AI Assistant instead of showing dialog
+    // This provides a better user experience for chart generation
     if (onOpenAIAssistant) {
       onOpenAIAssistant();
+    } else {
+      // Fallback: If AI Assistant is not available, show dialog only if databases exist
+      if (databases.length > 0) {
+        setShowGenerateDialog(true);
+        if (databases.length === 1) {
+          setSelectedDatabaseForGenerate(databases[0].id);
+        }
+      } else {
+        toast.error("No databases available. Please add a database connection first.");
+      }
     }
+  };
+
+  const handleConfirmGenerateCharts = async () => {
+    if (!projectId || !selectedDatabaseForGenerate) {
+      toast.error("Please select a database");
+      return;
+    }
+
+    setIsGeneratingCharts(true);
+    try {
+      const selectedDb = databases.find(db => db.id === selectedDatabaseForGenerate);
+      const response = await generateCharts(String(projectId), selectedDatabaseForGenerate, {
+        db_type: selectedDb?.type || 'postgresql',
+        role: 'admin',
+      });
+
+      if (response.success && response.data) {
+        // Map generated charts to UI format
+        const newCharts: Chart[] = response.data.generated_charts.map((chart) => ({
+          id: chart.id,
+          name: chart.title,
+          type: mapChartType(chart.chart_type) as 'line' | 'bar' | 'pie' | 'area',
+          dataSource: selectedDb?.name || "Unknown Database",
+          createdAt: new Date().toISOString(),
+          lastUpdated: "just now",
+          query: chart.query,
+          status: 'draft' as const,
+          createdById: currentUser?.id,
+          projectId: projectId,
+          isGenerated: true,
+        }));
+
+        setGeneratedCharts(prev => [...newCharts, ...prev]);
+        setCharts(prev => [...newCharts, ...prev]);
+        toast.success(`Generated ${newCharts.length} chart(s) successfully!`);
+        setShowGenerateDialog(false);
+        setSelectedDatabaseForGenerate("");
+      } else {
+        toast.error(response.error?.message || "Failed to generate charts");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while generating charts");
+    } finally {
+      setIsGeneratingCharts(false);
+    }
+  };
+
+  // Helper to map chart type
+  const mapChartType = (type: string): 'line' | 'bar' | 'pie' | 'area' => {
+    const typeMap: Record<string, 'line' | 'bar' | 'pie' | 'area'> = {
+      line: 'line',
+      bar: 'bar',
+      pie: 'pie',
+      area: 'area',
+    };
+    return typeMap[type.toLowerCase()] || 'line';
   };
 
 
 
-  const handleAddToDashboard = (chart: Chart) => {
+  const handleAddToDashboard = async (chart: Chart) => {
     if (!selectedDashboardForAdd) {
       toast.error("Please select a dashboard");
       return;
     }
 
-    const dashboardId = parseInt(selectedDashboardForAdd);
-    const updatedChart = { ...chart, dashboardId, status: 'published' as const };
-    
-    // Update in generated charts if it exists there
-    if (generatedCharts.find(c => c.id === chart.id)) {
-      setGeneratedCharts(prev => prev.map(c => c.id === chart.id ? updatedChart : c));
-    }
-    
-    // Update in all charts if it exists there
-    if (charts.find(c => c.id === chart.id)) {
-      setCharts(prev => prev.map(c => c.id === chart.id ? updatedChart : c));
-    } else {
-      // If not in charts, add it
-      setCharts(prev => [updatedChart, ...prev]);
+    if (!projectId) {
+      toast.error("Project ID is required");
+      return;
     }
 
-    const dashboard = mockDashboards.find(d => d.id === dashboardId);
-    toast.success(`"${chart.name}" added to ${dashboard?.name}`);
-    setChartToAddToDashboard(null);
-    setSelectedDashboardForAdd("");
+    // Extract database ID from dataSource if it's in format "Database {id}"
+    // Support both UUID format and numeric IDs
+    let databaseId: string | undefined;
+    const dbIdMatch = chart.dataSource.match(/Database ([^\s]+)/);
+    if (dbIdMatch) {
+      databaseId = dbIdMatch[1];
+    } else {
+      // If not in "Database {id}" format, check if dataSource is the ID directly (UUID)
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (chart.dataSource && uuidRegex.test(chart.dataSource)) {
+        databaseId = chart.dataSource;
+      }
+    }
+
+    if (!databaseId) {
+      toast.error("Database connection ID is required to add chart to dashboard");
+      return;
+    }
+
+    try {
+      const response = await addChartToDashboard({
+        title: chart.name,
+        query: chart.query || '',
+        chart_type: chart.type,
+        dashboard_id: selectedDashboardForAdd,
+        data_connection_id: databaseId,
+        type: chart.type,
+      });
+
+      if (response.success) {
+        // Update local state
+        const dashboardId = parseInt(selectedDashboardForAdd);
+        const updatedChart = { ...chart, dashboardId, status: 'published' as const };
+        
+        // Update in generated charts if it exists there
+        if (generatedCharts.find(c => c.id === chart.id)) {
+          setGeneratedCharts(prev => prev.map(c => c.id === chart.id ? updatedChart : c));
+        }
+        
+        // Update in all charts if it exists there
+        if (charts.find(c => c.id === chart.id)) {
+          setCharts(prev => prev.map(c => c.id === chart.id ? updatedChart : c));
+        } else {
+          // If not in charts, add it
+          setCharts(prev => [updatedChart, ...prev]);
+        }
+
+        const allDashboards = dashboards.length > 0 ? dashboards : mockDashboards.map(d => ({ id: d.id, name: d.name }));
+        const dashboard = allDashboards.find(d => String(d.id) === selectedDashboardForAdd);
+        toast.success(`"${chart.name}" added to ${dashboard?.name || 'dashboard'}`);
+        setChartToAddToDashboard(null);
+        setSelectedDashboardForAdd("");
+        // Refresh dashboards to get updated chart counts
+        fetchDashboards();
+      } else {
+        toast.error(response.error?.message || "Failed to add chart to dashboard");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while adding chart to dashboard");
+    }
   };
 
   // Filter charts
@@ -579,14 +881,14 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                     className: "hover:text-destructive"
                   },
                   {
-                    icon: <Pin className={isPinned(chart.id) ? 'fill-primary/20 rotate-45' : ''} />,
+                    icon: <Pin className={(chart.isFavorite || isPinned(chartIdToNumber(chart.id))) ? 'fill-primary/20 rotate-45' : ''} />,
                     onClick: (e) => {
                       e?.stopPropagation();
                       handleTogglePin(chart);
                     },
-                    label: isPinned(chart.id) ? "Unpin chart" : "Pin chart",
+                    label: (chart.isFavorite || isPinned(chartIdToNumber(chart.id))) ? "Unpin chart" : "Pin chart",
                     variant: "ghost",
-                    className: isPinned(chart.id) ? 'text-primary hover:text-primary/80 opacity-100' : 'hover:text-primary'
+                    className: (chart.isFavorite || isPinned(chartIdToNumber(chart.id))) ? 'text-primary hover:text-primary/80 opacity-100' : 'hover:text-primary'
                   }
                 ]}
               />
@@ -821,8 +1123,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                   <SelectValue placeholder="Select dashboard" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockDashboards.map((dashboard) => (
-                    <SelectItem key={dashboard.id} value={dashboard.id.toString()}>
+                  {(dashboards.length > 0 ? dashboards : mockDashboards.map(d => ({ id: d.id, name: d.name }))).map((dashboard) => (
+                    <SelectItem key={dashboard.id} value={String(dashboard.id)}>
                       {dashboard.name}
                     </SelectItem>
                   ))}
@@ -858,9 +1160,14 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             chart={previewChart}
             isOpen={!!previewChart}
             onClose={() => setPreviewChart(null)}
+            dashboards={dashboards.length > 0 ? dashboards : mockDashboards.map(d => ({ id: d.id, name: d.name }))}
+            projectId={projectId}
             onAddToDashboard={(dashboardId) => {
-              const dashboard = mockDashboards.find(d => d.id === dashboardId);
-              toast.success(`Chart added to "${dashboard?.name}"!`);
+              // Refresh charts after adding to dashboard
+              if (projectId) {
+                fetchCharts();
+                fetchDashboards(); // Refresh dashboards too
+              }
               setPreviewChart(null);
             }}
             onSaveAsDraft={() => {
@@ -892,6 +1199,62 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Generate Charts Dialog */}
+        <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
+          <DialogContent className="border-border">
+            <DialogHeader>
+              <DialogTitle>Generate Charts</DialogTitle>
+              <DialogDescription>
+                Select a database to automatically generate charts based on its schema.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <Select value={selectedDatabaseForGenerate} onValueChange={setSelectedDatabaseForGenerate}>
+                <SelectTrigger className="border-border">
+                  <SelectValue placeholder="Select a database" />
+                </SelectTrigger>
+                <SelectContent>
+                  {databases.map((database) => (
+                    <SelectItem key={database.id} value={database.id}>
+                      {database.name} ({database.type})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="flex justify-end gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowGenerateDialog(false);
+                    setSelectedDatabaseForGenerate("");
+                  }}
+                  className="border-border"
+                  disabled={isGeneratingCharts}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleConfirmGenerateCharts}
+                  disabled={!selectedDatabaseForGenerate || isGeneratingCharts}
+                  className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
+                >
+                  {isGeneratingCharts ? (
+                    <>
+                      <Clock className="w-4 h-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      Generate Charts
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

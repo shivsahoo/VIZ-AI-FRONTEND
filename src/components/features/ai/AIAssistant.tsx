@@ -5,6 +5,8 @@ import { Card } from "../../ui/card";
 import { Badge } from "../../ui/badge";
 import { GradientButton } from "../../shared/GradientButton";
 import { ChartPreviewDialog } from "../charts/ChartPreviewDialog";
+import { getDashboards, getDatabases } from "../../../services/api";
+import { toast } from "sonner";
 
 interface Message {
   id: number;
@@ -20,11 +22,13 @@ interface ChartSuggestion {
   description: string;
   query: string;
   reasoning: string;
+  dataSource?: string;
 }
 
 interface AIAssistantProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
+  projectId?: number | string;
   onChartCreated?: (chart: {
     name: string;
     type: 'line' | 'bar' | 'pie' | 'area';
@@ -54,7 +58,7 @@ const chartTypeColors = {
   area: "bg-orange-500/10 text-orange-500 border-orange-500/20"
 };
 
-export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart }: AIAssistantProps) {
+export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, editingChart }: AIAssistantProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
@@ -68,6 +72,71 @@ export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart
   const [isGenerating, setIsGenerating] = useState(false);
   const [previewChart, setPreviewChart] = useState<ChartSuggestion | null>(null);
   const [showDatabaseSelection, setShowDatabaseSelection] = useState(true);
+  const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
+  const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [isLoadingDatabases, setIsLoadingDatabases] = useState(false);
+
+  // Fetch dashboards and databases when projectId is available
+  useEffect(() => {
+    if (projectId && isOpen) {
+      fetchDashboards();
+      fetchDatabases();
+    }
+  }, [projectId, isOpen]);
+
+  const fetchDashboards = async () => {
+    if (!projectId) return;
+    
+    try {
+      console.log('AIAssistant: Fetching dashboards for projectId:', projectId);
+      const response = await getDashboards(String(projectId));
+      console.log('AIAssistant: getDashboards response:', response);
+      
+      if (response.success && response.data && Array.isArray(response.data)) {
+        const fetchedDashboards = response.data.map(d => ({ id: d.id, name: d.name }));
+        setDashboards(fetchedDashboards);
+        console.log('AIAssistant: Fetched dashboards successfully', { count: fetchedDashboards.length, dashboards: fetchedDashboards });
+      } else {
+        console.warn('AIAssistant: getDashboards failed or no data', { 
+          success: response.success, 
+          error: response.error,
+          data: response.data 
+        });
+      }
+    } catch (err) {
+      console.error("AIAssistant: Failed to fetch dashboards:", err);
+    }
+  };
+
+  const fetchDatabases = async () => {
+    if (!projectId) return;
+    
+    setIsLoadingDatabases(true);
+    try {
+      const response = await getDatabases(String(projectId));
+      if (response.success && response.data) {
+        const fetchedDatabases = response.data.map(db => ({
+          id: db.id,
+          name: db.name,
+          type: db.type,
+        }));
+        setDatabases(fetchedDatabases);
+        console.log('AIAssistant: Fetched databases', { count: fetchedDatabases.length, databases: fetchedDatabases });
+        
+        if (fetchedDatabases.length === 0) {
+          toast.info("No database connections found. Please add a database connection first.");
+        }
+      } else {
+        toast.error(response.error?.message || "Failed to fetch database connections");
+        console.error("Failed to fetch databases:", response.error);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to fetch database connections");
+      console.error("Failed to fetch databases:", err);
+    } finally {
+      setIsLoadingDatabases(false);
+    }
+  };
 
   // Update initial message when editing a chart
   useEffect(() => {
@@ -95,18 +164,26 @@ export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart
     }
   }, [editingChart, isOpen]);
 
-  // Mock database connections
-  const databases = [
-    { value: "sales-db", label: "Sales Database" },
-    { value: "inventory-db", label: "Inventory DB" },
-    { value: "analytics-db", label: "Analytics DB" },
-    { value: "customer-db", label: "Customer DB" },
-    { value: "marketing-db", label: "Marketing DB" }
+  // Use fetched databases if available, otherwise fall back to mock databases
+  const availableDatabases = databases.length > 0 
+    ? databases.map(db => ({
+        value: db.id,
+        label: db.name,
+        id: db.id,
+        name: db.name,
+        type: db.type
+      }))
+    : [
+        { value: "sales-db", label: "Sales Database", id: "sales-db", name: "Sales Database", type: "postgresql" },
+        { value: "inventory-db", label: "Inventory DB", id: "inventory-db", name: "Inventory DB", type: "postgresql" },
+        { value: "analytics-db", label: "Analytics DB", id: "analytics-db", name: "Analytics DB", type: "mysql" },
+        { value: "customer-db", label: "Customer DB", id: "customer-db", name: "Customer DB", type: "mysql" },
+        { value: "marketing-db", label: "Marketing DB", id: "marketing-db", name: "Marketing DB", type: "postgresql" }
   ];
 
   const handleDatabaseSelect = (dbValue: string) => {
     setSelectedDatabase(dbValue);
-    const selectedDb = databases.find(db => db.value === dbValue);
+    const selectedDb = availableDatabases.find(db => db.value === dbValue || db.id === dbValue);
     
     // Add user selection message
     const userMessage: Message = {
@@ -194,20 +271,49 @@ export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart
   };
 
   const handleCreateChart = (suggestion: ChartSuggestion) => {
+    // Find the selected database and format dataSource with database ID
+    const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
+    
+    if (!selectedDb || !selectedDb.id) {
+      toast.error("Please select a valid database connection first.");
+      return;
+    }
+    
+    // If it's a real database (UUID), validate it; otherwise use mock value
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isRealDatabase = uuidRegex.test(selectedDb.id);
+    
+    if (!isRealDatabase && databases.length > 0) {
+      // If we have real databases but selected a mock one, show error
+      toast.error("Please select a valid database connection from the list.");
+      return;
+    }
+    
+    // Format dataSource as "Database {id}" so ChartPreviewDialog can extract it
+    const chartWithDataSource: ChartSuggestion = {
+      ...suggestion,
+      dataSource: `Database ${selectedDb.id}`
+    };
+    
     // Open preview dialog instead of creating immediately
-    setPreviewChart(suggestion);
+    setPreviewChart(chartWithDataSource);
   };
 
   const handleSaveAsDraft = () => {
     if (!previewChart) return;
 
-    const selectedDb = databases.find(db => db.value === selectedDatabase);
+    const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
+    
+    if (!selectedDb || !selectedDb.id) {
+      toast.error("Database connection is required");
+      return;
+    }
     
     if (onChartCreated) {
       onChartCreated({
         name: previewChart.name,
         type: previewChart.type,
-        dataSource: selectedDb?.label || "Unknown",
+        dataSource: `Database ${selectedDb.id}`, // Format: "Database {uuid}" for extraction
         query: previewChart.query,
         status: 'draft'
       });
@@ -230,19 +336,24 @@ export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart
     setPreviewChart(null);
   };
 
-  const handleAddChartToDashboard = (dashboardId: number) => {
+  const handleAddChartToDashboard = (dashboardId: number | string) => {
     if (!previewChart) return;
 
-    const selectedDb = databases.find(db => db.value === selectedDatabase);
+    const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
+    
+    if (!selectedDb || !selectedDb.id) {
+      toast.error("Database connection is required");
+      return;
+    }
     
     if (onChartCreated) {
       onChartCreated({
         name: previewChart.name,
         type: previewChart.type,
-        dataSource: selectedDb?.label || "Unknown",
+        dataSource: `Database ${selectedDb.id}`, // Format: "Database {uuid}" for extraction
         query: previewChart.query,
         status: 'published',
-        dashboardId: dashboardId
+          dashboardId: typeof dashboardId === 'string' ? (isNaN(Number(dashboardId)) ? undefined : Number(dashboardId)) : dashboardId
       });
     }
     
@@ -305,7 +416,7 @@ export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart
               {selectedDatabase ? (
                 <div className="flex items-center gap-2 mt-0.5">
                   <p className="text-xs text-white/80 truncate">
-                    {databases.find(db => db.value === selectedDatabase)?.label}
+                    {availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase)?.label || selectedDatabase}
                   </p>
                   <button
                     onClick={handleChangeDatabase}
@@ -500,8 +611,18 @@ export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart
                 <Database className="w-3.5 h-3.5" />
                 Select Database
               </label>
+              {isLoadingDatabases ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                  <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                  <span>Loading databases...</span>
+                </div>
+              ) : availableDatabases.length === 0 ? (
+                <div className="text-xs text-muted-foreground py-2">
+                  No database connections available. Please add a database connection to get started.
+                </div>
+              ) : (
               <div className="flex flex-wrap gap-2">
-                {databases.map((db) => (
+                {availableDatabases.map((db) => (
                   <button
                     key={db.value}
                     onClick={() => handleDatabaseSelect(db.value)}
@@ -519,6 +640,7 @@ export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart
                   </button>
                 ))}
               </div>
+              )}
             </div>
           </div>
         )}
@@ -554,6 +676,8 @@ export function AIAssistant({ isOpen, onOpenChange, onChartCreated, editingChart
         isOpen={!!previewChart}
         onClose={() => setPreviewChart(null)}
         chart={previewChart}
+          projectId={projectId}
+          dashboards={dashboards}
         onAddToDashboard={handleAddChartToDashboard}
         onSaveAsDraft={handleSaveAsDraft}
       />

@@ -9,14 +9,19 @@ import {
 import { Button } from "../../ui/button";
 import { GradientButton } from "../../shared/GradientButton";
 import { Badge } from "../../ui/badge";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from "../../ui/dropdown-menu";
 import { ChartCard } from "./ChartCard";
 import { toast } from "sonner";
+import { addChartToDashboard } from "../../../services/api";
+import * as React from "react";
 
 interface ChartPreviewDialogProps {
   isOpen: boolean;
@@ -28,27 +33,20 @@ interface ChartPreviewDialogProps {
     query: string;
     reasoning: string;
     dashboards?: string[]; // Array of dashboard names this chart belongs to
+    dataSource?: string; // Database/data source for the chart
   } | null;
-  onAddToDashboard: (dashboardId: number) => void;
+  dashboards?: Array<{ id: string | number; name: string }>; // Real dashboards from API
+  projectId?: string | number;
+  onAddToDashboard?: (dashboardId: number | string) => void; // Callback after API call succeeds
   onSaveAsDraft: () => void;
   isExistingChart?: boolean;
   chartStatus?: 'draft' | 'published';
 }
 
 interface Dashboard {
-  id: number;
+  id: number | string;
   name: string;
 }
-
-// Mock dashboards
-const mockDashboards: Dashboard[] = [
-  { id: 1, name: "Revenue Overview" },
-  { id: 2, name: "Customer Analytics" },
-  { id: 3, name: "Sales Performance" },
-  { id: 4, name: "Product Metrics" },
-  { id: 5, name: "Marketing ROI" },
-  { id: 6, name: "Operations Dashboard" }
-];
 
 // Mock data for different chart types
 const mockLineData = [
@@ -93,14 +91,77 @@ const mockAreaData = [
   { date: 'Sun', orders: 178 }
 ];
 
-export function ChartPreviewDialog({ isOpen, onClose, chart, onAddToDashboard, onSaveAsDraft, isExistingChart = false, chartStatus }: ChartPreviewDialogProps) {
+export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], projectId, onAddToDashboard, onSaveAsDraft, isExistingChart = false, chartStatus }: ChartPreviewDialogProps) {
+  // Debug logging
+  React.useEffect(() => {
+    if (isOpen && chart) {
+      console.log('ChartPreviewDialog opened:', {
+        dashboardsCount: dashboards.length,
+        dashboards,
+        projectId,
+        chartName: chart.name
+      });
+    }
+  }, [isOpen, chart, dashboards, projectId]);
+  
   if (!chart) return null;
 
-  const handleAddToDashboard = (dashboardId: number) => {
-    const dashboard = mockDashboards.find(d => d.id === dashboardId);
-    onAddToDashboard(dashboardId);
-    toast.success(`Chart added to "${dashboard?.name}"!`);
+  const handleAddToDashboard = async (dashboardId: number | string) => {
+    if (!chart || !projectId) {
+      toast.error("Chart or project information is missing");
+      return;
+    }
+
+    // Extract database ID from dataSource
+    // Try format "Database {id}" first (supports UUIDs)
+    let databaseId: string | undefined;
+    const dbIdMatch = chart.dataSource?.match(/Database ([^\s]+)/);
+    if (dbIdMatch) {
+      databaseId = dbIdMatch[1];
+    } else {
+      // If not in "Database {id}" format, check if dataSource is the ID directly
+      databaseId = chart.dataSource && chart.dataSource !== 'Unknown' && chart.dataSource !== 'Unknown Database' 
+        ? chart.dataSource 
+        : undefined;
+    }
+
+    // Validate that databaseId is a UUID (must match UUID format: 8-4-4-4-12 hex characters)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!databaseId || !uuidRegex.test(databaseId)) {
+      toast.error("A valid database connection is required. Please select a database when creating the chart.");
+      console.error("ChartPreviewDialog: Invalid or missing database ID", { 
+        dataSource: chart.dataSource, 
+        extractedId: databaseId,
+        chart: chart.name,
+        isValidUUID: databaseId ? uuidRegex.test(databaseId) : false
+      });
+      return;
+    }
+
+    try {
+      const response = await addChartToDashboard({
+        title: chart.name,
+        query: chart.query || '',
+        report: chart.reasoning || chart.description || '',
+        type: chart.type,
+        relevance: '',
+        is_time_based: false,
+        chart_type: chart.type,
+        dashboard_id: String(dashboardId),
+        data_connection_id: databaseId,
+      });
+
+      if (response.success) {
+        const dashboard = dashboards.find(d => String(d.id) === String(dashboardId));
+        toast.success(`Chart added to "${dashboard?.name || 'dashboard'}"!`);
+        onAddToDashboard?.(dashboardId);
     onClose();
+      } else {
+        toast.error(response.error?.message || "Failed to add chart to dashboard");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while adding chart to dashboard");
+    }
   };
 
   const handleSaveAsDraft = () => {
@@ -210,19 +271,32 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, onAddToDashboard, o
                 <ChevronDown className="w-4 h-4" />
               </GradientButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[250px]">
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                Select a dashboard
-              </div>
-              {mockDashboards.map((dashboard) => (
+            <DropdownMenuContent 
+              align="end" 
+              className="w-[250px] !z-[99999]" 
+              onCloseAutoFocus={(e) => e.preventDefault()}
+            >
+              <DropdownMenuLabel>Select a dashboard</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {dashboards && dashboards.length > 0 ? (
+                dashboards.map((dashboard) => (
                 <DropdownMenuItem
                   key={dashboard.id}
-                  onClick={() => handleAddToDashboard(dashboard.id)}
-                  className="cursor-pointer"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      console.log('Dashboard selected:', dashboard);
+                      handleAddToDashboard(dashboard.id);
+                    }}
                 >
                   {dashboard.name}
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <DropdownMenuItem disabled className="text-muted-foreground">
+                  No dashboards available. Please create a dashboard first.
                 </DropdownMenuItem>
-              ))}
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

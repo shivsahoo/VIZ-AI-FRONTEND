@@ -10,13 +10,7 @@ import { OnboardingFlow } from "./pages/OnboardingFlow";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
 import { PinnedChartsProvider } from "./context/PinnedChartsContext";
-
-const mockProjects = [
-  { id: 1, name: "E-Commerce Analytics" },
-  { id: 2, name: "Marketing Intelligence" },
-  { id: 3, name: "Financial Reporting" },
-  { id: 4, name: "Product Analytics" }
-];
+import { getProjects, getCurrentUser } from "./services/api";
 
 // Mock user ID for now
 const MOCK_USER_ID = 1;
@@ -25,9 +19,12 @@ type UserRole = 'super_admin' | 'project_user';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true); // Add loading state for auth check
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string; role: UserRole } | null>(null);
   const [currentView, setCurrentView] = useState('home');
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
   const [isDark, setIsDark] = useState(false);
   const [workspaceTab, setWorkspaceTab] = useState('home');
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
@@ -56,22 +53,118 @@ export default function App() {
     }
   }, [isDark]);
 
-  const handleProjectSelect = (projectName: string) => {
+  // Check for existing session on app mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      setIsCheckingAuth(true);
+      
+      // Check if tokens exist in localStorage
+      const accessToken = localStorage.getItem('vizai_access_token');
+      const refreshToken = localStorage.getItem('vizai_refresh_token');
+      
+      if (!accessToken || !refreshToken) {
+        setIsCheckingAuth(false);
+        return; // No tokens, user needs to login
+      }
+      
+      // Try to get current user info (this will auto-refresh token if needed)
+      try {
+        const response = await getCurrentUser();
+        if (response.success && response.data) {
+          // Restore session
+          setCurrentUser({
+            name: response.data.name || response.data.username,
+            email: response.data.email,
+            role: response.data.role === 'admin' ? 'super_admin' : 'project_user', // Map role
+          });
+          setIsAuthenticated(true);
+          
+          // Restore last project if exists
+          const lastProject = localStorage.getItem('vizai_last_project');
+          const lastProjectId = localStorage.getItem('vizai_last_project_id');
+          if (lastProject) {
+            setSelectedProject(lastProject);
+            setSelectedProjectId(lastProjectId);
+            setCurrentView('workspace');
+            setWorkspaceTab('home');
+          } else {
+            setCurrentView('home');
+          }
+          
+          // Check onboarding status
+          const hasCompletedOnboardingBefore = localStorage.getItem('vizai_onboarding_completed') === 'true';
+          setHasCompletedOnboarding(hasCompletedOnboardingBefore);
+          setShowOnboarding(false);
+        } else {
+          // Token invalid, clear tokens
+          localStorage.removeItem('vizai_access_token');
+          localStorage.removeItem('vizai_refresh_token');
+        }
+      } catch (error) {
+        // Token invalid or expired, clear tokens
+        localStorage.removeItem('vizai_access_token');
+        localStorage.removeItem('vizai_refresh_token');
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+    
+    checkAuth();
+  }, []); // Run only on mount
+
+  // Fetch projects on mount to have project IDs available
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchProjects();
+    }
+  }, [isAuthenticated]);
+
+  const fetchProjects = async () => {
+    try {
+      const response = await getProjects();
+      if (response.success && response.data) {
+        setProjects(response.data.map(p => ({ id: p.id, name: p.name })));
+      }
+    } catch (error) {
+      console.error('Failed to fetch projects:', error);
+    }
+  };
+
+  const handleProjectSelect = (projectName: string, projectId?: string) => {
     setSelectedProject(projectName);
+    
+    // Find project ID if not provided
+    let finalProjectId: string | null = null;
+    if (projectId) {
+      finalProjectId = projectId;
+    } else {
+      const project = projects.find(p => p.name === projectName);
+      finalProjectId = project?.id || null;
+    }
+    setSelectedProjectId(finalProjectId);
+    
     setCurrentView('workspace');
     setWorkspaceTab('home'); // Reset to home when entering a project
     // Store last visited project for project users
     if (currentUser?.role === 'project_user') {
       localStorage.setItem('vizai_last_project', projectName);
+      if (finalProjectId) {
+        localStorage.setItem('vizai_last_project_id', finalProjectId);
+      }
     }
   };
 
   const handleProjectChange = (projectName: string) => {
+    const project = projects.find(p => p.name === projectName);
     setSelectedProject(projectName);
+    setSelectedProjectId(project?.id || null);
     setWorkspaceTab('home'); // Reset to home when switching projects
     // Store last visited project for project users
     if (currentUser?.role === 'project_user') {
       localStorage.setItem('vizai_last_project', projectName);
+      if (project?.id) {
+        localStorage.setItem('vizai_last_project_id', project.id);
+      }
     }
   };
 
@@ -101,8 +194,10 @@ export default function App() {
       } else {
         // Returning user - navigate to last project or home
         const lastProject = localStorage.getItem('vizai_last_project');
-        if (lastProject && mockProjects.some(p => p.name === lastProject)) {
+        const lastProjectId = localStorage.getItem('vizai_last_project_id');
+        if (lastProject) {
           setSelectedProject(lastProject);
+          setSelectedProjectId(lastProjectId);
           setCurrentView('workspace');
           setWorkspaceTab('home');
         } else {
@@ -185,7 +280,9 @@ export default function App() {
 
   const renderView = () => {
     if (currentView === 'workspace' && selectedProject) {
-      const project = mockProjects.find(p => p.name === selectedProject);
+      // Use selectedProjectId if available, otherwise try to find it
+      const projectId = selectedProjectId || projects.find(p => p.name === selectedProject)?.id;
+      
       return (
         <WorkspaceView 
           projectName={selectedProject} 
@@ -194,7 +291,7 @@ export default function App() {
           activeTab={workspaceTab}
           onTabChange={setWorkspaceTab}
           currentUser={currentUser ? { ...currentUser, id: MOCK_USER_ID } : undefined}
-          projectId={project?.id}
+          projectId={projectId || undefined}
           chartCreatedTrigger={chartCreatedTrigger}
           pendingChartFromAI={pendingChartFromAI}
           onChartFromAIProcessed={() => setPendingChartFromAI(null)}
@@ -220,6 +317,18 @@ export default function App() {
   };
 
   const isInWorkspace = currentView === 'workspace' && selectedProject;
+
+  // Show loading state while checking authentication
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen w-full bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Show auth view if not authenticated
   if (!isAuthenticated) {
@@ -254,7 +363,7 @@ export default function App() {
           onNavigate={setCurrentView}
           selectedProject={isInWorkspace ? selectedProject : null}
           workspaceTab={isInWorkspace ? workspaceTab : undefined}
-          projects={mockProjects}
+          projects={projects}
           onProjectChange={handleProjectChange}
           user={currentUser!}
           onSignOut={handleSignOut}
@@ -280,17 +389,18 @@ export default function App() {
 
           {/* AI Assistant Panel - Only visible when in workspace (except Databases and Team pages) */}
           {isInWorkspace && workspaceTab !== 'databases' && workspaceTab !== 'team' && (
-            <AIAssistant 
-              isOpen={isAIAssistantOpen}
-              onOpenChange={(open) => {
-                setIsAIAssistantOpen(open);
-                if (!open) {
-                  setEditingChart(null); // Clear editing chart when closing
-                }
-              }}
-              onChartCreated={handleChartCreatedFromAI}
-              editingChart={editingChart}
-            />
+                    <AIAssistant
+          isOpen={isAIAssistantOpen}
+          onOpenChange={(open) => {
+            setIsAIAssistantOpen(open);
+            if (!open) {
+              setEditingChart(null); // Clear editing chart when closing
+            }
+          }}
+          projectId={selectedProjectId || projects.find(p => p.name === selectedProject)?.id || undefined}
+          onChartCreated={handleChartCreatedFromAI}
+          editingChart={editingChart}
+        />
           )}
         </div>
         </div>

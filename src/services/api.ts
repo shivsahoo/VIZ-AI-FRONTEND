@@ -86,9 +86,9 @@ async function apiRequest<T>(
   const token = getAccessToken();
   const url = `${API_BASE_URL}${endpoint}`;
 
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...options.headers,
+    ...(options.headers as Record<string, string> || {}),
   };
 
   if (token && !endpoint.includes('/auth/')) {
@@ -257,6 +257,37 @@ export const login = async (credentials: LoginCredentials): Promise<ApiResponse<
       error: {
         code: 'LOGIN_FAILED',
         message: error.message || 'Login failed',
+      },
+    };
+  }
+};
+
+/**
+ * Get current user details (verify token and restore session)
+ */
+export const getCurrentUser = async (): Promise<ApiResponse<User>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      user: { id: string; username: string; email: string };
+    }>('/api/v1/backend/user_profile');
+
+    return {
+      success: true,
+      data: {
+        id: response.user.id,
+        username: response.user.username,
+        name: response.user.username, // Alias for compatibility
+        email: response.user.email,
+        role: 'admin', // Default role, can be enhanced later
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GET_CURRENT_USER_FAILED',
+        message: error.message || 'Failed to get current user',
       },
     };
   }
@@ -529,11 +560,53 @@ export interface Dashboard {
 }
 
 /**
+ * Get favorite dashboards for the current user
+ */
+export const getFavorites = async (): Promise<ApiResponse<Array<{
+  id: string;
+  name: string;
+  description: string;
+  user_id: string;
+}>>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      dashboards: Array<{
+        id: string;
+        name: string;
+        description: string;
+        user_id: string;
+      }>;
+    }>('/api/v1/backend/favorites');
+
+    return {
+      success: true,
+      data: response.dashboards || [],
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'FETCH_FAVORITES_FAILED',
+        message: error.message || 'Failed to fetch favorites',
+      },
+    };
+  }
+};
+
+/**
  * Get dashboards for a project
  */
 export const getDashboards = async (projectId: string): Promise<ApiResponse<Dashboard[]>> => {
   try {
-    const response = await apiRequest<{
+    const response = await apiRequest<Array<{
+      id: string;
+      title: string;
+      description: string | null;
+      project_id: string;
+      created_by: string;
+      is_favorite?: boolean;
+    }> | {
       message: string;
       dashboards: Array<{
         id: string;
@@ -541,12 +614,25 @@ export const getDashboards = async (projectId: string): Promise<ApiResponse<Dash
         description: string | null;
         project_id: string;
         created_by: string;
+        is_favorite?: boolean;
       }>;
     }>(`/api/v1/backend/projects/${projectId}/users/dashboard`);
 
+    // Handle both response formats: array directly or object with dashboards property
+    const dashboardsArray: Array<{
+      id: string;
+      title: string;
+      description: string | null;
+      project_id: string;
+      created_by: string;
+      is_favorite?: boolean;
+    }> = Array.isArray(response)
+      ? response
+      : (response as any).dashboards || [];
+
     return {
       success: true,
-      data: response.dashboards.map((d) => ({
+      data: dashboardsArray.map((d) => ({
         id: d.id,
         name: d.title,
         description: d.description || '',
@@ -650,25 +736,32 @@ export interface ChartData {
  */
 export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>> => {
   try {
-    const response = await apiRequest<Array<{
-      id: string;
-      title: string;
-      query: string;
-      chart_type: string;
-      data_connection_id: string | null;
-      created_at: string;
-    }>>('/api/v1/backend/charts');
+    const response = await apiRequest<{
+      message?: string;
+      charts?: Array<{
+        id: string;
+        title: string;
+        query: string;
+        type: string; // Backend uses 'type' which is actually chart_type
+        datasourceConnectionId: string | null; // Backend uses camelCase
+        created_at: string;
+        isFavorite?: boolean;
+      }>;
+    }>('/api/v1/backend/charts');
+
+    // Handle both response formats: object with charts array or direct array
+    const chartsArray = response.charts || (Array.isArray(response) ? response : []);
 
     return {
       success: true,
-      data: response
-        .filter((chart) => chart.data_connection_id) // Filter charts with connections
+      data: chartsArray
+        .filter((chart) => chart.datasourceConnectionId) // Filter charts with connections
         .map((chart) => ({
           id: chart.id,
           name: chart.title,
-          type: mapChartType(chart.chart_type),
+          type: mapChartType(chart.type), // Backend returns 'type' which is chart_type
           projectId, // Will need to get from backend or context
-          databaseId: chart.data_connection_id || undefined,
+          databaseId: chart.datasourceConnectionId || undefined,
           query: chart.query,
           config: {},
           createdAt: chart.created_at,
@@ -746,6 +839,72 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
 };
 
 /**
+ * Add chart to dashboard
+ * Note: This creates a new chart and associates it with the dashboard
+ */
+export const addChartToDashboard = async (data: {
+  title: string;
+  query: string;
+  chart_type: 'line' | 'bar' | 'pie' | 'area';
+  dashboard_id: string;
+  data_connection_id: string; // Required - must be a valid UUID
+  report?: string;
+  type?: string;
+  relevance?: string;
+  is_time_based?: boolean;
+}): Promise<ApiResponse<{ chart_id: string }>> => {
+  try {
+    // Prepare request body - only include fields that have values
+    const requestBody: any = {
+        title: data.title,
+        query: data.query,
+        type: data.type || data.chart_type,
+        is_time_based: data.is_time_based ?? false,
+        chart_type: data.chart_type,
+        dashboard_id: data.dashboard_id,
+        data_connection_id: data.data_connection_id,
+    };
+
+    // Only include report if it has a value (not empty string)
+    if (data.report && data.report.trim() !== '') {
+      requestBody.report = data.report;
+    }
+
+    // Only include relevance if it has a value (not empty string)
+    // Backend expects numeric value or null, not empty string
+    if (data.relevance && data.relevance.trim() !== '') {
+      requestBody.relevance = data.relevance;
+    } else {
+      // Send null instead of empty string for relevance
+      requestBody.relevance = null;
+    }
+
+    const response = await apiRequest<{
+      message: string;
+      chart_id: string;
+    }>('/api/v1/backend/charts/save-to-dashboard', {
+      method: 'POST',
+      body: JSON.stringify(requestBody),
+    });
+
+    return {
+      success: true,
+      data: {
+        chart_id: response.chart_id,
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'ADD_CHART_TO_DASHBOARD_FAILED',
+        message: error.message || 'Failed to add chart to dashboard',
+      },
+    };
+  }
+};
+
+/**
  * Get chart data (execute query)
  */
 export const getChartData = async (chartId: string, datasourceConnectionId: string): Promise<ApiResponse<ChartData>> => {
@@ -777,6 +936,75 @@ export const getChartData = async (chartId: string, datasourceConnectionId: stri
       error: {
         code: 'FETCH_CHART_DATA_FAILED',
         message: error.message || 'Failed to fetch chart data',
+      },
+    };
+  }
+};
+
+/**
+ * Get favorite charts for the current user
+ */
+export const getFavoriteCharts = async (): Promise<ApiResponse<Array<{
+  id: string;
+  title: string;
+  created_at: string;
+  connection_id: string;
+  query: string;
+}>>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      favorite_charts: Array<{
+        id: string;
+        title: string;
+        created_at: string;
+        connection_id: string;
+        query: string;
+      }>;
+    }>('/api/v1/backend/charts/favorite');
+
+    return {
+      success: true,
+      data: response.favorite_charts || [],
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'FETCH_FAVORITE_CHARTS_FAILED',
+        message: error.message || 'Failed to fetch favorite charts',
+      },
+    };
+  }
+};
+
+/**
+ * Update favorite status of a chart (toggle pin/unpin)
+ */
+export const updateFavoriteChart = async (chartId: string): Promise<ApiResponse<{ is_favorite: boolean }>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      is_favorite: boolean;
+    }>('/api/v1/backend/charts/favorite', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        chart_id: chartId,
+      }),
+    });
+
+    return {
+      success: true,
+      data: {
+        is_favorite: response.is_favorite,
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'UPDATE_FAVORITE_CHART_FAILED',
+        message: error.message || 'Failed to update favorite chart status',
       },
     };
   }
@@ -816,30 +1044,47 @@ export interface DatabaseSchema {
 export const getDatabases = async (projectId: string): Promise<ApiResponse<Database[]>> => {
   try {
     const response = await apiRequest<{
-      message: string;
-      connections: Array<{
-        db_entry_id: string;
-        connection_name: string;
+      message?: string;
+      connections?: Array<{
+        id: string;
+        name: string;
         db_type: string;
-        host?: string;
+        db_host_link?: string;
         db_name?: string;
-        username?: string;
-        created_at: string;
+        db_username?: string;
+        project_id: string;
+        consent_given?: boolean;
       }>;
     }>(`/api/v1/backend/connections/${projectId}`);
 
+    // Handle response format: object with connections array
+    let connectionsArray: Array<{
+      id: string;
+      name: string;
+      db_type: string;
+      db_host_link?: string;
+      db_name?: string;
+      db_username?: string;
+      project_id: string;
+      consent_given?: boolean;
+    }> = [];
+
+    if (response.connections && Array.isArray(response.connections)) {
+      connectionsArray = response.connections;
+    }
+
     return {
       success: true,
-      data: response.connections.map((conn) => ({
-        id: conn.db_entry_id,
-        name: conn.connection_name,
+      data: connectionsArray.map((conn) => ({
+        id: conn.id, // Backend returns 'id', which is the UUID
+        name: conn.name, // Backend returns 'name', not 'connection_name'
         type: conn.db_type || 'postgresql',
-        host: conn.host || '',
+        host: conn.db_host_link || '',
         port: 5432, // Default, not provided by backend
         database: conn.db_name || '',
-        username: conn.username || '',
+        username: conn.db_username || '',
         status: 'connected' as const,
-        lastChecked: conn.created_at,
+        lastChecked: new Date().toISOString(), // Backend doesn't provide created_at in this response
       })),
     };
   } catch (error: any) {
@@ -1026,11 +1271,33 @@ export const generateInsights = async (chartId: string, analysisType: string): P
 };
 
 /**
- * Create dashboard from conversational prompt
+ * Generate charts from database
  */
-export const createDashboardFromPrompt = async (prompt: string, databaseId: string, projectId: string): Promise<ApiResponse<{ dashboardId: string; charts: Chart[] }>> => {
+export const generateCharts = async (
+  projectId: string,
+  datasourceConnectionId: string,
+  options?: {
+    db_type?: string;
+    domain?: string;
+    min_date?: string;
+    max_date?: string;
+    api_key?: string;
+    role?: string;
+  }
+): Promise<ApiResponse<{
+  generated_charts: Array<{
+    id: string;
+    title: string;
+    query: string;
+    chart_type: string;
+    relevance: string;
+    is_time_based: boolean;
+    report: string;
+  }>;
+}>> => {
   try {
     const response = await apiRequest<{
+      success?: boolean;
       generated_charts: Array<{
         id: string;
         title: string;
@@ -1040,14 +1307,50 @@ export const createDashboardFromPrompt = async (prompt: string, databaseId: stri
         is_time_based: boolean;
         report: string;
       }>;
-    }>(`/api/v1/backend/generate_charts/${projectId}/${databaseId}`, {
+    }>(`/api/v1/backend/generate_charts/${projectId}/${datasourceConnectionId}`, {
       method: 'POST',
       body: JSON.stringify({
-        db_type: 'postgresql',
-        domain: '',
-        role: 'admin',
+        db_type: options?.db_type || 'postgresql',
+        domain: options?.domain || '',
+        min_date: options?.min_date,
+        max_date: options?.max_date,
+        api_key: options?.api_key,
+        role: options?.role || 'admin',
       }),
     });
+
+    return {
+      success: true,
+      data: {
+        generated_charts: response.generated_charts || [],
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GENERATE_CHARTS_FAILED',
+        message: error.message || 'Failed to generate charts',
+      },
+    };
+  }
+};
+
+/**
+ * Create dashboard from conversational prompt
+ */
+export const createDashboardFromPrompt = async (prompt: string, databaseId: string, projectId: string): Promise<ApiResponse<{ dashboardId: string; charts: Chart[] }>> => {
+  try {
+    // Use generateCharts to get charts
+    const chartsResponse = await generateCharts(projectId, databaseId, {
+      db_type: 'postgresql',
+      domain: '',
+      role: 'admin',
+    });
+
+    if (!chartsResponse.success || !chartsResponse.data) {
+      throw new Error('Failed to generate charts');
+    }
 
     // Create dashboard first
     const dashboard = await createDashboard(projectId, {
@@ -1063,7 +1366,7 @@ export const createDashboardFromPrompt = async (prompt: string, databaseId: stri
       success: true,
       data: {
         dashboardId: dashboard.data.id,
-        charts: response.generated_charts.map((chart) => ({
+        charts: chartsResponse.data.generated_charts.map((chart) => ({
           id: chart.id,
           name: chart.title,
           type: mapChartType(chart.chart_type),
@@ -1353,11 +1656,16 @@ const api = {
   // Dashboards
   getDashboards,
   createDashboard,
+  getFavorites,
   
   // Charts
   getCharts,
   createChart,
+  addChartToDashboard,
   getChartData,
+  generateCharts,
+  getFavoriteCharts,
+  updateFavoriteChart,
   
   // Databases
   getDatabases,

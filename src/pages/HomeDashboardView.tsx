@@ -1,15 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { MouseEvent } from "react";
-import { Pin, TrendingUp, TrendingDown, BarChart3, Lightbulb, Plus, ArrowRight, Clock, Sparkles, Star } from "lucide-react";
+import { Pin, TrendingUp, TrendingDown, BarChart3, Lightbulb, Plus, ArrowRight, Clock, Star, LayoutDashboard } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { GradientButton } from "../components/shared/GradientButton";
 import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, AreaChart, Area, ResponsiveContainer, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
-import { CustomChartTooltip } from "../components/features/charts/ChartTooltip";
 import { toast } from "sonner";
-import { usePinnedCharts, PinnedChartData } from "../context/PinnedChartsContext";
+import { PinnedChartData } from "../context/PinnedChartsContext";
+import { getFavoriteCharts, updateFavoriteChart, getFavorites } from "../services/api";
 
 interface HomeDashboardViewProps {
   onNavigate?: (tab: string) => void;
@@ -94,20 +94,120 @@ const areaChartData = [
 
 const PIE_COLORS = ["#06B6D4", "#5B67F1", "#8B5CF6"];
 
-export function HomeDashboardView({ onNavigate, onOpenAIAssistant }: HomeDashboardViewProps) {
-  const { pinnedCharts, unpinChart } = usePinnedCharts();
+// Extended interface to store original API chart ID
+interface FavoriteChartData extends PinnedChartData {
+  originalId: string; // Store the original UUID from API
+}
+
+interface FavoriteDashboard {
+  id: string;
+  name: string;
+  description: string;
+  user_id: string;
+}
+
+export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
+  const [favoriteCharts, setFavoriteCharts] = useState<FavoriteChartData[]>([]);
+  const [favoriteDashboards, setFavoriteDashboards] = useState<FavoriteDashboard[]>([]);
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
+  const [isLoadingDashboards, setIsLoadingDashboards] = useState(true);
   const [isLoadingInsights, setIsLoadingInsights] = useState(true);
   const [selectedChart, setSelectedChart] = useState<PinnedChartData | null>(null);
   const [pinnedInsightIds, setPinnedInsightIds] = useState<number[]>(recentInsights.map(i => i.id));
 
-  // Simulate loading charts
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoadingCharts(false);
-    }, 2000);
-    return () => clearTimeout(timer);
+  // Helper to format time ago
+  const formatTimeAgo = useCallback((dateString: string): string => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return "just now";
+    if (diffMins < 60) return `${diffMins} minutes ago`;
+    if (diffHours < 24) return `${diffHours} hours ago`;
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString();
   }, []);
+
+  // Helper to infer chart type from query
+  const inferChartType = useCallback((query: string): 'line' | 'bar' | 'pie' | 'area' => {
+    const q = query.toLowerCase();
+    if (q.includes('group by') && (q.includes('count') || q.includes('sum'))) {
+      if (q.includes('date') || q.includes('time') || q.includes('month') || q.includes('year')) {
+        return 'line';
+      }
+      return 'bar';
+    }
+    if (q.includes('pie') || q.includes('percentage')) {
+      return 'pie';
+    }
+    if (q.includes('area') || (q.includes('cumulative') || q.includes('running'))) {
+      return 'area';
+    }
+    // Default to line for time-based queries
+    if (q.includes('date') || q.includes('time') || q.includes('month') || q.includes('year')) {
+      return 'line';
+    }
+    return 'bar';
+  }, []);
+
+  // Fetch favorite charts from API
+  const fetchFavoriteCharts = useCallback(async () => {
+    setIsLoadingCharts(true);
+    try {
+      const response = await getFavoriteCharts();
+      if (response.success && response.data) {
+        // Map API response to FavoriteChartData format (includes originalId)
+        const mappedCharts: FavoriteChartData[] = response.data.map((chart, index) => ({
+          id: parseInt(chart.id.replace(/-/g, '').substring(0, 8), 16) || index + 1, // Convert UUID to number for compatibility
+          originalId: chart.id, // Store original UUID for API calls
+          name: chart.title,
+          description: chart.query.length > 50 ? `Chart query: ${chart.query.substring(0, 50)}...` : `Chart query: ${chart.query}` || 'No description available',
+          lastUpdated: formatTimeAgo(chart.created_at),
+          chartType: inferChartType(chart.query),
+          category: 'Analytics', // Default category
+          dashboardName: 'My Dashboard', // Default dashboard name
+          dataSource: chart.connection_id || 'Unknown Data Source'
+        }));
+        setFavoriteCharts(mappedCharts);
+      } else {
+        toast.error(response.error?.message || "Failed to load favorite charts");
+        setFavoriteCharts([]);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while fetching favorite charts");
+      setFavoriteCharts([]);
+    } finally {
+      setIsLoadingCharts(false);
+    }
+  }, [formatTimeAgo, inferChartType]);
+
+  // Fetch favorite dashboards from API
+  const fetchFavoriteDashboards = useCallback(async () => {
+    setIsLoadingDashboards(true);
+    try {
+      const response = await getFavorites();
+      if (response.success && response.data) {
+        setFavoriteDashboards(response.data);
+      } else {
+        toast.error(response.error?.message || "Failed to load favorite dashboards");
+        setFavoriteDashboards([]);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while fetching favorite dashboards");
+      setFavoriteDashboards([]);
+    } finally {
+      setIsLoadingDashboards(false);
+    }
+  }, []);
+
+  // Load favorite charts and dashboards on mount
+  useEffect(() => {
+    fetchFavoriteCharts();
+    fetchFavoriteDashboards();
+  }, [fetchFavoriteCharts, fetchFavoriteDashboards]);
 
   // Simulate loading insights
   useEffect(() => {
@@ -117,10 +217,28 @@ export function HomeDashboardView({ onNavigate, onOpenAIAssistant }: HomeDashboa
     return () => clearTimeout(timer);
   }, []);
 
-  const handleUnpinChart = (chartId: number, chartName: string, e: React.MouseEvent) => {
+  const handleUnpinChart = async (chartId: number, chartName: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    unpinChart(chartId);
-    toast.success(`"${chartName}" unpinned from Home Dashboard`);
+    
+    // Find the chart to get its original UUID
+    const chart = favoriteCharts.find(c => c.id === chartId);
+    if (!chart || !chart.originalId) {
+      toast.error("Chart not found");
+      return;
+    }
+
+    try {
+      const updateResponse = await updateFavoriteChart(chart.originalId);
+      if (updateResponse.success) {
+        // Refresh the favorite charts list
+        await fetchFavoriteCharts();
+        toast.success(`"${chartName}" unpinned from Home Dashboard`);
+      } else {
+        toast.error(updateResponse.error?.message || "Failed to unpin chart");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while unpinning chart");
+    }
   };
 
   const handleUnpinInsight = (insightId: number, insightTitle: string, e: React.MouseEvent) => {
@@ -161,13 +279,13 @@ export function HomeDashboardView({ onNavigate, onOpenAIAssistant }: HomeDashboa
               <Plus className="w-4 h-4" />
               New Dashboard
             </Button>
-            <Button 
+            {/* <Button 
               onClick={onOpenAIAssistant}
               className="gradient-primary hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-smooth gap-2"
             >
               <Sparkles className="w-4 h-4" />
               Ask VizAI
-            </Button>
+            </Button> */}
           </div>
         </div>
 
@@ -176,7 +294,7 @@ export function HomeDashboardView({ onNavigate, onOpenAIAssistant }: HomeDashboa
           <div className="flex items-center justify-between">
             <h2 className="text-foreground">Pinned Charts</h2>
             <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5">
-              {pinnedCharts.length} charts
+              {favoriteCharts.length} charts
             </Badge>
           </div>
 
@@ -204,7 +322,7 @@ export function HomeDashboardView({ onNavigate, onOpenAIAssistant }: HomeDashboa
                 </Card>
               ))}
             </div>
-          ) : pinnedCharts.length === 0 ? (
+          ) : favoriteCharts.length === 0 ? (
             <Card className="p-12 border-2 border-dashed border-border card-shadow">
               <div className="flex flex-col items-center justify-center text-center">
                 <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center mb-5">
@@ -225,7 +343,7 @@ export function HomeDashboardView({ onNavigate, onOpenAIAssistant }: HomeDashboa
             </Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {pinnedCharts.map((chart) => {
+              {favoriteCharts.map((chart) => {
                 const Icon = chartTypeIcons[chart.chartType];
                 const colorClass = chartTypeColors[chart.chartType];
                 
@@ -384,7 +502,7 @@ export function HomeDashboardView({ onNavigate, onOpenAIAssistant }: HomeDashboa
                               innerRadius={55}
                               outerRadius={95}
                             >
-                              {chartData.map((entry: any, index: number) => (
+                              {chartData.map((_entry: any, index: number) => (
                                 <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                               ))}
                             </Pie>
@@ -482,6 +600,96 @@ export function HomeDashboardView({ onNavigate, onOpenAIAssistant }: HomeDashboa
                   </Card>
                 );
               })}
+            </div>
+          )}
+        </div>
+
+        {/* Favorite Dashboards */}
+        <div className="space-y-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-foreground">Favorite Dashboards</h2>
+            <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5">
+              {favoriteDashboards.length} dashboards
+            </Badge>
+          </div>
+
+          {isLoadingDashboards ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3].map((i) => (
+                <Card key={i} className="p-6 border-2 border-border card-shadow">
+                  <div className="space-y-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-muted/50 animate-pulse" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-4 bg-muted/50 rounded animate-pulse w-3/4" />
+                        <div className="h-3 bg-muted/30 rounded animate-pulse w-1/2" />
+                      </div>
+                    </div>
+                    <div className="h-32 bg-muted/30 rounded-lg animate-pulse" />
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : favoriteDashboards.length === 0 ? (
+            <Card className="p-12 border-2 border-dashed border-border card-shadow">
+              <div className="flex flex-col items-center justify-center text-center">
+                <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center mb-5">
+                  <LayoutDashboard className="w-10 h-10 text-muted-foreground" />
+                </div>
+                <h3 className="text-foreground mb-2">No favorite dashboards yet</h3>
+                <p className="text-muted-foreground mb-6 max-w-md">
+                  Mark dashboards as favorites to access them quickly from your home page
+                </p>
+                <Button 
+                  onClick={() => onNavigate?.('dashboards')}
+                  variant="outline"
+                  className="hover:bg-muted/50"
+                >
+                  Browse Dashboards
+                </Button>
+              </div>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {favoriteDashboards.map((dashboard) => (
+                <Card 
+                  key={dashboard.id}
+                  className="overflow-hidden border-2 border-border hover:border-primary/30 hover:shadow-xl transition-smooth cursor-pointer group hover-lift card-shadow"
+                  onClick={() => onNavigate?.('dashboards')}
+                >
+                  <div className="p-6">
+                    <div className="flex items-start gap-4 mb-4">
+                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center flex-shrink-0 shadow-md">
+                        <LayoutDashboard className="w-6 h-6 text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-foreground group-hover:text-primary transition-colors mb-2 line-clamp-1">
+                          {dashboard.name}
+                        </h3>
+                        <p className="text-sm text-muted-foreground line-clamp-2">
+                          {dashboard.description || 'No description available'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-4 border-t border-border">
+                      <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5">
+                        Favorite
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onNavigate?.('dashboards');
+                        }}
+                        className="text-primary hover:text-primary hover:bg-primary/10"
+                      >
+                        View <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
             </div>
           )}
         </div>

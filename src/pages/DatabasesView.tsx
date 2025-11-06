@@ -1,5 +1,5 @@
 import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -33,44 +33,10 @@ import {
 } from "../components/ui/table";
 import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
-
-const mockDatabases = [
-  {
-    id: 1,
-    name: "prod-analytics-db",
-    type: "PostgreSQL",
-    host: "analytics.prod.company.com",
-    status: "connected",
-    lastChecked: "2 minutes ago"
-  },
-  {
-    id: 2,
-    name: "sales-mysql-db",
-    type: "MySQL",
-    host: "sales.prod.company.com",
-    status: "connected",
-    lastChecked: "5 minutes ago"
-  },
-  {
-    id: 3,
-    name: "customer-data-warehouse",
-    type: "PostgreSQL",
-    host: "warehouse.prod.company.com",
-    status: "connected",
-    lastChecked: "1 minute ago"
-  },
-  {
-    id: 4,
-    name: "legacy-reporting",
-    type: "MySQL",
-    host: "legacy.company.com",
-    status: "error",
-    lastChecked: "10 minutes ago"
-  }
-];
+import { getDatabases } from "../services/api";
 
 interface DatabaseConnection {
-  id: number;
+  id: string;
   name: string;
   type: string;
   host: string;
@@ -78,8 +44,13 @@ interface DatabaseConnection {
   lastChecked: string;
 }
 
-export function DatabasesView() {
-  const [databases, setDatabases] = useState<DatabaseConnection[]>(mockDatabases);
+interface DatabasesViewProps {
+  projectId?: string | number;
+}
+
+export function DatabasesView({ projectId }: DatabasesViewProps) {
+  const [databases, setDatabases] = useState<DatabaseConnection[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [showConnectionFlow, setShowConnectionFlow] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
@@ -90,6 +61,60 @@ export function DatabasesView() {
   const [dbType, setDbType] = useState("postgresql");
   const [host, setHost] = useState("");
 
+  // Helper function to format time ago
+  const formatTimeAgo = (dateString: string): string => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return "just now";
+    if (diffMins < 60) return `${diffMins} minutes ago`;
+    if (diffHours < 24) return `${diffHours} hours ago`;
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString();
+  };
+
+  const fetchDatabases = useCallback(async () => {
+    if (!projectId) return;
+    
+    setIsLoading(true);
+    try {
+      const response = await getDatabases(String(projectId));
+      if (response.success && response.data) {
+        // Map API Database format to DatabaseConnection format
+        const mappedDatabases: DatabaseConnection[] = response.data.map((db) => ({
+          id: db.id,
+          name: db.name,
+          type: db.type === 'postgresql' ? 'PostgreSQL' : db.type === 'mysql' ? 'MySQL' : db.type,
+          host: db.host || 'N/A',
+          status: db.status,
+          lastChecked: formatTimeAgo(db.lastChecked),
+        }));
+        setDatabases(mappedDatabases);
+      } else {
+        toast.error(response.error?.message || "Failed to load databases");
+        setDatabases([]);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while fetching databases");
+      setDatabases([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [projectId]);
+
+  // Fetch databases from API
+  useEffect(() => {
+    if (projectId) {
+      fetchDatabases();
+    } else {
+      setIsLoading(false);
+    }
+  }, [projectId, fetchDatabases]);
+
   const handleConnectionFlowComplete = (connectionData: {
     database: any;
     selectedTables: string[];
@@ -98,17 +123,10 @@ export function DatabasesView() {
     const dbName = connectionData.database.connectionName || connectionData.database.name || "New Database";
     toast.success(`Database "${dbName}" connected successfully!`);
     
-    // Add the new database to the list (in real app, this would be saved to backend)
-    const newDb: DatabaseConnection = {
-      id: databases.length + 1,
-      name: dbName,
-      type: connectionData.database.dbType === "postgresql" ? "PostgreSQL" : "MySQL",
-      host: connectionData.database.host || "localhost",
-      status: "connected",
-      lastChecked: "just now"
-    };
-    
-    setDatabases([...databases, newDb]);
+    // Refresh the database list from API
+    if (projectId) {
+      fetchDatabases();
+    }
     setShowConnectionFlow(false);
   };
 
@@ -147,6 +165,7 @@ export function DatabasesView() {
   };
 
   const handleDeleteConnection = (db: DatabaseConnection) => {
+    // TODO: Implement delete API call when available
     setDatabases(databases.filter(d => d.id !== db.id));
     toast.success(`Connection "${db.name}" deleted successfully`);
   };
@@ -176,7 +195,9 @@ export function DatabasesView() {
                   <Check className="w-6 h-6 text-success" />
                 </div>
                 <div>
-                  <p className="text-2xl text-foreground mb-1">3</p>
+                  <p className="text-2xl text-foreground mb-1">
+                    {databases.filter(db => db.status === 'connected').length}
+                  </p>
                   <p className="text-sm text-muted-foreground">Active Connections</p>
                 </div>
               </div>
@@ -188,7 +209,9 @@ export function DatabasesView() {
                   <X className="w-6 h-6 text-destructive" />
                 </div>
                 <div>
-                  <p className="text-2xl text-foreground mb-1">1</p>
+                  <p className="text-2xl text-foreground mb-1">
+                    {databases.filter(db => db.status === 'error' || db.status === 'disconnected').length}
+                  </p>
                   <p className="text-sm text-muted-foreground">Connection Errors</p>
                 </div>
               </div>
@@ -200,7 +223,7 @@ export function DatabasesView() {
                   <Database className="w-6 h-6 text-accent" />
                 </div>
                 <div>
-                  <p className="text-2xl text-foreground mb-1">4</p>
+                  <p className="text-2xl text-foreground mb-1">{databases.length}</p>
                   <p className="text-sm text-muted-foreground">Total Databases</p>
                 </div>
               </div>
@@ -221,7 +244,20 @@ export function DatabasesView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {databases.map((db) => (
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                      Loading databases...
+                    </TableCell>
+                  </TableRow>
+                ) : databases.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                      No database connections found. Click "Add Connection" to get started.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  databases.map((db) => (
                   <TableRow key={db.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
@@ -271,7 +307,8 @@ export function DatabasesView() {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
-                ))}
+                  ))
+                )}
               </TableBody>
             </Table>
           </Card>

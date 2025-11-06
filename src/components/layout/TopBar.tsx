@@ -12,7 +12,7 @@ import {
 } from "../ui/dropdown-menu";
 
 interface Project {
-  id: number;
+  id: number | string;
   name: string;
 }
 

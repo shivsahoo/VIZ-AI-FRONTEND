@@ -5,7 +5,7 @@ import { ActionButtonGroup } from "../../shared/ActionButtonGroup";
 import { LineChart, Line, BarChart, Bar, AreaChart, Area, ResponsiveContainer } from "recharts";
 
 interface Dashboard {
-  id: number;
+  id: number | string;
   name: string;
   description: string;
   charts: number;

@@ -9,10 +9,13 @@ import { UsersView } from "./UsersView";
 import { DashboardDetailView } from "./DashboardDetailView";
 import { DashboardCreationBot } from "../components/features/dashboards/DashboardCreationBot";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "../components/ui/dialog";
+import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import { toast } from "sonner";
+import { getDashboards, createDashboard, type Dashboard as ApiDashboard } from "../services/api";
 
+// UI Dashboard type (extends API Dashboard with display fields)
 interface Dashboard {
-  id: number;
+  id: string | number;
   name: string;
   description: string;
   charts: number;
@@ -20,65 +23,29 @@ interface Dashboard {
   category?: string;
   icon: any;
   createdById?: number;
-  projectId?: number;
+  projectId?: number | string;
+  status?: 'active' | 'archived';
+  collaborators?: number;
 }
 
-const initialDashboards: Dashboard[] = [
-  {
-    id: 1,
-    name: "Revenue Overview",
-    description: "Monthly revenue trends and forecasts",
-    charts: 6,
-    lastUpdated: "2 hours ago",
-    category: "Finance",
-    icon: TrendingUp
-  },
-  {
-    id: 2,
-    name: "Customer Analytics",
-    description: "User behavior and retention metrics",
-    charts: 8,
-    lastUpdated: "5 minutes ago",
-    category: "Marketing",
-    icon: BarChart3
-  },
-  {
-    id: 3,
-    name: "Sales Performance",
-    description: "Sales team KPIs and pipeline analysis",
-    charts: 5,
-    lastUpdated: "1 hour ago",
-    category: "Sales",
-    icon: PieChart
-  },
-  {
-    id: 4,
-    name: "Product Metrics",
-    description: "Feature usage and engagement tracking",
-    charts: 10,
-    lastUpdated: "30 minutes ago",
-    category: "Product",
-    icon: LineChart
-  },
-  {
-    id: 5,
-    name: "Marketing ROI",
-    description: "Campaign performance across channels",
-    charts: 7,
-    lastUpdated: "3 hours ago",
-    category: "Marketing",
-    icon: TrendingUp
-  },
-  {
-    id: 6,
-    name: "Operations Dashboard",
-    description: "Operational efficiency and costs",
-    charts: 4,
-    lastUpdated: "1 day ago",
-    category: "Operations",
-    icon: BarChart3
-  }
-];
+// Helper function to format time ago
+const formatTimeAgo = (dateString: string): string => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins} minutes ago`;
+  if (diffHours < 24) return `${diffHours} hours ago`;
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return date.toLocaleDateString();
+};
+
+// Default icon for dashboards
+const defaultIcon = LayoutDashboard;
 
 interface WorkspaceViewProps {
   projectName: string;
@@ -87,7 +54,7 @@ interface WorkspaceViewProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
   currentUser?: { id: number; name: string; email: string };
-  projectId?: number;
+  projectId?: number | string;
   chartCreatedTrigger?: number;
   pendingChartFromAI?: {
     name: string;
@@ -105,7 +72,45 @@ interface WorkspaceViewProps {
 export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabChange, currentUser, projectId, chartCreatedTrigger, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart }: WorkspaceViewProps) {
   const [selectedDashboard, setSelectedDashboard] = useState<string | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [dashboards, setDashboards] = useState<Dashboard[]>(initialDashboards);
+  const [dashboards, setDashboards] = useState<Dashboard[]>([]);
+  const [isLoadingDashboards, setIsLoadingDashboards] = useState(false);
+
+  // Fetch dashboards when projectId is available
+  useEffect(() => {
+    if (projectId) {
+      fetchDashboards();
+    }
+  }, [projectId]);
+
+  const fetchDashboards = async () => {
+    if (!projectId) return;
+    
+    setIsLoadingDashboards(true);
+    try {
+      const response = await getDashboards(String(projectId));
+      if (response.success && response.data) {
+        // Map API dashboards to UI format
+        const uiDashboards: Dashboard[] = response.data.map((dashboard) => ({
+          id: dashboard.id,
+          name: dashboard.name,
+          description: dashboard.description,
+          charts: dashboard.chartCount || 0,
+          lastUpdated: formatTimeAgo(dashboard.updatedAt || dashboard.createdAt),
+          icon: defaultIcon,
+          createdById: currentUser?.id,
+          projectId: dashboard.projectId || projectId,
+          status: 'active' as const,
+        }));
+        setDashboards(uiDashboards);
+      } else {
+        toast.error(response.error?.message || "Failed to load dashboards");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while fetching dashboards");
+    } finally {
+      setIsLoadingDashboards(false);
+    }
+  };
 
   // Clear selected dashboard when activeTab changes (navigation from sidebar)
   useEffect(() => {
@@ -124,27 +129,43 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
     setIsCreateDialogOpen(true);
   };
 
-  const handleCreateDashboard = (dashboard: {
+  const handleCreateDashboard = async (dashboard: {
     name: string;
     description: string;
   }) => {
-    // Create a new dashboard object
-    const newDashboard: Dashboard = {
-      id: Math.max(...dashboards.map(d => d.id), 0) + 1,
+    if (!projectId) {
+      toast.error("Project ID is required to create a dashboard");
+      return;
+    }
+
+    try {
+      const response = await createDashboard(String(projectId), {
       name: dashboard.name,
       description: dashboard.description,
-      charts: 0,
-      lastUpdated: "Just now",
-      icon: LayoutDashboard,
-      createdById: currentUser?.id,
-      projectId: projectId
-    };
+      });
 
-    // Add to dashboards list
+      if (response.success && response.data) {
+        // Add new dashboard to list with UI formatting
+        const newDashboard: Dashboard = {
+          id: response.data.id,
+          name: response.data.name,
+          description: response.data.description,
+          charts: response.data.chartCount || 0,
+          lastUpdated: "just now",
+          icon: defaultIcon,
+      createdById: currentUser?.id,
+          projectId: response.data.projectId || projectId.toString(),
+          status: 'active' as const,
+    };
     setDashboards([newDashboard, ...dashboards]);
-    
-    // Show success message
+        setIsCreateDialogOpen(false);
     toast.success(`Dashboard "${dashboard.name}" created successfully!`);
+      } else {
+        toast.error(response.error?.message || "Failed to create dashboard");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while creating dashboard");
+    }
   };
 
   const renderContent = () => {
@@ -174,12 +195,13 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
             dashboards={dashboards}
             onViewDashboard={handleViewDashboard}
             onCreateDashboard={handleOpenCreateDialog}
+            isLoading={isLoadingDashboards}
           />
         );
       case 'charts':
         return <ChartsView currentUser={currentUser} projectId={projectId} key={chartCreatedTrigger} pendingChartFromAI={pendingChartFromAI} onChartFromAIProcessed={onChartFromAIProcessed} onOpenAIAssistant={onOpenAIAssistant} onEditChart={onEditChart} />;
       case 'databases':
-        return <DatabasesView />;
+        return <DatabasesView projectId={projectId} />;
       case 'insights':
         return <InsightsView />;
       case 'team':

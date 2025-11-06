@@ -14,6 +14,7 @@
 import { Button } from "../ui/button";
 import { type ReactNode } from "react";
 import { type ComponentProps } from "react";
+import React from "react";
 
 interface GradientButtonProps extends Omit<ComponentProps<typeof Button>, 'className'> {
   /** Button content */
@@ -25,13 +26,11 @@ interface GradientButtonProps extends Omit<ComponentProps<typeof Button>, 'class
 /**
  * Gradient-styled button for primary actions
  */
-export function GradientButton({ 
-  children, 
-  className = '',
-  ...props 
-}: GradientButtonProps) {
+export const GradientButton = React.forwardRef<HTMLButtonElement, GradientButtonProps>(
+  ({ children, className = '', ...props }, ref) => {
   return (
     <Button
+        ref={ref}
       {...props}
       className={`bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white ${className}`}
     >
@@ -39,4 +38,7 @@ export function GradientButton({
     </Button>
   );
 }
+);
+
+GradientButton.displayName = "GradientButton";
 
