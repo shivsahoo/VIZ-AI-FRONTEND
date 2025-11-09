@@ -70,7 +70,7 @@ interface WorkspaceViewProps {
 }
 
 export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabChange, currentUser, projectId, chartCreatedTrigger, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart }: WorkspaceViewProps) {
-  const [selectedDashboard, setSelectedDashboard] = useState<string | null>(null);
+  const [selectedDashboard, setSelectedDashboard] = useState<{ id: string; name: string } | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [isLoadingDashboards, setIsLoadingDashboards] = useState(false);
@@ -117,8 +117,17 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
     setSelectedDashboard(null);
   }, [activeTab]);
 
-  const handleViewDashboard = (dashboardName: string) => {
-    setSelectedDashboard(dashboardName);
+  const handleViewDashboard = (dashboardName: string, dashboardId?: string | number) => {
+    // Find the dashboard by name or ID to get the full dashboard info
+    const dashboard = dashboards.find(d => 
+      d.name === dashboardName || (dashboardId && d.id === dashboardId)
+    );
+    if (dashboard) {
+      setSelectedDashboard({ id: String(dashboard.id), name: dashboard.name });
+    } else {
+      // Fallback to just name if dashboard not found in list
+      setSelectedDashboard({ id: dashboardId ? String(dashboardId) : '', name: dashboardName });
+    }
   };
 
   const handleBackToDashboards = () => {
@@ -173,7 +182,9 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
     if (selectedDashboard) {
       return (
         <DashboardDetailView 
-          dashboardName={selectedDashboard}
+          dashboardId={selectedDashboard.id}
+          dashboardName={selectedDashboard.name}
+          projectId={projectId ? String(projectId) : undefined}
           onBack={handleBackToDashboards}
           onOpenAIAssistant={onOpenAIAssistant}
           onEditChart={onEditChart}
@@ -205,7 +216,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
       case 'insights':
         return <InsightsView />;
       case 'team':
-        return <UsersView />;
+        return <UsersView projectId={projectId} />;
       default:
         return (
           <HomeDashboardView 

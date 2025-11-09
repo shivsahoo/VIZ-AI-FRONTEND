@@ -177,36 +177,12 @@ export default function App() {
     setCurrentUser(user);
     setIsAuthenticated(true);
     
-    // Role-based navigation
-    if (user.role === 'super_admin') {
-      // Super admin always sees home page
-      setCurrentView('home');
-      setShowOnboarding(false);
-      setHasCompletedOnboarding(true);
-    } else {
-      // Project users
-      const hasCompletedOnboardingBefore = localStorage.getItem('vizai_onboarding_completed') === 'true';
-      
-      if (!hasCompletedOnboardingBefore) {
-        // First-time user - show onboarding
-        setShowOnboarding(true);
-        setHasCompletedOnboarding(false);
-      } else {
-        // Returning user - navigate to last project or home
-        const lastProject = localStorage.getItem('vizai_last_project');
-        const lastProjectId = localStorage.getItem('vizai_last_project_id');
-        if (lastProject) {
-          setSelectedProject(lastProject);
-          setSelectedProjectId(lastProjectId);
-          setCurrentView('workspace');
-          setWorkspaceTab('home');
-        } else {
-          setCurrentView('home');
-        }
-        setShowOnboarding(false);
-        setHasCompletedOnboarding(true);
-      }
-    }
+    setCurrentView('home');
+    setShowOnboarding(false);
+    setHasCompletedOnboarding(true);
+    
+    setSelectedProject(null);
+    setSelectedProjectId(null);
   };
 
   const handleOnboardingComplete = (projectData: {

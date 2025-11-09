@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, Pin, Trash2, Calendar, Database, Plus, Clock, Edit2, Filter, X } from "lucide-react";
+import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, Pin, Trash2, Plus, Clock, Filter } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -36,7 +36,7 @@ import {
 } from "../components/ui/alert-dialog";
 import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
 import { toast } from "sonner";
-import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, type Chart as ApiChart } from "../services/api";
+import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, deleteChart, type Chart as ApiChart } from "../services/api";
 import {
   LineChart as RechartsLine,
   Line,
@@ -441,13 +441,24 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     }
   };
 
-  const handleDeleteChart = () => {
+  const handleDeleteChart = async () => {
     if (!chartToDelete) return;
     
-    setCharts(charts.filter(c => c.id !== chartToDelete.id));
-    setGeneratedCharts(generatedCharts.filter(c => c.id !== chartToDelete.id));
-    toast.success(`Chart "${chartToDelete.name}" deleted successfully!`);
-    setChartToDelete(null);
+    try {
+      const chartId = typeof chartToDelete.id === 'string' ? chartToDelete.id : String(chartToDelete.id);
+      const response = await deleteChart(chartId, chartToDelete.dashboardId);
+      
+      if (response.success) {
+        setCharts(charts.filter(c => c.id !== chartToDelete.id));
+        setGeneratedCharts(generatedCharts.filter(c => c.id !== chartToDelete.id));
+        toast.success(`Chart "${chartToDelete.name}" deleted successfully!`);
+        setChartToDelete(null);
+      } else {
+        toast.error(response.error?.message || "Failed to delete chart");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while deleting chart");
+    }
   };
 
   const handleTogglePin = async (chart: Chart) => {
@@ -852,24 +863,25 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
               )}
               <ActionButtonGroup
                 actions={[
-                  {
-                    icon: <Edit2 />,
-                    onClick: (e) => {
-                      e?.stopPropagation();
-                      if (onEditChart) {
-                        onEditChart({
-                          name: chart.name,
-                          type: chart.type,
-                          description: chart.dataSource
-                        });
-                      }
-                      if (onOpenAIAssistant) {
-                        onOpenAIAssistant();
-                      }
-                    },
-                    label: "Edit chart",
-                    variant: "ghost"
-                  },
+                  // Edit functionality commented out
+                  // {
+                  //   icon: <Edit2 />,
+                  //   onClick: (e) => {
+                  //     e?.stopPropagation();
+                  //     if (onEditChart) {
+                  //       onEditChart({
+                  //         name: chart.name,
+                  //         type: chart.type,
+                  //         description: chart.dataSource
+                  //       });
+                  //     }
+                  //     if (onOpenAIAssistant) {
+                  //       onOpenAIAssistant();
+                  //     }
+                  //   },
+                  //   label: "Edit chart",
+                  //   variant: "ghost"
+                  // },
                   {
                     icon: <Trash2 />,
                     onClick: (e) => {

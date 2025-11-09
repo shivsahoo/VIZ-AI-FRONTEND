@@ -34,7 +34,7 @@ interface Dashboard {
 
 interface DashboardsViewProps {
   dashboards: Dashboard[];
-  onViewDashboard?: (dashboardName: string) => void;
+  onViewDashboard?: (dashboardName: string, dashboardId?: string | number) => void;
   onCreateDashboard?: () => void;
   isLoading?: boolean;
 }
@@ -164,7 +164,7 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard,
                     e.stopPropagation();
                     setDashboardToDelete(dashboard);
                   }}
-                  onClick={() => onViewDashboard?.(dashboard.name)}
+                  onClick={() => onViewDashboard?.(dashboard.name, dashboard.id)}
                 />
               ))}
             </div>
@@ -197,7 +197,7 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard,
                       e.stopPropagation();
                       setDashboardToDelete(dashboard);
                     }}
-                    onClick={() => onViewDashboard?.(dashboard.name)}
+                    onClick={() => onViewDashboard?.(dashboard.name, dashboard.id)}
                   />
                 ))}
               </div>

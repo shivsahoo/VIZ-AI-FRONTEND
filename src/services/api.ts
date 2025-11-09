@@ -377,6 +377,11 @@ export const getProjects = async (): Promise<ApiResponse<Project[]>> => {
         description: string | null;
         super_user_id: string;
         created_at: string;
+        created_at_relative?: string;
+        active_dashboards?: number;
+        database_connections?: number;
+        team_members?: number;
+        owners?: Array<any>;
       }>;
     }>('/api/v1/backend/projects');
 
@@ -389,9 +394,9 @@ export const getProjects = async (): Promise<ApiResponse<Project[]>> => {
         createdAt: p.created_at,
         updatedAt: p.created_at,
         owner: p.super_user_id,
-        memberCount: 0, // Not provided by backend
-        databaseCount: 0,
-        dashboardCount: 0,
+        memberCount: p.team_members || 0,
+        databaseCount: p.database_connections || 0,
+        dashboardCount: p.active_dashboards || 0,
       })),
     };
   } catch (error: any) {
@@ -656,6 +661,41 @@ export const getDashboards = async (projectId: string): Promise<ApiResponse<Dash
 };
 
 /**
+ * Get dashboard charts
+ */
+export const getDashboardCharts = async (dashboardId: string): Promise<ApiResponse<Array<{
+  id: string;
+  title: string;
+  created_at: string;
+  connection_id: string | null;
+}>>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      charts: Array<{
+        id: string;
+        title: string;
+        created_at: string;
+        connection_id: string | null;
+      }>;
+    }>(`/api/v1/backend/dashboards/${dashboardId}/charts`);
+
+    return {
+      success: true,
+      data: response.charts || [],
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'FETCH_DASHBOARD_CHARTS_FAILED',
+        message: error.message || 'Failed to fetch dashboard charts',
+      },
+    };
+  }
+};
+
+/**
  * Create new dashboard
  */
 export const createDashboard = async (projectId: string, data: { name: string; description: string }): Promise<ApiResponse<Dashboard>> => {
@@ -907,7 +947,7 @@ export const addChartToDashboard = async (data: {
 /**
  * Get chart data (execute query)
  */
-export const getChartData = async (chartId: string, datasourceConnectionId: string): Promise<ApiResponse<ChartData>> => {
+export const getChartData = async (chartId: string, datasourceConnectionId: string, query: string): Promise<ApiResponse<ChartData>> => {
   try {
     const response = await apiRequest<{
       data: any[];
@@ -915,7 +955,7 @@ export const getChartData = async (chartId: string, datasourceConnectionId: stri
     }>(`/api/v1/backend/excecute-query/${datasourceConnectionId}/`, {
       method: 'POST',
       body: JSON.stringify({
-        query: '', // Will need to get query from chart first
+        query: query,
       }),
     });
 
@@ -942,6 +982,74 @@ export const getChartData = async (chartId: string, datasourceConnectionId: stri
 };
 
 /**
+ * Filter charts by dashboard ID, database connection, or status
+ */
+export const filterCharts = async (filters: {
+  dashboardId?: string;
+  databaseConnectionId?: string;
+  status?: 'draft' | 'published';
+}): Promise<ApiResponse<Array<{
+  id: string;
+  title: string;
+  query: string;
+  chart_type: string;
+  type: string;
+  created_at: string;
+  database_connection_id: string;
+  database_connection_name?: string;
+  status: string;
+  is_favorite: boolean;
+  dashboards: Array<{ id: string; title: string }>;
+  dashboard_count: number;
+}>>> => {
+  try {
+    const queryParams = new URLSearchParams();
+    if (filters.dashboardId) {
+      queryParams.append('dashboard_id', filters.dashboardId);
+    }
+    if (filters.databaseConnectionId) {
+      queryParams.append('database_connection_id', filters.databaseConnectionId);
+    }
+    if (filters.status) {
+      queryParams.append('status', filters.status);
+    }
+
+    const response = await apiRequest<{
+      message: string;
+      charts: Array<{
+        id: string;
+        title: string;
+        query: string;
+        chart_type: string;
+        type: string;
+        created_at: string;
+        database_connection_id: string;
+        database_connection_name?: string;
+        status: string;
+        is_favorite: boolean;
+        dashboards: Array<{ id: string; title: string }>;
+        dashboard_count: number;
+      }>;
+      total_count: number;
+      filters_applied: Record<string, any>;
+    }>(`/api/v1/backend/charts/filter?${queryParams.toString()}`);
+
+    return {
+      success: true,
+      data: response.charts || [],
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'FILTER_CHARTS_FAILED',
+        message: error.message || 'Failed to filter charts',
+      },
+    };
+  }
+};
+
+/**
  * Get favorite charts for the current user
  */
 export const getFavoriteCharts = async (): Promise<ApiResponse<Array<{
@@ -961,7 +1069,7 @@ export const getFavoriteCharts = async (): Promise<ApiResponse<Array<{
         connection_id: string;
         query: string;
       }>;
-    }>('/api/v1/backend/charts/favorite');
+    }>('/api/v1/backend/users/charts/favorite');
 
     return {
       success: true,
@@ -1005,6 +1113,73 @@ export const updateFavoriteChart = async (chartId: string): Promise<ApiResponse<
       error: {
         code: 'UPDATE_FAVORITE_CHART_FAILED',
         message: error.message || 'Failed to update favorite chart status',
+      },
+    };
+  }
+};
+
+/**
+ * Delete a chart
+ * If dashboardId is provided, deletes the chart from that specific dashboard.
+ * Otherwise, attempts to delete the chart entirely using a general delete endpoint.
+ * 
+ * Note: The backend currently only has a delete-from-dashboard endpoint.
+ * If a general delete endpoint doesn't exist, this will fail for charts without a dashboardId.
+ */
+export const deleteChart = async (chartId: string, dashboardId?: number | string): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    // If dashboardId is provided, use the delete from dashboard endpoint
+    if (dashboardId) {
+      const dashboardIdStr = typeof dashboardId === 'string' ? dashboardId : String(dashboardId);
+      const response = await apiRequest<{
+        message: string;
+      }>(`/api/v1/backend/dashboards/${dashboardIdStr}/charts/${chartId}`, {
+        method: 'DELETE',
+      });
+
+      return {
+        success: true,
+        data: {
+          message: response.message || 'Chart deleted successfully',
+        },
+      };
+    }
+    
+    // Try to delete chart directly using general delete endpoint
+    // This endpoint may not exist in the backend - if it doesn't, we'll handle the error
+    try {
+      const response = await apiRequest<{
+        message: string;
+      }>(`/api/v1/backend/charts/${chartId}`, {
+        method: 'DELETE',
+      });
+
+      return {
+        success: true,
+        data: {
+          message: response.message || 'Chart deleted successfully',
+        },
+      };
+    } catch (generalDeleteError: any) {
+      // If general delete endpoint doesn't exist (404), return a helpful error
+      if (generalDeleteError.message?.includes('404') || generalDeleteError.message?.includes('Not Found')) {
+        return {
+          success: false,
+          error: {
+            code: 'DELETE_CHART_FAILED',
+            message: 'Cannot delete chart: Chart is not associated with a dashboard. Please add the chart to a dashboard first, then delete it.',
+          },
+        };
+      }
+      // Re-throw other errors
+      throw generalDeleteError;
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'DELETE_CHART_FAILED',
+        message: error.message || 'Failed to delete chart',
       },
     };
   }
@@ -1404,11 +1579,19 @@ export interface TeamMember {
 }
 
 /**
- * Get project members
+ * Get project members (all users in project)
  */
 export const getTeamMembers = async (projectId: string): Promise<ApiResponse<TeamMember[]>> => {
   try {
-    const response = await apiRequest<{
+    const response = await apiRequest<Array<{
+      id: string;
+      user_id: string;
+      username: string;
+      email: string;
+      created_at: string;
+      role_id?: string;
+      role_name?: string;
+    }> | {
       message: string;
       users: Array<{
         id: string;
@@ -1416,16 +1599,23 @@ export const getTeamMembers = async (projectId: string): Promise<ApiResponse<Tea
         username: string;
         email: string;
         created_at: string;
+        role_id?: string;
+        role_name?: string;
       }>;
     }>(`/api/v1/backend/projects/${projectId}/users`);
 
+    // Handle both response formats: array directly or object with users property
+    const usersArray = Array.isArray(response)
+      ? response
+      : (response as any).users || [];
+
     return {
       success: true,
-      data: response.users.map((u) => ({
-        id: u.user_id,
+      data: usersArray.map((u: any) => ({
+        id: u.user_id || u.id,
         name: u.username,
         email: u.email,
-        role: 'Member', // Default, would need to fetch from role
+        role: u.role_name || 'Member', // Use role_name if available
         joinedAt: u.created_at,
         lastActive: new Date().toISOString(),
       })),
@@ -1442,16 +1632,35 @@ export const getTeamMembers = async (projectId: string): Promise<ApiResponse<Tea
 };
 
 /**
- * Invite user to project
+ * Invite user to project (Create user project relationship)
  */
-export const inviteUser = async (projectId: string, data: { email: string; role: string }): Promise<ApiResponse<{ inviteId: string }>> => {
+export const inviteUser = async (
+  projectId: string,
+  data: {
+    username: string;
+    email: string;
+    role_id: string; // Role ID (UUID)
+  }
+): Promise<ApiResponse<{ user_id: string; project_id: string }>> => {
   try {
-    // Backend doesn't have invite endpoint, uses create user project
-    // This would need role_id instead of role name
+    const response = await apiRequest<{
+      message: string;
+      user_id: string;
+      project_id: string;
+    }>(`/api/v1/backend/projects/${projectId}/users`, {
+      method: 'POST',
+      body: JSON.stringify({
+        username: data.username,
+        email: data.email,
+        role_id: data.role_id,
+      }),
+    });
+
     return {
       success: true,
       data: {
-        inviteId: 'invite_' + Date.now(),
+        user_id: response.user_id,
+        project_id: response.project_id,
       },
     };
   } catch (error: any) {
@@ -1486,10 +1695,60 @@ export interface Role {
   };
 }
 
+export interface Permission {
+  id: string;
+  type: string;
+}
+
+/**
+ * Get all permissions
+ */
+export const getPermissions = async (): Promise<ApiResponse<Permission[]>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      permissions: Array<{
+        id: string;
+        type: string;
+      }>;
+    }>('/api/v1/backend/permissions');
+
+    return {
+      success: true,
+      data: response.permissions.map((p) => ({
+        id: p.id,
+        type: p.type,
+      })),
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'FETCH_PERMISSIONS_FAILED',
+        message: error.message || 'Failed to fetch permissions',
+      },
+    };
+  }
+};
+
 /**
  * Get roles for project
  */
-export const getRoles = async (projectId: string): Promise<ApiResponse<Role[]>> => {
+export const getRoles = async (projectId: string): Promise<ApiResponse<Array<{
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[]; // Array of permission types (strings)
+  blacklist: Array<{
+    table_name: string;
+    table_id: string;
+  }>;
+  isBuiltIn?: boolean;
+  databaseAccess?: {
+    databases: string[];
+    tables: { [database: string]: string[] };
+  };
+}>>> => {
   try {
     const response = await apiRequest<{
       message: string;
@@ -1497,7 +1756,7 @@ export const getRoles = async (projectId: string): Promise<ApiResponse<Role[]>> 
         id: string;
         name: string;
         description: string;
-        permissions: string[];
+        permissions: string[]; // Permission types (strings like "VIEW_DATASOURCE", etc.)
         blacklist: Array<{
           table_name: string;
           table_id: string;
@@ -1510,14 +1769,10 @@ export const getRoles = async (projectId: string): Promise<ApiResponse<Role[]>> 
       data: response.roles.map((r) => ({
         id: r.id,
         name: r.name,
+        description: r.description || '',
+        permissions: r.permissions, // Keep as array of permission type strings
+        blacklist: r.blacklist || [],
         isBuiltIn: r.name.toLowerCase() === 'admin' || r.name.toLowerCase() === 'member',
-        permissions: {
-          projects: 'read',
-          team: 'read',
-          databases: 'read',
-          dashboards: 'read',
-          insights: 'read',
-        },
         databaseAccess: {
           databases: [],
           tables: {},
@@ -1538,18 +1793,15 @@ export const getRoles = async (projectId: string): Promise<ApiResponse<Role[]>> 
 /**
  * Create custom role
  */
-export const createRole = async (projectId: string, data: Partial<Role>): Promise<ApiResponse<Role>> => {
+export const createRole = async (
+  projectId: string,
+  data: {
+    name: string;
+    description: string;
+    permissions: string[]; // Array of permission IDs
+  }
+): Promise<ApiResponse<Role>> => {
   try {
-    const permissionsResponse = await apiRequest<{
-      message: string;
-      permissions: Array<{ id: string; type: string }>;
-    }>('/api/v1/backend/permissions');
-
-    // Use first permission as default (would need proper mapping)
-    const permissionIds = permissionsResponse.permissions
-      .slice(0, 3)
-      .map((p) => p.id);
-
     const response = await apiRequest<{
       message: string;
       role: {
@@ -1562,9 +1814,9 @@ export const createRole = async (projectId: string, data: Partial<Role>): Promis
     }>(`/api/v1/backend/projects/${projectId}/roles`, {
       method: 'POST',
       body: JSON.stringify({
-        name: data.name || 'Custom Role',
-        description: '',
-        permissions: permissionIds,
+        name: data.name,
+        description: data.description || '',
+        permissions: data.permissions,
       }),
     });
 
@@ -1580,6 +1832,10 @@ export const createRole = async (projectId: string, data: Partial<Role>): Promis
           databases: 'read',
           dashboards: 'read',
           insights: 'read',
+        },
+        databaseAccess: {
+          databases: [],
+          tables: {},
         },
       },
     };
@@ -1656,16 +1912,19 @@ const api = {
   // Dashboards
   getDashboards,
   createDashboard,
+  getDashboardCharts,
   getFavorites,
   
   // Charts
   getCharts,
+  filterCharts,
   createChart,
   addChartToDashboard,
   getChartData,
   generateCharts,
   getFavoriteCharts,
   updateFavoriteChart,
+  deleteChart,
   
   // Databases
   getDatabases,
@@ -1685,6 +1944,7 @@ const api = {
   // Roles
   getRoles,
   createRole,
+  getPermissions,
   
   // Audit
   getAuditLogs,

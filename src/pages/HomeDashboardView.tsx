@@ -605,7 +605,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
         </div>
 
         {/* Favorite Dashboards */}
-        <div className="space-y-5">
+        {/* <div className="space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-foreground">Favorite Dashboards</h2>
             <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5">
@@ -692,7 +692,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
               ))}
             </div>
           )}
-        </div>
+        </div> */}
 
         {/* AI Insights Preview */}
         <div className="space-y-5">

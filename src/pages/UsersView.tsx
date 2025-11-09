@@ -1,5 +1,5 @@
-import { Plus, Shield, Search, Mail, MoreVertical, Trash2, UserCog, Users as UsersIcon, Database, ChevronDown, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { Plus, Shield, Search, Mail, MoreVertical, Trash2, UserCog, Users as UsersIcon, Database, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -32,6 +32,8 @@ import {
 } from "../components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { toast } from "sonner";
+import { getTeamMembers, getRoles, getPermissions, createRole, inviteUser, type Permission as ApiPermission } from "../services/api";
+import { Skeleton } from "../components/ui/skeleton";
 
 interface Permission {
   id: string;
@@ -175,9 +177,16 @@ const mockUsers: User[] = [
 
 type ViewType = "members" | "roles";
 
-export function UsersView() {
-  const [users, setUsers] = useState<User[]>(mockUsers);
-  const [roles, setRoles] = useState<Role[]>(defaultRoles);
+interface UsersViewProps {
+  projectId?: number | string;
+}
+
+export function UsersView({ projectId }: UsersViewProps) {
+  const [users, setUsers] = useState<User[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [apiPermissions, setApiPermissions] = useState<ApiPermission[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [isLoadingRoles, setIsLoadingRoles] = useState(true);
   const [activeView, setActiveView] = useState<ViewType>("members");
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
@@ -204,6 +213,140 @@ export function UsersView() {
   const [selectedDatabaseAccess, setSelectedDatabaseAccess] = useState<DatabaseAccess[]>([]);
   const [expandedDatabases, setExpandedDatabases] = useState<Set<string>>(new Set());
 
+  // Store API role IDs mapping
+  const [roleIdMap, setRoleIdMap] = useState<Map<string, string>>(new Map()); // UI ID -> API ID
+  const [rolesLoaded, setRolesLoaded] = useState(false);
+
+  // Fetch permissions and roles when projectId is available
+  useEffect(() => {
+    if (projectId) {
+      setRolesLoaded(false); // Reset when projectId changes
+      fetchPermissions();
+      fetchRoles();
+    } else {
+      setIsLoadingUsers(false);
+      setIsLoadingRoles(false);
+      setRolesLoaded(false);
+    }
+  }, [projectId]);
+
+  // Fetch users after roles are loaded (only once when roles are first loaded)
+  useEffect(() => {
+    if (projectId && roles.length > 0 && !isLoadingRoles && !rolesLoaded) {
+      setRolesLoaded(true);
+      fetchUsers();
+    }
+  }, [projectId, roles.length, isLoadingRoles]);
+
+  // Update role counts when users change
+  useEffect(() => {
+    if (users.length > 0 && roles.length > 0) {
+      const updatedRoles = roles.map(role => {
+        const userCount = users.filter(u => u.roleId === role.id).length;
+        return { ...role, count: userCount };
+      });
+      // Only update if counts actually changed to avoid infinite loops
+      const countsChanged = updatedRoles.some((role, index) => role.count !== roles[index]?.count);
+      if (countsChanged) {
+        setRoles(updatedRoles);
+      }
+    }
+  }, [users]);
+
+  const fetchUsers = async () => {
+    if (!projectId || roles.length === 0) return;
+    
+    setIsLoadingUsers(true);
+    try {
+      const response = await getTeamMembers(String(projectId));
+      if (response.success && response.data) {
+        // Map API users to UI format
+        const uiUsers: User[] = response.data.map((user, index) => {
+          // Find role by name to get roleId
+          const role = roles.find(r => r.name === user.role);
+          return {
+            id: index + 1, // Temporary ID for UI
+            name: user.name,
+            email: user.email,
+            roleId: role?.id || (roles.length > 0 ? roles[0].id : 1), // Default to first role if not found
+            status: "active" as const,
+            avatar: user.name.split(" ").map(n => n[0]).join("").toUpperCase(),
+          };
+        });
+        setUsers(uiUsers);
+      } else {
+        toast.error(response.error?.message || "Failed to load users");
+        setUsers([]);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while fetching users");
+      setUsers([]);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  const fetchRoles = async () => {
+    if (!projectId) return;
+    
+    setIsLoadingRoles(true);
+    try {
+      const response = await getRoles(String(projectId));
+      if (response.success && response.data) {
+        // Create mapping for API role IDs
+        const newRoleIdMap = new Map<string, string>();
+        
+        // Map API roles to UI format
+        const uiRoles: Role[] = response.data.map((role, index) => {
+          const uiId = index + 1;
+          // Store mapping: UI ID -> API ID
+          newRoleIdMap.set(uiId.toString(), role.id);
+
+          return {
+            id: uiId,
+            name: role.name,
+            description: role.description || `${role.name} role`,
+            permissions: Array.isArray(role.permissions) ? role.permissions : [],
+            count: 0, // Will be updated after users are loaded
+            color: role.isBuiltIn 
+              ? role.name.toLowerCase() === 'admin' 
+                ? "bg-primary" 
+                : "bg-accent"
+              : "bg-accent/80",
+            isSystem: role.isBuiltIn || false,
+            databaseAccess: role.databaseAccess ? Object.keys(role.databaseAccess.tables || {}).map(dbId => ({
+              databaseId: dbId,
+              databaseName: dbId, // Would need to fetch database names
+              tables: role.databaseAccess!.tables[dbId] || [],
+            })) : [],
+          };
+        });
+        setRoleIdMap(newRoleIdMap);
+        setRoles(uiRoles);
+      } else {
+        toast.error(response.error?.message || "Failed to load roles");
+        setRoles([]);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while fetching roles");
+      setRoles([]);
+    } finally {
+      setIsLoadingRoles(false);
+    }
+  };
+
+  const fetchPermissions = async () => {
+    try {
+      const response = await getPermissions();
+      if (response.success && response.data) {
+        setApiPermissions(response.data);
+      }
+    } catch (err: any) {
+      console.error("Failed to fetch permissions:", err);
+      // Don't show error toast for permissions as it's not critical
+    }
+  };
+
   const filteredUsers = users.filter(user => 
     user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.email.toLowerCase().includes(searchQuery.toLowerCase())
@@ -217,72 +360,113 @@ export function UsersView() {
     return roles.find(r => r.id === roleId)?.color || "from-gray-500 to-slate-500";
   };
 
-  const handleInviteMember = () => {
+  const handleInviteMember = async () => {
+    if (!projectId) {
+      toast.error("Project ID is required");
+      return;
+    }
+
     if (!inviteEmail || !inviteName || !inviteUsername || !inviteRoleId) {
       toast.error("Please fill in all fields");
       return;
     }
 
-    const newUser: User = {
-      id: users.length + 1,
-      name: inviteName,
-      email: inviteEmail,
-      roleId: parseInt(inviteRoleId),
-      status: "active",
-      avatar: inviteName.split(" ").map(n => n[0]).join("").toUpperCase(),
-    };
+    try {
+      // Get the actual API role ID from the mapping
+      const apiRoleId = roleIdMap.get(inviteRoleId);
+      if (!apiRoleId) {
+        toast.error("Selected role not found");
+        return;
+      }
 
-    setUsers([...users, newUser]);
-    
-    // Update role count
-    const updatedRoles = roles.map(role => 
-      role.id === parseInt(inviteRoleId)
-        ? { ...role, count: role.count + 1 }
-        : role
-    );
-    setRoles(updatedRoles);
+      const response = await inviteUser(String(projectId), {
+        username: inviteUsername,
+        email: inviteEmail,
+        role_id: apiRoleId, // Use the actual API role ID (UUID)
+      });
 
-    toast.success(`Invitation sent to ${inviteEmail}`);
-    setInviteDialogOpen(false);
-    setInviteEmail("");
-    setInviteName("");
-    setInviteUsername("");
-    setInviteRoleId("");
+      if (response.success) {
+        toast.success(`User invited successfully`);
+        setInviteDialogOpen(false);
+        setInviteEmail("");
+        setInviteName("");
+        setInviteUsername("");
+        setInviteRoleId("");
+        
+        // Refresh users list
+        fetchUsers();
+      } else {
+        toast.error(response.error?.message || "Failed to invite user");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while inviting user");
+    }
   };
 
-  const handleCreateOrUpdateRole = () => {
+  const handleCreateOrUpdateRole = async () => {
+    if (!projectId) {
+      toast.error("Project ID is required");
+      return;
+    }
+
     if (!roleName || !roleDescription) {
       toast.error("Please fill in role name and description");
       return;
     }
 
     if (editingRole) {
-      // Update existing role
-      const updatedRoles = roles.map(role =>
-        role.id === editingRole.id
-          ? { ...role, name: roleName, description: roleDescription, permissions: selectedPermissions, databaseAccess: selectedDatabaseAccess }
-          : role
-      );
-      setRoles(updatedRoles);
-      toast.success("Role updated successfully");
-    } else {
-      // Create new role
-      const newRole: Role = {
-        id: roles.length + 1,
-        name: roleName,
-        description: roleDescription,
-        permissions: selectedPermissions,
-        databaseAccess: selectedDatabaseAccess,
-        count: 0,
-        color: "bg-accent/80",
-        isSystem: false,
-      };
-      setRoles([...roles, newRole]);
-      toast.success("Role created successfully");
+      // Update existing role - TODO: Implement update API if available
+      toast.error("Role update not yet implemented via API");
+      return;
     }
 
-    setRoleDialogOpen(false);
-    resetRoleDialog();
+    try {
+      // Map selected permissions to permission IDs (UUIDs) from API
+      // selectedPermissions contains permission IDs (UUIDs) from the API permissions
+      const permissionIds: string[] = [];
+      
+      selectedPermissions.forEach(permId => {
+        // Check if it's already a UUID (API permission ID)
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(permId)) {
+          permissionIds.push(permId);
+        } else {
+          // Try to find matching permission by type or name
+          const apiPerm = apiPermissions.find(p => 
+            p.type === permId || 
+            p.id === permId ||
+            p.type.toLowerCase().includes(permId.toLowerCase())
+          );
+          if (apiPerm) {
+            permissionIds.push(apiPerm.id);
+          }
+        }
+      });
+
+      if (permissionIds.length === 0) {
+        toast.error("Please select at least one permission");
+        return;
+      }
+
+      const response = await createRole(String(projectId), {
+        name: roleName,
+        description: roleDescription,
+        permissions: permissionIds,
+      });
+
+      if (response.success && response.data) {
+        toast.success("Role created successfully");
+        setRoleDialogOpen(false);
+        resetRoleDialog();
+        
+        // Refresh roles list
+        fetchRoles();
+      } else {
+        toast.error(response.error?.message || "Failed to create role");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while creating role");
+    }
   };
 
   const resetRoleDialog = () => {
@@ -454,13 +638,46 @@ export function UsersView() {
     return db.tables.includes(tableName);
   };
 
-  const groupedPermissions = allPermissions.reduce((acc, permission) => {
-    if (!acc[permission.category]) {
-      acc[permission.category] = [];
+  // Map API permissions to UI permissions format
+  const mappedPermissions: Permission[] = apiPermissions.map(apiPerm => {
+    // Try to find matching permission in allPermissions by type/name
+    const matchingPerm = allPermissions.find(p => 
+      p.id === apiPerm.type || 
+      p.name.toLowerCase().includes(apiPerm.type.toLowerCase()) ||
+      apiPerm.type.toLowerCase().includes(p.name.toLowerCase())
+    );
+    
+    if (matchingPerm) {
+      return {
+        ...matchingPerm,
+        id: apiPerm.id, // Use API permission ID
+      };
     }
-    acc[permission.category].push(permission);
-    return acc;
-  }, {} as Record<string, Permission[]>);
+    
+    // If no match, create a new permission entry
+    return {
+      id: apiPerm.id,
+      name: apiPerm.type,
+      description: `${apiPerm.type} permission`,
+      category: "General",
+    };
+  });
+
+  const groupedPermissions = mappedPermissions.length > 0 
+    ? mappedPermissions.reduce((acc, permission) => {
+        if (!acc[permission.category]) {
+          acc[permission.category] = [];
+        }
+        acc[permission.category].push(permission);
+        return acc;
+      }, {} as Record<string, Permission[]>)
+    : allPermissions.reduce((acc, permission) => {
+        if (!acc[permission.category]) {
+          acc[permission.category] = [];
+        }
+        acc[permission.category].push(permission);
+        return acc;
+      }, {} as Record<string, Permission[]>);
 
   return (
     <div className="min-h-full bg-background">
@@ -509,7 +726,16 @@ export function UsersView() {
         {activeView === "members" && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">{filteredUsers.length} team members</p>
+              <p className="text-sm text-muted-foreground">
+                {isLoadingUsers ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                    Loading members...
+                  </span>
+                ) : (
+                  `${filteredUsers.length} team members`
+                )}
+              </p>
               <div className="flex items-center gap-3">
                 <div className="relative w-80">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -542,76 +768,124 @@ export function UsersView() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredUsers.map((user) => {
-                    const roleColor = getRoleColor(user.roleId);
-                    
-                    return (
-                      <TableRow key={user.id} className="hover:bg-muted/20">
+                  {isLoadingUsers ? (
+                    // Loading skeleton rows
+                    Array.from({ length: 5 }).map((_, index) => (
+                      <TableRow key={`skeleton-${index}`} className="hover:bg-muted/20">
                         <TableCell>
                           <div className="flex items-center gap-3">
-                            <Avatar className="w-9 h-9 border border-border">
-                              <AvatarFallback className="bg-muted text-muted-foreground text-xs">
-                                {user.avatar}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="text-sm text-foreground">{user.name}</span>
+                            <Skeleton className="w-9 h-9 rounded-full" />
+                            <Skeleton className="h-4 w-32" />
                           </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Mail className="w-3.5 h-3.5" />
-                            {user.email}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Select
-                            value={user.roleId.toString()}
-                            onValueChange={(value) => handleChangeUserRole(user.id, parseInt(value))}
-                          >
-                            <SelectTrigger className="w-36 h-8 border-0 bg-transparent hover:bg-muted text-sm">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {roles.map((role) => (
-                                <SelectItem key={role.id} value={role.id.toString()}>
-                                  {role.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <div className={`w-1.5 h-1.5 rounded-full ${user.status === 'active' ? 'bg-success' : 'bg-muted-foreground/30'}`} />
-                            <span className="text-sm text-muted-foreground capitalize">{user.status}</span>
+                            <Skeleton className="w-3.5 h-3.5 rounded" />
+                            <Skeleton className="h-4 w-40" />
                           </div>
                         </TableCell>
                         <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8">
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => openEditMemberDialog(user)}>
-                                <UserCog className="w-4 h-4 mr-2" />
-                                Edit Details
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem 
-                                className="text-destructive"
-                                onClick={() => handleRemoveUser(user.id)}
-                              >
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                Remove Member
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          <Skeleton className="h-8 w-36" />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Skeleton className="w-1.5 h-1.5 rounded-full" />
+                            <Skeleton className="h-4 w-16" />
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-8 w-8 rounded" />
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
+                    ))
+                  ) : filteredUsers.length === 0 ? (
+                    // Empty state
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-8">
+                        <div className="flex flex-col items-center gap-3">
+                          <UsersIcon className="w-12 h-12 text-muted-foreground/30" />
+                          <div>
+                            <p className="text-sm text-foreground font-medium">No members found</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {searchQuery ? "Try adjusting your search" : "Invite team members to get started"}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    // User rows
+                    filteredUsers.map((user) => {
+                      const roleColor = getRoleColor(user.roleId);
+                      
+                      return (
+                        <TableRow key={user.id} className="hover:bg-muted/20">
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <Avatar className="w-9 h-9 border border-border">
+                                <AvatarFallback className="bg-muted text-muted-foreground text-xs">
+                                  {user.avatar}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="text-sm text-foreground">{user.name}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Mail className="w-3.5 h-3.5" />
+                              {user.email}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={user.roleId.toString()}
+                              onValueChange={(value) => handleChangeUserRole(user.id, parseInt(value))}
+                            >
+                              <SelectTrigger className="w-36 h-8 border-0 bg-transparent hover:bg-muted text-sm">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {roles.map((role) => (
+                                  <SelectItem key={role.id} value={role.id.toString()}>
+                                    {role.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <div className={`w-1.5 h-1.5 rounded-full ${user.status === 'active' ? 'bg-success' : 'bg-muted-foreground/30'}`} />
+                              <span className="text-sm text-muted-foreground capitalize">{user.status}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                  <MoreVertical className="w-4 h-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => openEditMemberDialog(user)}>
+                                  <UserCog className="w-4 h-4 mr-2" />
+                                  Edit Details
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  className="text-destructive"
+                                  onClick={() => handleRemoveUser(user.id)}
+                                >
+                                  <Trash2 className="w-4 h-4 mr-2" />
+                                  Remove Member
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
                 </TableBody>
               </Table>
             </Card>
