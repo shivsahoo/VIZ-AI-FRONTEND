@@ -9,13 +9,15 @@ import { Checkbox } from "../../ui/checkbox";
 import { Textarea } from "../../ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
 import { toast } from "sonner";
+import { createDatabase } from "../../../services/api";
 
 interface DatabaseSetupGuidedProps {
   projectName: string;
+  projectId?: string;
   onComplete: (dbConfig: any) => void;
 }
 
-export function DatabaseSetupGuided({ projectName, onComplete }: DatabaseSetupGuidedProps) {
+export function DatabaseSetupGuided({ projectName, projectId, onComplete }: DatabaseSetupGuidedProps) {
   const [connectionMethod, setConnectionMethod] = useState("form");
   const [isConnecting, setIsConnecting] = useState(false);
   
@@ -33,10 +35,22 @@ export function DatabaseSetupGuided({ projectName, onComplete }: DatabaseSetupGu
   const [useSSL, setUseSSL] = useState(false);
   const [additionalParams, setAdditionalParams] = useState("");
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
+    if (!projectId) {
+      toast.error("Project ID is required to create a database connection");
+      return;
+    }
+
     if (connectionMethod === "string") {
       if (!connectionString.trim()) {
         toast.error("Please enter a connection string");
+        return;
+      }
+      
+      // Extract connection name from connection string if not provided separately
+      // For connection string method, we still need a connection name
+      if (!connectionName.trim()) {
+        toast.error("Please provide a connection name");
         return;
       }
     } else {
@@ -48,19 +62,70 @@ export function DatabaseSetupGuided({ projectName, onComplete }: DatabaseSetupGu
 
     setIsConnecting(true);
 
-    // Simulate connection process
-    setTimeout(() => {
-      const dbConfig = connectionMethod === "string" 
-        ? { connectionString, method: "string" }
-        : { connectionName, dbType, host, port, database, username, password, useSSL, additionalParams, method: "form" };
-
-      toast.success("Database connected successfully!");
+    try {
+      let requestData: any;
       
-      // Wait a bit before completing to show success state
-      setTimeout(() => {
+      if (connectionMethod === "string") {
+        // Use connection string method
+        requestData = {
+          connectionString: connectionString.trim(),
+          connectionName: connectionName.trim(),
+          consentGiven: true,
+        };
+      } else {
+        // Use form fields method
+        // Only include port if it's provided and not empty
+        const portValue = port && port.trim() ? port.trim() : undefined;
+        
+        requestData = {
+          connectionName: connectionName.trim(),
+          dbType: dbType,
+          host: host.trim(),
+          ...(portValue && { port: portValue }),
+          database: database.trim(),
+          username: username.trim(),
+          password: password || '',
+          consentGiven: true,
+        };
+      }
+
+      // Call the API to create the database connection
+      const response = await createDatabase(projectId, requestData);
+
+      if (response.success && response.data) {
+        const dbConfig = connectionMethod === "string" 
+          ? { 
+              connectionString, 
+              method: "string",
+              id: response.data.id,
+              name: response.data.name,
+            }
+          : { 
+              connectionName, 
+              dbType, 
+              host, 
+              port, 
+              database, 
+              username, 
+              password, 
+              useSSL, 
+              additionalParams, 
+              method: "form",
+              id: response.data.id,
+              name: response.data.name,
+            };
+
+        toast.success("Database connected successfully!");
         onComplete(dbConfig);
-      }, 500);
-    }, 1500);
+      } else {
+        throw new Error(response.error?.message || "Failed to create database connection");
+      }
+    } catch (error: any) {
+      console.error("Error creating database connection:", error);
+      toast.error(error.message || "Failed to create database connection. Please check your credentials and try again.");
+    } finally {
+      setIsConnecting(false);
+    }
   };
 
   return (
@@ -75,7 +140,24 @@ export function DatabaseSetupGuided({ projectName, onComplete }: DatabaseSetupGu
         </p>
       </div>
 
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-2xl mx-auto space-y-6">
+        {/* Connection Name - Always visible */}
+        <div className="space-y-2">
+          <Label htmlFor="connectionName">
+            Connection Name <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            id="connectionName"
+            placeholder="my-analytics-db"
+            value={connectionName}
+            onChange={(e) => setConnectionName(e.target.value)}
+            className="h-12"
+          />
+          <p className="text-xs text-muted-foreground">
+            A friendly name to identify this database connection
+          </p>
+        </div>
+
         <Tabs value={connectionMethod} onValueChange={setConnectionMethod} className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-8">
             <TabsTrigger value="form" className="flex items-center gap-2">
@@ -91,18 +173,6 @@ export function DatabaseSetupGuided({ projectName, onComplete }: DatabaseSetupGu
           {/* Connection Form Tab */}
           <TabsContent value="form" className="space-y-6">
             <div className="grid grid-cols-2 gap-6">
-              <div className="col-span-2 space-y-2">
-                <Label htmlFor="connectionName">
-                  Connection Name <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="connectionName"
-                  placeholder="my-analytics-db"
-                  value={connectionName}
-                  onChange={(e) => setConnectionName(e.target.value)}
-                  className="h-12"
-                />
-              </div>
 
               <div className="space-y-2">
                 <Label htmlFor="dbType">
@@ -232,7 +302,9 @@ export function DatabaseSetupGuided({ projectName, onComplete }: DatabaseSetupGu
           <TabsContent value="string" className="space-y-6">
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="connectionString">Connection String</Label>
+                <Label htmlFor="connectionString">
+                  Connection String <span className="text-destructive">*</span>
+                </Label>
                 <Textarea
                   id="connectionString"
                   placeholder="postgresql://username:password@localhost:5432/database&#10;or&#10;mysql://username:password@localhost:3306/database"
@@ -240,6 +312,9 @@ export function DatabaseSetupGuided({ projectName, onComplete }: DatabaseSetupGu
                   onChange={(e) => setConnectionString(e.target.value)}
                   className="min-h-[160px] font-mono text-sm"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Enter your full database connection string
+                </p>
               </div>
 
               <div className="rounded-xl bg-muted/30 p-6 space-y-3 border border-border">

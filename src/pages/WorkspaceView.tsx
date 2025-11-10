@@ -214,7 +214,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
       case 'databases':
         return <DatabasesView projectId={projectId} />;
       case 'insights':
-        return <InsightsView />;
+        return <InsightsView projectId={projectId} />;
       case 'team':
         return <UsersView projectId={projectId} />;
       default:

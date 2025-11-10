@@ -26,6 +26,7 @@ import { Card } from "../../ui/card";
 import { Button } from "../../ui/button";
 
 interface DatabaseConnectionFlowProps {
+  projectId?: string;
   onComplete: (connectionData: {
     database: any;
     selectedTables: string[];
@@ -34,7 +35,7 @@ interface DatabaseConnectionFlowProps {
   onCancel: () => void;
 }
 
-export function DatabaseConnectionFlow({ onComplete, onCancel }: DatabaseConnectionFlowProps) {
+export function DatabaseConnectionFlow({ projectId, onComplete, onCancel }: DatabaseConnectionFlowProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const [databaseConfig, setDatabaseConfig] = useState<any>(null);
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
@@ -153,6 +154,7 @@ export function DatabaseConnectionFlow({ onComplete, onCancel }: DatabaseConnect
             >
               <DatabaseSetupGuided
                 projectName="your workspace"
+                projectId={projectId}
                 onComplete={handleDatabaseComplete}
               />
             </motion.div>

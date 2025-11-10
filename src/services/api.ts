@@ -910,13 +910,13 @@ export const addChartToDashboard = async (data: {
       requestBody.report = data.report;
     }
 
-    // Only include relevance if it has a value (not empty string)
-    // Backend expects numeric value or null, not empty string
+    // Only include relevance if it has a valid numeric value
+    // Convert string to number if provided, otherwise omit the field
     if (data.relevance && data.relevance.trim() !== '') {
-      requestBody.relevance = data.relevance;
-    } else {
-      // Send null instead of empty string for relevance
-      requestBody.relevance = null;
+      const relevanceValue = parseFloat(data.relevance);
+      if (!isNaN(relevanceValue)) {
+        requestBody.relevance = relevanceValue;
+      }
     }
 
     const response = await apiRequest<{
@@ -1275,32 +1275,90 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
 
 /**
  * Create database connection
+ * 
+ * @param projectId - The project ID
+ * @param data - Database connection data. Can include:
+ *   - connectionString: Full connection string (e.g., "postgresql://user:pass@host:port/db")
+ *   - OR form fields: connectionName, dbType, host, port, database, username, password
  */
-export const createDatabase = async (projectId: string, data: Partial<Database>): Promise<ApiResponse<Database>> => {
+export const createDatabase = async (
+  projectId: string, 
+  data: {
+    connectionString?: string;
+    connectionName?: string;
+    dbType?: string;
+    host?: string;
+    port?: number | string;
+    database?: string;
+    username?: string;
+    password?: string;
+    consentGiven?: boolean;
+  }
+): Promise<ApiResponse<Database>> => {
   try {
+    // Prepare request body based on whether connection string or form fields are provided
+    const requestBody: any = {
+      connection_name: data.connectionName || '',
+    };
+
+    if (data.connectionString) {
+      // Use connection string method
+      requestBody.connection_string = data.connectionString;
+      // Extract db_type from connection string if not provided
+      if (data.connectionString.startsWith('postgresql://')) {
+        requestBody.db_type = 'postgres';
+      } else if (data.connectionString.startsWith('mysql://')) {
+        requestBody.db_type = 'mysql';
+      }
+    } else {
+      // Use form fields method
+      // Backend expects "postgres" not "postgresql", but it lowercases and checks for "postgres"
+      const dbType = data.dbType?.toLowerCase() === 'postgresql' ? 'postgres' : (data.dbType?.toLowerCase() || 'postgres');
+      
+      requestBody.db_type = dbType;
+      
+      // Construct host with port if port is provided and different from default
+      let hostWithPort = data.host || '';
+      if (data.port) {
+        const portStr = String(data.port).trim();
+        if (portStr) {
+          const portNum = parseInt(portStr);
+          if (!isNaN(portNum)) {
+            const defaultPort = dbType === 'postgres' ? 5432 : 3306;
+            
+            // Only append port if it's different from default and not already in host
+            if (portNum !== defaultPort && !hostWithPort.includes(':')) {
+              hostWithPort = `${hostWithPort}:${portNum}`;
+            }
+          }
+        }
+      }
+      
+      requestBody.host = hostWithPort;
+      requestBody.db_name = data.database || '';
+      requestBody.name = data.username || ''; // Backend uses 'name' field for username
+      requestBody.password = data.password || '';
+    }
+
+    if (data.consentGiven !== undefined) {
+      requestBody.consent_given = data.consentGiven;
+    }
+
     const response = await apiRequest<{
       db_entry_id: string;
     }>(`/api/v1/backend/database/${projectId}`, {
       method: 'POST',
-      body: JSON.stringify({
-        connection_name: data.name,
-        db_type: data.type || 'postgresql',
-        host: data.host,
-        db_name: data.database,
-        username: data.username,
-        password: '', // Will need to handle securely
-        connection_string: data.host ? `postgresql://${data.username}@${data.host}:${data.port}/${data.database}` : undefined,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     return {
       success: true,
       data: {
         id: response.db_entry_id,
-        name: data.name || 'New Database',
-        type: data.type || 'postgresql',
+        name: data.connectionName || 'New Database',
+        type: data.dbType || 'postgresql',
         host: data.host || '',
-        port: data.port || 5432,
+        port: typeof data.port === 'number' ? data.port : (data.port ? parseInt(data.port) : 5432),
         database: data.database || '',
         username: data.username || '',
         status: 'connected' as const,
@@ -1440,6 +1498,165 @@ export const generateInsights = async (chartId: string, analysisType: string): P
       error: {
         code: 'GENERATE_INSIGHTS_FAILED',
         message: error.message || 'Failed to generate insights',
+      },
+    };
+  }
+};
+
+/**
+ * Business Insights Types
+ */
+export interface BusinessInsightsRequest {
+  database_connection_id: string;
+}
+
+export interface Recommendation {
+  priority: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+}
+
+export interface KeyMetricAnalysis {
+  kpi_name: string;
+  value_interpretation: string;
+  business_impact: string;
+}
+
+export interface BusinessInsights {
+  executive_summary: string;
+  key_metrics: KeyMetricAnalysis[];
+  insights_and_patterns: string[];
+  recommendations: Recommendation[];
+  areas_of_concern: string[];
+}
+
+export interface BusinessInsightsResponse {
+  message: string;
+  database_name: string;
+  database_type?: string;
+  kpis_analyzed: number;
+  kpi_queries: Array<{
+    kpi_title: string;
+    description: string;
+    sql_query: string;
+  }>;
+  query_results: Array<{
+    kpi_title: string;
+    description: string;
+    query: string;
+    success: boolean;
+    data: any[];
+    row_count: number;
+    error?: string;
+  }>;
+  insights: BusinessInsights;
+}
+
+export interface DatabaseInsightSummary {
+  database_id: string;
+  database_name: string;
+  database_type: string;
+  status: 'success' | 'failed' | 'skipped';
+  kpis_analyzed?: number;
+  successful_queries?: number;
+  insights?: BusinessInsights;
+  error?: string;
+}
+
+export interface StrategicPriority {
+  rank: number;
+  title: string;
+  description: string;
+  impact: 'high' | 'medium' | 'low';
+}
+
+export interface RiskAssessment {
+  critical_risks: string[];
+  moderate_risks: string[];
+}
+
+export interface Opportunity {
+  title: string;
+  description: string;
+  potential_impact: string;
+}
+
+export interface ConsolidatedInsights {
+  overall_health_score: string;
+  health_assessment: string;
+  cross_database_patterns: string[];
+  strategic_priorities: StrategicPriority[];
+  risk_assessment: RiskAssessment;
+  opportunities: Opportunity[];
+}
+
+export interface ProjectInsightsResponse {
+  message: string;
+  project_id: string;
+  project_name: string;
+  total_databases_analyzed: number;
+  successful_analyses: number;
+  database_insights: DatabaseInsightSummary[];
+  consolidated_insights: ConsolidatedInsights;
+}
+
+/**
+ * Generate business insights for a single database connection
+ */
+export const generateBusinessInsights = async (
+  databaseConnectionId: string
+): Promise<ApiResponse<BusinessInsightsResponse>> => {
+  try {
+    const response = await apiRequest<BusinessInsightsResponse>(
+      '/api/v1/backend/business-insights',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          database_connection_id: databaseConnectionId,
+        }),
+      }
+    );
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GENERATE_BUSINESS_INSIGHTS_FAILED',
+        message: error.message || 'Failed to generate business insights',
+      },
+    };
+  }
+};
+
+/**
+ * Generate project-wide business insights for all databases in a project
+ */
+export const generateProjectInsights = async (
+  projectId: string
+): Promise<ApiResponse<ProjectInsightsResponse>> => {
+  try {
+    const response = await apiRequest<ProjectInsightsResponse>(
+      `/api/v1/backend/projects/${projectId}/business-insights`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }
+    );
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GENERATE_PROJECT_INSIGHTS_FAILED',
+        message: error.message || 'Failed to generate project insights',
       },
     };
   }

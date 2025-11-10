@@ -316,6 +316,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
         {/* Database Connection Flow */}
         {showConnectionFlow && (
           <DatabaseConnectionFlow
+            projectId={projectId ? String(projectId) : undefined}
             onComplete={handleConnectionFlowComplete}
             onCancel={() => setShowConnectionFlow(false)}
           />

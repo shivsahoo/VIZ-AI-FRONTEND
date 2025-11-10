@@ -1,67 +1,355 @@
-import { Lightbulb, TrendingUp, TrendingDown, AlertCircle, Plus, Filter, Sparkles } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Lightbulb, TrendingUp, TrendingDown, AlertCircle, Filter, Sparkles, Loader2, Database } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { 
+  generateProjectInsights, 
+  generateBusinessInsights,
+  getDatabases,
+  type ProjectInsightsResponse,
+  type BusinessInsightsResponse,
+  type Database as ApiDatabase,
+} from "../services/api";
+import { toast } from "sonner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
 
-const mockInsights = [
-  {
-    id: 1,
-    title: "Revenue Spike Detected",
-    description: "Revenue increased by 34% in the last week, driven primarily by enterprise customers. This is 15% above the normal growth rate.",
-    type: "positive",
-    category: "Revenue",
-    timestamp: "2 hours ago",
-    impact: "High"
-  },
-  {
-    id: 2,
-    title: "Customer Churn Rate Increasing",
-    description: "Monthly churn rate has risen to 5.2%, up from the average of 3.8%. Primary reason cited in exit surveys is pricing concerns.",
-    type: "negative",
-    category: "Retention",
-    timestamp: "5 hours ago",
-    impact: "High"
-  },
-  {
-    id: 3,
-    title: "New Market Opportunity",
-    description: "Analysis shows 23% of traffic comes from Southeast Asia, but only 8% convert. Localization could unlock significant growth.",
-    type: "opportunity",
-    category: "Growth",
-    timestamp: "1 day ago",
-    impact: "Medium"
-  },
-  {
-    id: 4,
-    title: "Product Feature Adoption",
-    description: "The new analytics dashboard has 78% adoption rate among premium users, exceeding the 50% target by a significant margin.",
-    type: "positive",
-    category: "Product",
-    timestamp: "1 day ago",
-    impact: "Medium"
-  },
-  {
-    id: 5,
-    title: "Marketing Campaign Performance",
-    description: "Email campaign ROI dropped to 2.1x from usual 3.5x. Subject line A/B testing suggests personalization issues.",
-    type: "negative",
-    category: "Marketing",
-    timestamp: "2 days ago",
-    impact: "Low"
-  },
-  {
-    id: 6,
-    title: "Sales Velocity Improving",
-    description: "Average sales cycle decreased from 45 to 38 days. Implementation of automated follow-ups showing strong results.",
-    type: "positive",
-    category: "Sales",
-    timestamp: "2 days ago",
-    impact: "Medium"
-  }
-];
+interface Insight {
+  id: string;
+  title: string;
+  description: string;
+  type: "positive" | "negative" | "opportunity";
+  category: string;
+  timestamp: string;
+  impact: "High" | "Medium" | "Low";
+  source?: string; // Database name or "Project-wide"
+}
 
-export function InsightsView() {
+interface InsightsViewProps {
+  projectId?: string | number;
+}
+
+export function InsightsView({ projectId }: InsightsViewProps) {
+  const [insights, setInsights] = useState<Insight[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [databases, setDatabases] = useState<ApiDatabase[]>([]);
+  const [selectedDatabase, setSelectedDatabase] = useState<string>("");
+  const [showGenerateDialog, setShowGenerateDialog] = useState(false);
+  const [activeTab, setActiveTab] = useState("all");
+  const [filteredInsights, setFilteredInsights] = useState<Insight[]>([]);
+
+  // Fetch databases when projectId is available
+  useEffect(() => {
+    if (projectId) {
+      fetchDatabases();
+    }
+  }, [projectId]);
+
+  // Filter insights based on active tab
+  useEffect(() => {
+    let filtered = insights;
+    
+    switch (activeTab) {
+      case "recent":
+        // Show most recent insights (first 10)
+        filtered = insights.slice(0, 10);
+        break;
+      case "trending":
+        // Show positive insights (trending)
+        filtered = insights.filter(i => i.type === "positive");
+        break;
+      case "anomalies":
+        // Show negative insights (anomalies/concerns)
+        filtered = insights.filter(i => i.type === "negative");
+        break;
+      default:
+        filtered = insights;
+    }
+    
+    setFilteredInsights(filtered);
+  }, [activeTab, insights]);
+
+  const fetchDatabases = async () => {
+    if (!projectId) return;
+    
+    try {
+      const response = await getDatabases(String(projectId));
+      if (response.success && response.data) {
+        setDatabases(response.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch databases:", error);
+    }
+  };
+
+  const transformProjectInsights = (data: ProjectInsightsResponse): Insight[] => {
+    const transformed: Insight[] = [];
+    let idCounter = 1;
+
+    // Transform consolidated insights (project-wide)
+    if (data.consolidated_insights) {
+      const consolidated = data.consolidated_insights;
+      
+      // Strategic priorities as opportunities
+      consolidated.strategic_priorities?.forEach((priority) => {
+        transformed.push({
+          id: `priority-${idCounter++}`,
+          title: priority.title,
+          description: priority.description,
+          type: "opportunity",
+          category: "Strategic Priority",
+          timestamp: "Just now",
+          impact: priority.impact === "high" ? "High" : priority.impact === "medium" ? "Medium" : "Low",
+          source: "Project-wide",
+        });
+      });
+
+      // Opportunities
+      consolidated.opportunities?.forEach((opportunity) => {
+        transformed.push({
+          id: `opportunity-${idCounter++}`,
+          title: opportunity.title,
+          description: `${opportunity.description} - Potential Impact: ${opportunity.potential_impact}`,
+          type: "opportunity",
+          category: "Opportunity",
+          timestamp: "Just now",
+          impact: "Medium",
+          source: "Project-wide",
+        });
+      });
+
+      // Critical risks as negative insights
+      consolidated.risk_assessment?.critical_risks?.forEach((risk) => {
+        transformed.push({
+          id: `risk-critical-${idCounter++}`,
+          title: risk,
+          description: `Critical risk identified: ${risk}`,
+          type: "negative",
+          category: "Risk",
+          timestamp: "Just now",
+          impact: "High",
+          source: "Project-wide",
+        });
+      });
+
+      // Moderate risks
+      consolidated.risk_assessment?.moderate_risks?.forEach((risk) => {
+        transformed.push({
+          id: `risk-moderate-${idCounter++}`,
+          title: risk,
+          description: `Moderate risk identified: ${risk}`,
+          type: "negative",
+          category: "Risk",
+          timestamp: "Just now",
+          impact: "Medium",
+          source: "Project-wide",
+        });
+      });
+    }
+
+    // Transform database-specific insights
+    data.database_insights?.forEach((dbInsight) => {
+      if (dbInsight.insights) {
+        const insights = dbInsight.insights;
+        
+        // Recommendations
+        insights.recommendations?.forEach((rec) => {
+          transformed.push({
+            id: `rec-${dbInsight.database_id}-${idCounter++}`,
+            title: rec.title,
+            description: rec.description,
+            type: rec.priority === "high" ? "opportunity" : "positive",
+            category: "Recommendation",
+            timestamp: "Just now",
+            impact: rec.priority === "high" ? "High" : rec.priority === "medium" ? "Medium" : "Low",
+            source: dbInsight.database_name,
+          });
+        });
+
+        // Areas of concern as negative insights
+        insights.areas_of_concern?.forEach((concern) => {
+          transformed.push({
+            id: `concern-${dbInsight.database_id}-${idCounter++}`,
+            title: concern,
+            description: `Area requiring attention: ${concern}`,
+            type: "negative",
+            category: "Concern",
+            timestamp: "Just now",
+            impact: "High",
+            source: dbInsight.database_name,
+          });
+        });
+
+        // Key metrics as positive/negative based on interpretation
+        insights.key_metrics?.forEach((metric) => {
+          const isPositive = metric.value_interpretation?.toLowerCase().includes("good") ||
+                           metric.value_interpretation?.toLowerCase().includes("excellent") ||
+                           metric.value_interpretation?.toLowerCase().includes("improving");
+          
+          transformed.push({
+            id: `metric-${dbInsight.database_id}-${idCounter++}`,
+            title: metric.kpi_name,
+            description: `${metric.value_interpretation} - ${metric.business_impact}`,
+            type: isPositive ? "positive" : "negative",
+            category: "Key Metric",
+            timestamp: "Just now",
+            impact: "Medium",
+            source: dbInsight.database_name,
+          });
+        });
+
+        // Insights and patterns
+        insights.insights_and_patterns?.forEach((pattern) => {
+          transformed.push({
+            id: `pattern-${dbInsight.database_id}-${idCounter++}`,
+            title: pattern.substring(0, 60) + (pattern.length > 60 ? "..." : ""),
+            description: pattern,
+            type: "opportunity",
+            category: "Pattern",
+            timestamp: "Just now",
+            impact: "Medium",
+            source: dbInsight.database_name,
+          });
+        });
+      }
+    });
+
+    return transformed;
+  };
+
+  const transformBusinessInsights = (data: BusinessInsightsResponse): Insight[] => {
+    const transformed: Insight[] = [];
+    let idCounter = 1;
+
+    const insights = data.insights;
+
+    // Recommendations
+    insights.recommendations?.forEach((rec) => {
+      transformed.push({
+        id: `rec-${idCounter++}`,
+        title: rec.title,
+        description: rec.description,
+        type: rec.priority === "high" ? "opportunity" : "positive",
+        category: "Recommendation",
+        timestamp: "Just now",
+        impact: rec.priority === "high" ? "High" : rec.priority === "medium" ? "Medium" : "Low",
+        source: data.database_name,
+      });
+    });
+
+    // Areas of concern
+    insights.areas_of_concern?.forEach((concern) => {
+      transformed.push({
+        id: `concern-${idCounter++}`,
+        title: concern,
+        description: `Area requiring attention: ${concern}`,
+        type: "negative",
+        category: "Concern",
+        timestamp: "Just now",
+        impact: "High",
+        source: data.database_name,
+      });
+    });
+
+    // Key metrics
+    insights.key_metrics?.forEach((metric) => {
+      const isPositive = metric.value_interpretation?.toLowerCase().includes("good") ||
+                       metric.value_interpretation?.toLowerCase().includes("excellent") ||
+                       metric.value_interpretation?.toLowerCase().includes("improving");
+      
+      transformed.push({
+        id: `metric-${idCounter++}`,
+        title: metric.kpi_name,
+        description: `${metric.value_interpretation} - ${metric.business_impact}`,
+        type: isPositive ? "positive" : "negative",
+        category: "Key Metric",
+        timestamp: "Just now",
+        impact: "Medium",
+        source: data.database_name,
+      });
+    });
+
+    // Insights and patterns
+    insights.insights_and_patterns?.forEach((pattern) => {
+      transformed.push({
+        id: `pattern-${idCounter++}`,
+        title: pattern.substring(0, 60) + (pattern.length > 60 ? "..." : ""),
+        description: pattern,
+        type: "opportunity",
+        category: "Pattern",
+        timestamp: "Just now",
+        impact: "Medium",
+        source: data.database_name,
+      });
+    });
+
+    return transformed;
+  };
+
+  const handleGenerateInsights = async () => {
+    if (!projectId) {
+      toast.error("Project ID is required to generate insights");
+      return;
+    }
+
+    setIsGenerating(true);
+    setShowGenerateDialog(false);
+
+    try {
+      let response;
+      
+      if (selectedDatabase && selectedDatabase !== "all") {
+        // Generate insights for a specific database
+        response = await generateBusinessInsights(selectedDatabase);
+        if (response.success && response.data) {
+          const transformed = transformBusinessInsights(response.data);
+          setInsights(prev => [...transformed, ...prev]);
+          toast.success(`Generated ${transformed.length} insights from ${response.data.database_name}`);
+        } else {
+          toast.error(response.error?.message || "Failed to generate insights");
+        }
+      } else {
+        // Generate project-wide insights
+        response = await generateProjectInsights(String(projectId));
+        if (response.success && response.data) {
+          const transformed = transformProjectInsights(response.data);
+          setInsights(prev => [...transformed, ...prev]);
+          toast.success(
+            `Generated ${transformed.length} insights from ${response.data.successful_analyses} databases`
+          );
+        } else {
+          toast.error(response.error?.message || "Failed to generate project insights");
+        }
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while generating insights");
+    } finally {
+      setIsGenerating(false);
+      setSelectedDatabase("");
+    }
+  };
+
+  // Calculate stats
+  const totalInsights = insights.length;
+  const positiveTrends = insights.filter(i => i.type === "positive").length;
+  const requiresAttention = insights.filter(i => i.type === "negative").length;
+  const anomalies = insights.filter(i => i.type === "negative" && i.impact === "High").length;
+
   return (
     <div className="px-12 py-10">
       <div className="max-w-[1600px] mx-auto">
@@ -72,81 +360,124 @@ export function InsightsView() {
             <p className="text-muted-foreground">Automatic discoveries and anomalies detected in your data</p>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline">
+            <Button 
+              variant="outline"
+              onClick={() => setShowGenerateDialog(true)}
+              disabled={!projectId || isGenerating}
+            >
               <Filter className="w-4 h-4 mr-2" />
               Filter
             </Button>
-            <Button className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all">
-              <Sparkles className="w-4 h-4 mr-2" />
-              Generate Insights
+            <Button 
+              className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all"
+              onClick={() => setShowGenerateDialog(true)}
+              disabled={!projectId || isGenerating}
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Generate Insights
+                </>
+              )}
             </Button>
           </div>
         </div>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <Card className="p-6 border border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center">
-                  <Lightbulb className="w-6 h-6 text-accent" />
-                </div>
-                <div>
-                  <p className="text-2xl text-foreground mb-1">24</p>
-                  <p className="text-sm text-muted-foreground">Total Insights</p>
-                </div>
+          <Card className="p-6 border border-border">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center">
+                <Lightbulb className="w-6 h-6 text-accent" />
               </div>
-            </Card>
+              <div>
+                <p className="text-2xl text-foreground mb-1">{totalInsights}</p>
+                <p className="text-sm text-muted-foreground">Total Insights</p>
+              </div>
+            </div>
+          </Card>
 
-            <Card className="p-6 border border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-success/10 flex items-center justify-center">
-                  <TrendingUp className="w-6 h-6 text-success" />
-                </div>
-                <div>
-                  <p className="text-2xl text-foreground mb-1">8</p>
-                  <p className="text-sm text-muted-foreground">Positive Trends</p>
-                </div>
+          <Card className="p-6 border border-border">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-success/10 flex items-center justify-center">
+                <TrendingUp className="w-6 h-6 text-success" />
               </div>
-            </Card>
+              <div>
+                <p className="text-2xl text-foreground mb-1">{positiveTrends}</p>
+                <p className="text-sm text-muted-foreground">Positive Trends</p>
+              </div>
+            </div>
+          </Card>
 
-            <Card className="p-6 border border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-destructive/10 flex items-center justify-center">
-                  <TrendingDown className="w-6 h-6 text-destructive" />
-                </div>
-                <div>
-                  <p className="text-2xl text-foreground mb-1">3</p>
-                  <p className="text-sm text-muted-foreground">Requires Attention</p>
-                </div>
+          <Card className="p-6 border border-border">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-destructive/10 flex items-center justify-center">
+                <TrendingDown className="w-6 h-6 text-destructive" />
               </div>
-            </Card>
+              <div>
+                <p className="text-2xl text-foreground mb-1">{requiresAttention}</p>
+                <p className="text-sm text-muted-foreground">Requires Attention</p>
+              </div>
+            </div>
+          </Card>
 
-            <Card className="p-6 border border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-chart-2/10 flex items-center justify-center">
-                  <AlertCircle className="w-6 h-6 text-chart-2" />
-                </div>
-                <div>
-                  <p className="text-2xl text-foreground mb-1">5</p>
-                  <p className="text-sm text-muted-foreground">Anomalies Detected</p>
-                </div>
+          <Card className="p-6 border border-border">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-chart-2/10 flex items-center justify-center">
+                <AlertCircle className="w-6 h-6 text-chart-2" />
               </div>
-            </Card>
+              <div>
+                <p className="text-2xl text-foreground mb-1">{anomalies}</p>
+                <p className="text-sm text-muted-foreground">Anomalies Detected</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Filter Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
+          <TabsList>
+            <TabsTrigger value="all">All Insights</TabsTrigger>
+            <TabsTrigger value="recent">Recent</TabsTrigger>
+            <TabsTrigger value="trending">Trending</TabsTrigger>
+            <TabsTrigger value="anomalies">Anomalies</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {/* Insights Grid */}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
           </div>
-
-          {/* Filter Tabs */}
-          <Tabs defaultValue="all" className="mb-6">
-            <TabsList>
-              <TabsTrigger value="all">All Insights</TabsTrigger>
-              <TabsTrigger value="recent">Recent</TabsTrigger>
-              <TabsTrigger value="trending">Trending</TabsTrigger>
-              <TabsTrigger value="anomalies">Anomalies</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          {/* Insights Grid */}
+        ) : filteredInsights.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
+              <Lightbulb className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <h3 className="text-lg text-foreground mb-2">No insights yet</h3>
+            <p className="text-sm text-muted-foreground mb-6">
+              {projectId 
+                ? "Generate insights to discover patterns in your data" 
+                : "Select a project to generate insights"}
+            </p>
+            {projectId && (
+              <Button 
+                className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
+                onClick={() => setShowGenerateDialog(true)}
+              >
+                <Sparkles className="w-4 h-4 mr-2" />
+                Generate Insights
+              </Button>
+            )}
+          </div>
+        ) : (
           <div className="space-y-4">
-            {mockInsights.map((insight) => {
+            {filteredInsights.map((insight) => {
               const iconColor = 
                 insight.type === 'positive' ? 'text-success' :
                 insight.type === 'negative' ? 'text-destructive' :
@@ -180,15 +511,18 @@ export function InsightsView() {
                             {insight.description}
                           </p>
                         </div>
-                        <Button variant="outline" size="sm" className="ml-4 flex-shrink-0">
-                          Add to Dashboard
-                        </Button>
                       </div>
 
                       <div className="flex items-center gap-3 text-sm">
                         <Badge variant="outline" className="border-border">
                           {insight.category}
                         </Badge>
+                        {insight.source && (
+                          <Badge variant="outline" className="border-border">
+                            <Database className="w-3 h-3 mr-1" />
+                            {insight.source}
+                          </Badge>
+                        )}
                         <Badge 
                           className={
                             insight.impact === 'High' 
@@ -208,20 +542,64 @@ export function InsightsView() {
               );
             })}
           </div>
-
-        {/* Empty State */}
-        {mockInsights.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20">
-            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
-              <Lightbulb className="w-8 h-8 text-muted-foreground" />
-            </div>
-            <h3 className="text-lg text-foreground mb-2">No insights yet</h3>
-            <p className="text-sm text-muted-foreground mb-6">Ask VizAI to discover patterns in your data</p>
-            <Button className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white">
-              Ask VizAI
-            </Button>
-          </div>
         )}
+
+        {/* Generate Insights Dialog */}
+        <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Generate Insights</DialogTitle>
+              <DialogDescription>
+                Choose to generate insights for a specific database or all databases in the project.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Select Database</label>
+                <Select value={selectedDatabase} onValueChange={setSelectedDatabase}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All databases (Project-wide)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All databases (Project-wide)</SelectItem>
+                    {databases.map((db) => (
+                      <SelectItem key={db.id} value={db.id}>
+                        {db.name} ({db.type})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {selectedDatabase === "all" || !selectedDatabase
+                    ? "Project-wide insights analyze all databases and provide consolidated strategic insights."
+                    : "Database-specific insights provide focused analysis for the selected database."}
+                </p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setShowGenerateDialog(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleGenerateInsights}
+                  disabled={isGenerating}
+                  className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      Generate
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
