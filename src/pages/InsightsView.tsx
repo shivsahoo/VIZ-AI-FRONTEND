@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Lightbulb, TrendingUp, TrendingDown, AlertCircle, Filter, Sparkles, Loader2, Database } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -48,17 +48,11 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [databases, setDatabases] = useState<ApiDatabase[]>([]);
-  const [selectedDatabase, setSelectedDatabase] = useState<string>("");
+  const [selectedDatabase, setSelectedDatabase] = useState<string>("all");
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
   const [activeTab, setActiveTab] = useState("all");
   const [filteredInsights, setFilteredInsights] = useState<Insight[]>([]);
 
-  // Fetch databases when projectId is available
-  useEffect(() => {
-    if (projectId) {
-      fetchDatabases();
-    }
-  }, [projectId]);
 
   // Filter insights based on active tab
   useEffect(() => {
@@ -84,18 +78,43 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     setFilteredInsights(filtered);
   }, [activeTab, insights]);
 
-  const fetchDatabases = async () => {
+  const fetchDatabases = useCallback(async () => {
     if (!projectId) return;
     
     try {
       const response = await getDatabases(String(projectId));
       if (response.success && response.data) {
+        // Backend returns all databases for the project
         setDatabases(response.data);
+      } else if (response.error) {
+        console.error("Failed to fetch databases:", response.error);
+        // Show user-friendly message if no databases found
+        if (response.error.message?.includes("No database connections")) {
+          toast.info("No database connections found. Please add a database connection first.");
+        }
       }
     } catch (error) {
       console.error("Failed to fetch databases:", error);
     }
-  };
+  }, [projectId]);
+
+  // Fetch databases when projectId is available
+  useEffect(() => {
+    if (projectId) {
+      fetchDatabases();
+    }
+  }, [projectId, fetchDatabases]);
+
+  // Reset selected database to "all" when dialog opens
+  useEffect(() => {
+    if (showGenerateDialog) {
+      setSelectedDatabase("all");
+      // Refresh databases when dialog opens
+      if (projectId) {
+        fetchDatabases();
+      }
+    }
+  }, [showGenerateDialog, projectId, fetchDatabases]);
 
   const transformProjectInsights = (data: ProjectInsightsResponse): Insight[] => {
     const transformed: Insight[] = [];
@@ -333,14 +352,20 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             `Generated ${transformed.length} insights from ${response.data.successful_analyses} databases`
           );
         } else {
-          toast.error(response.error?.message || "Failed to generate project insights");
+          const errorMessage = response.error?.message || "Failed to generate project insights";
+          // Check if the error is about no database connections
+          if (errorMessage.includes("No database connections found")) {
+            toast.error("No database connections found for this project. Please add a database connection first.");
+          } else {
+            toast.error(errorMessage);
+          }
         }
       }
     } catch (error: any) {
       toast.error(error.message || "An error occurred while generating insights");
     } finally {
       setIsGenerating(false);
-      setSelectedDatabase("");
+      setSelectedDatabase("all");
     }
   };
 
@@ -562,17 +587,25 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All databases (Project-wide)</SelectItem>
-                    {databases.map((db) => (
-                      <SelectItem key={db.id} value={db.id}>
-                        {db.name} ({db.type})
+                    {databases.length === 0 ? (
+                      <SelectItem value="none" disabled>
+                        No databases available
                       </SelectItem>
-                    ))}
+                    ) : (
+                      databases.map((db) => (
+                        <SelectItem key={db.id} value={db.id}>
+                          {db.name} ({db.type})
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {selectedDatabase === "all" || !selectedDatabase
+                  {selectedDatabase === "all"
                     ? "Project-wide insights analyze all databases and provide consolidated strategic insights."
-                    : "Database-specific insights provide focused analysis for the selected database."}
+                    : selectedDatabase && databases.find(db => db.id === selectedDatabase)
+                    ? `Database-specific insights provide focused analysis for ${databases.find(db => db.id === selectedDatabase)?.name}.`
+                    : "Select a database or choose project-wide analysis."}
                 </p>
               </div>
               <div className="flex justify-end gap-2">
@@ -581,7 +614,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                 </Button>
                 <Button 
                   onClick={handleGenerateInsights}
-                  disabled={isGenerating}
+                  disabled={isGenerating || (selectedDatabase !== "all" && !databases.find(db => db.id === selectedDatabase))}
                   className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
                 >
                   {isGenerating ? (
