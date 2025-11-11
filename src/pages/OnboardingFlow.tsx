@@ -55,6 +55,8 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
+  const [enhancedDescription, setEnhancedDescription] = useState<string | undefined>(undefined);
+  const [projectDomain, setProjectDomain] = useState<string | undefined>(undefined);
   const [projectContext, setProjectContext] = useState<Record<string, string>>({});
   const [databaseConfig, setDatabaseConfig] = useState<any>(null);
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
@@ -65,9 +67,13 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
     name: string;
     description: string;
     context: Record<string, string>;
+    enhancedDescription?: string;
+    domain?: string;
   }) => {
     setProjectName(data.name);
     setProjectDescription(data.description);
+    setEnhancedDescription(data.enhancedDescription);
+    setProjectDomain(data.domain);
     setProjectContext(data.context);
     setCurrentStep(2);
   };
@@ -106,8 +112,13 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
     // Complete onboarding
     onComplete({
       name: projectName,
-      description: projectDescription,
-      context: projectContext,
+      description: enhancedDescription || projectDescription,
+      context: {
+        ...projectContext,
+        enhanced_description: enhancedDescription,
+        domain: projectDomain,
+        ...contextData.responses
+      },
       database: databaseConfig,
       selectedTables: selectedTables,
       databaseContext: contextData.responses

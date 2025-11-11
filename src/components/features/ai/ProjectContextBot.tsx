@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Bot, Send, Sparkles } from "lucide-react";
+import { Bot, Send, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Card } from "../../ui/card";
 import { Avatar } from "../../ui/avatar";
+import { VizAIWebSocket, WebSocketResponse } from "../../../services/websocket";
+import { getCurrentUser } from "../../../services/api";
+import { toast } from "sonner";
 
 interface Message {
   id: number;
@@ -14,62 +17,20 @@ interface Message {
   timestamp: Date;
 }
 
-interface Question {
-  id: string;
-  question: string;
-  followUp?: string;
-  placeholder?: string;
-}
-
-const QUESTIONS: Question[] = [
-  {
-    id: "project_name",
-    question: "Let's start by naming your analytics project. What would you like to call it?",
-    followUp: "Great name! Let's continue.",
-    placeholder: "e.g., E-Commerce Analytics"
-  },
-  {
-    id: "project_description",
-    question: "Perfect! Can you describe what this project is about? This helps us understand your needs better.",
-    followUp: "Excellent! Now I have a few quick questions to personalize your experience.",
-    placeholder: "e.g., Track sales performance and customer behavior..."
-  },
-  {
-    id: "industry",
-    question: "What industry or domain is this project focused on?",
-    followUp: "Great! That helps us understand your data context.",
-    placeholder: "e.g., Retail, Finance, Healthcare"
-  },
-  {
-    id: "goal",
-    question: "What's your primary goal with this analytics project?",
-    followUp: "Perfect! We'll help you track those metrics.",
-    placeholder: "e.g., Improve customer retention"
-  },
-  {
-    id: "team_size",
-    question: "How many people will be using this workspace?",
-    followUp: "Got it! We'll set up the right collaboration features.",
-    placeholder: "e.g., 5-10 people"
-  },
-  {
-    id: "data_sources",
-    question: "What types of data sources will you be connecting? (e.g., sales data, user analytics, financial records)",
-    followUp: "Excellent! We'll prepare the right connectors for you.",
-    placeholder: "e.g., Sales database, Google Analytics"
-  }
-];
 
 interface ProjectContextBotProps {
   onComplete: (data: {
     name: string;
     description: string;
     context: Record<string, string>;
+    enhancedDescription?: string;
+    domain?: string;
   }) => void;
   onCancel?: () => void;
+  userId?: string; // Optional user ID, will be fetched if not provided
 }
 
-export function ProjectContextBot({ onComplete, onCancel }: ProjectContextBotProps) {
+export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectContextBotProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
@@ -78,11 +39,16 @@ export function ProjectContextBot({ onComplete, onCancel }: ProjectContextBotPro
       timestamp: new Date()
     }
   ]);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [userInput, setUserInput] = useState("");
   const [responses, setResponses] = useState<Record<string, string>>({});
   const [isTyping, setIsTyping] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const [wsClient, setWsClient] = useState<VizAIWebSocket | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
+  const [projectState, setProjectState] = useState<any>(null);
+  const [questionsAsked, setQuestionsAsked] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -92,6 +58,145 @@ export function ProjectContextBot({ onComplete, onCancel }: ProjectContextBotPro
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
+
+  // Initialize WebSocket connection (lazy - only when user clicks start)
+  const initWebSocket = async (): Promise<VizAIWebSocket | null> => {
+    try {
+      // Get user ID if not provided
+      let currentUserId = userId;
+      if (!currentUserId) {
+        const userResponse = await getCurrentUser();
+        if (!userResponse.success || !userResponse.data) {
+          console.error('[ProjectContextBot] Failed to get user information');
+          return null;
+        }
+        currentUserId = userResponse.data.id;
+      }
+
+      setIsConnecting(true);
+      const client = new VizAIWebSocket(currentUserId);
+      let connectionEstablished = false;
+
+      // Set up all handlers BEFORE connecting
+      
+      // Handle project_info responses
+      client.on('project_info', (response: WebSocketResponse) => {
+        console.log('[ProjectContextBot] Received response:', response);
+
+        if (response.status === 'collecting') {
+          // Show question to user
+          const question = response.message;
+          setCurrentQuestion(question);
+          setQuestionsAsked(response.state?.questions_asked_count || 0);
+          setProjectState(response.state || {});
+          
+          // Add bot message with question
+          addBotMessage(question);
+        } else if (response.status === 'completed') {
+          // Project info collection complete
+          const state = response.state || {};
+          setProjectState(state);
+          
+          addBotMessage("Thank you for answering all questions! Enhanced description generated.");
+          
+          setTimeout(() => {
+            addBotMessage("Perfect! I have everything I need. Let's set up your database connection next. 🚀");
+          }, 1500);
+
+          setTimeout(() => {
+            // Complete with enhanced description
+            onComplete({
+              name: state.name || responses.project_name || "My Project",
+              description: state.description || responses.project_description || "",
+              enhancedDescription: state.enhanced_description || state.description,
+              domain: state.domain || responses.domain || "",
+              context: {
+                ...responses,
+                enhanced_description: state.enhanced_description,
+                domain: state.domain,
+              }
+            });
+          }, 3500);
+        } else if (response.status === 'error') {
+          // Handle error
+          console.error('[ProjectContextBot] Error:', response.error);
+          toast.error(response.error || response.message || "An error occurred");
+          setIsTyping(false);
+          addBotMessage("I'm sorry, something went wrong. Please try again.");
+        }
+      });
+
+      // Handle connection open
+      client.onOpen(() => {
+        console.log('[ProjectContextBot] WebSocket connection established');
+        connectionEstablished = true;
+      });
+
+      // Handle connection errors
+      client.onError((error) => {
+        console.error('[ProjectContextBot] WebSocket error:', error);
+        if (!connectionEstablished) {
+          setConnectionError("Failed to connect to AI assistant. Please check your connection and try again.");
+          setIsConnecting(false);
+          setIsTyping(false);
+        }
+      });
+
+      // Handle connection close
+      client.onClose(() => {
+        if (connectionEstablished && !client.isConnected()) {
+          // Connection was established but closed unexpectedly
+          setConnectionError("Connection lost. Please try again.");
+          setIsTyping(false);
+        } else if (!connectionEstablished) {
+          // Connection failed before being established
+          setConnectionError("Failed to establish connection. Please check the WebSocket server is running.");
+          setIsConnecting(false);
+          setIsTyping(false);
+        }
+      });
+
+      // Connect WebSocket with timeout
+      try {
+        await Promise.race([
+          client.connect(),
+          new Promise<void>((_, reject) => {
+            setTimeout(() => reject(new Error('Connection timeout')), 10000); // 10 second timeout
+          })
+        ]);
+        
+        // Wait a bit to ensure connection is fully established
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        if (client.isConnected()) {
+          setWsClient(client);
+          setIsConnecting(false);
+          return client;
+        } else {
+          throw new Error('Connection not established');
+        }
+      } catch (error: any) {
+        console.warn('[ProjectContextBot] WebSocket connection failed:', error.message);
+        setConnectionError(error.message || "Connection timeout. Please ensure the WebSocket server is running.");
+        setIsConnecting(false);
+        return null;
+      }
+    } catch (error: any) {
+      console.error('[ProjectContextBot] Failed to initialize WebSocket:', error);
+      setConnectionError(error.message || "Failed to initialize WebSocket connection.");
+      setIsConnecting(false);
+      return null;
+    }
+  };
+
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (wsClient) {
+        wsClient.disconnect();
+      }
+    };
+  }, [wsClient]);
 
   const addBotMessage = (content: string) => {
     setIsTyping(true);
@@ -109,13 +214,36 @@ export function ProjectContextBot({ onComplete, onCancel }: ProjectContextBotPro
     }, 800);
   };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     setHasStarted(true);
-    addBotMessage(QUESTIONS[0].question);
+    setConnectionError(null);
+    setIsConnecting(true);
+    
+    // Connect via WebSocket
+    const client = await initWebSocket();
+    
+    if (client && client.isConnected()) {
+      setIsTyping(true);
+      // Start project_info workflow with initial empty payload
+      // The server will ask the first question
+      client.projectInfo({});
+    } else {
+      // WebSocket connection failed
+      setConnectionError("Unable to connect to AI assistant. Please check that the WebSocket server is running and try again.");
+      setIsConnecting(false);
+      setIsTyping(false);
+    }
   };
 
   const handleSendMessage = () => {
-    if (!userInput.trim()) return;
+    if (!userInput.trim()) {
+      return;
+    }
+
+    if (!wsClient || !wsClient.isConnected()) {
+      toast.error("Not connected to AI assistant. Please wait for connection or try again.");
+      return;
+    }
 
     // Add user message
     const userMessage: Message = {
@@ -126,55 +254,21 @@ export function ProjectContextBot({ onComplete, onCancel }: ProjectContextBotPro
     };
     setMessages((prev) => [...prev, userMessage]);
 
-    // Store response
-    const currentQuestion = QUESTIONS[currentQuestionIndex];
-    const newResponses = {
-      ...responses,
-      [currentQuestion.id]: userInput
-    };
-    setResponses(newResponses);
-
+    // Store response for reference
+    const inputValue = userInput;
     setUserInput("");
+    setIsTyping(true);
 
-    // Check if there are more questions
-    if (currentQuestionIndex < QUESTIONS.length - 1) {
-      // Add follow-up message
-      if (currentQuestion.followUp) {
-        setTimeout(() => {
-          addBotMessage(currentQuestion.followUp!);
-        }, 1000);
-      }
+    // Update responses state
+    setResponses((prev) => ({
+      ...prev,
+      [`response_${Date.now()}`]: inputValue
+    }));
 
-      // Ask next question
-      setTimeout(() => {
-        addBotMessage(QUESTIONS[currentQuestionIndex + 1].question);
-        setCurrentQuestionIndex((prev) => prev + 1);
-      }, currentQuestion.followUp ? 2500 : 1500);
-    } else {
-      // All questions answered
-      setTimeout(() => {
-        addBotMessage(currentQuestion.followUp || "Thank you!");
-      }, 1000);
-      
-      setTimeout(() => {
-        addBotMessage("Perfect! I have everything I need. Let's set up your database connection next. 🚀");
-      }, 2500);
-
-      setTimeout(() => {
-        // Extract project name and description from responses
-        const projectName = newResponses.project_name || "My Project";
-        const projectDescription = newResponses.project_description || "";
-        
-        // Remove project_name and project_description from context
-        const { project_name, project_description, ...context } = newResponses;
-        
-        onComplete({
-          name: projectName,
-          description: projectDescription,
-          context
-        });
-      }, 4500);
-    }
+    // Send user response via WebSocket
+    wsClient.projectInfo({
+      user_response: inputValue
+    });
   };
 
   const handleKeyPress = (e: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -184,8 +278,8 @@ export function ProjectContextBot({ onComplete, onCancel }: ProjectContextBotPro
     }
   };
 
-  const currentPlaceholder = hasStarted && currentQuestionIndex < QUESTIONS.length 
-    ? QUESTIONS[currentQuestionIndex].placeholder || "Type your answer..."
+  const currentPlaceholder = currentQuestion 
+    ? "Type your answer..."
     : "Type your answer...";
 
   return (
@@ -201,8 +295,14 @@ export function ProjectContextBot({ onComplete, onCancel }: ProjectContextBotPro
               <h3 className="text-foreground">VizAI Assistant</h3>
               <p className="text-xs text-muted-foreground">
                 {hasStarted 
-                  ? `Question ${Math.min(currentQuestionIndex + 1, QUESTIONS.length)} of ${QUESTIONS.length}` 
-                  : "Ready to help you get started"}
+                  ? questionsAsked > 0
+                    ? `Question ${questionsAsked} of up to 5` 
+                    : connectionError
+                    ? "Connection error"
+                    : "Starting conversation..."
+                  : isConnecting 
+                    ? "Connecting to AI assistant..." 
+                    : "Ready to help you get started"}
               </p>
             </div>
             {onCancel && (
@@ -266,6 +366,33 @@ export function ProjectContextBot({ onComplete, onCancel }: ProjectContextBotPro
             </motion.div>
           )}
 
+          {connectionError && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-destructive/10 border border-destructive/20 rounded-2xl px-4 py-3"
+            >
+              <p className="text-sm text-destructive">{connectionError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={() => {
+                  setConnectionError(null);
+                  setHasStarted(false);
+                  setMessages([{
+                    id: 1,
+                    type: "bot",
+                    content: "Hi! 👋 I'm your VizAI assistant. I'll help you set up your analytics project through a quick conversation. Ready to get started?",
+                    timestamp: new Date()
+                  }]);
+                }}
+              >
+                Try Again
+              </Button>
+            </motion.div>
+          )}
+
           <div ref={messagesEndRef} />
         </div>
 
@@ -275,28 +402,20 @@ export function ProjectContextBot({ onComplete, onCancel }: ProjectContextBotPro
             <div className="space-y-2">
               <Button
                 onClick={handleStart}
-                className="w-full h-12 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all"
+                disabled={isConnecting}
+                className="w-full h-12 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-50"
               >
-                <Sparkles className="w-5 h-5 mr-2" />
-                Let's Get Started
-              </Button>
-              <Button
-                onClick={() => {
-                  onComplete({
-                    name: "Test Project",
-                    description: "Testing the onboarding flow",
-                    context: {
-                      industry: "Technology",
-                      goal: "Testing",
-                      team_size: "1",
-                      data_sources: "Test data"
-                    }
-                  });
-                }}
-                variant="ghost"
-                className="w-full h-9 text-xs text-muted-foreground hover:text-foreground"
-              >
-                Skip for Testing
+                {isConnecting ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Connecting to AI assistant...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-5 h-5 mr-2" />
+                    Let's Get Started
+                  </>
+                )}
               </Button>
             </div>
           ) : (
@@ -307,15 +426,19 @@ export function ProjectContextBot({ onComplete, onCancel }: ProjectContextBotPro
                 onKeyPress={handleKeyPress}
                 placeholder={currentPlaceholder}
                 className="flex-1 h-12"
-                disabled={isTyping || currentQuestionIndex >= QUESTIONS.length}
+                disabled={isTyping || !currentQuestion || !wsClient || !wsClient.isConnected() || !!connectionError}
                 autoFocus
               />
               <Button
                 onClick={handleSendMessage}
-                disabled={!userInput.trim() || isTyping || currentQuestionIndex >= QUESTIONS.length}
-                className="h-12 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
+                disabled={!userInput.trim() || isTyping || !currentQuestion || !wsClient || !wsClient.isConnected() || !!connectionError}
+                className="h-12 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white disabled:opacity-50"
               >
-                <Send className="w-5 h-5" />
+                {isTyping ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Send className="w-5 h-5" />
+                )}
               </Button>
             </div>
           )}

@@ -6,8 +6,9 @@ import { Badge } from "../components/ui/badge";
 import { GradientButton } from "../components/shared/GradientButton";
 import { OnboardingFlow } from "./OnboardingFlow";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
+import { KPIInfoBot } from "../components/features/ai/KPIInfoBot";
 import { toast } from "sonner";
-import { getProjects, createProject, type Project as ApiProject } from "../services/api";
+import { getProjects, createProject, getCurrentUser, type Project as ApiProject } from "../services/api";
 
 // Helper function to format time ago
 const formatTimeAgo = (dateString: string): string => {
@@ -53,14 +54,35 @@ interface ProjectsViewProps {
 
 export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
   const [showNewProjectFlow, setShowNewProjectFlow] = useState(false);
+  const [showKPICollection, setShowKPICollection] = useState(false);
   const [projects, setProjects] = useState<UIProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [pendingProjectData, setPendingProjectData] = useState<{
+    projectId: string;
+    projectName: string;
+    projectDescription?: string;
+    projectDomain?: string;
+    enhancedDescription?: string;
+  } | null>(null);
 
-  // Fetch projects on mount
+  // Fetch projects and user ID on mount
   useEffect(() => {
     fetchProjects();
+    fetchUserId();
   }, []);
+
+  const fetchUserId = async () => {
+    try {
+      const response = await getCurrentUser();
+      if (response.success && response.data) {
+        setCurrentUserId(response.data.id);
+      }
+    } catch (error) {
+      console.error("Failed to get user ID:", error);
+    }
+  };
 
   const fetchProjects = async () => {
     setIsLoading(true);
@@ -102,10 +124,11 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     database: any;
   }) => {
     try {
-      // Create project via API
+      // Create project via API with enhanced description if available
+      const description = projectData.context?.enhanced_description || projectData.description;
       const response = await createProject({
         name: projectData.name,
-        description: projectData.description,
+        description: description,
       });
 
       if (response.success && response.data) {
@@ -124,15 +147,49 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         };
         setProjects([newProject, ...projects]);
         
-    setShowNewProjectFlow(false);
-    // Automatically select the newly created project
-        onProjectSelect(projectData.name, response.data.id);
+        // Store project data for KPI collection
+        setPendingProjectData({
+          projectId: response.data.id,
+          projectName: projectData.name,
+          projectDescription: projectData.description,
+          projectDomain: projectData.context?.domain,
+          enhancedDescription: projectData.context?.enhanced_description,
+        });
+
+        // Show KPI collection flow
+        setShowNewProjectFlow(false);
+        setShowKPICollection(true);
       } else {
         toast.error(response.error?.message || "Failed to create project");
       }
     } catch (err: any) {
       toast.error(err.message || "An error occurred while creating project");
     }
+  };
+
+  const handleKPICollectionComplete = (data: {
+    kpis: string[];
+    kpisSummary: string;
+  }) => {
+    // KPI collection complete - you can save KPIs to project if needed
+    console.log("KPIs collected:", data);
+    toast.success("KPIs collected successfully!");
+    
+    // Close KPI collection and select the project
+    setShowKPICollection(false);
+    if (pendingProjectData) {
+      onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId);
+    }
+    setPendingProjectData(null);
+  };
+
+  const handleKPICollectionCancel = () => {
+    // Skip KPI collection and select the project
+    setShowKPICollection(false);
+    if (pendingProjectData) {
+      onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId);
+    }
+    setPendingProjectData(null);
   };
 
   // Calculate stats from real data
@@ -164,6 +221,25 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     return (
       <div className="min-h-full bg-background">
         <OnboardingFlow onComplete={handleNewProjectComplete} />
+      </div>
+    );
+  }
+
+  // If collecting KPIs, show KPI collection flow
+  if (showKPICollection && pendingProjectData && currentUserId) {
+    return (
+      <div className="min-h-full bg-background flex items-center justify-center p-8">
+        <div className="w-full max-w-3xl">
+          <KPIInfoBot
+            userId={currentUserId}
+            projectName={pendingProjectData.projectName}
+            projectDescription={pendingProjectData.projectDescription}
+            projectDomain={pendingProjectData.projectDomain}
+            productDescription={pendingProjectData.enhancedDescription}
+            onComplete={handleKPICollectionComplete}
+            onCancel={handleKPICollectionCancel}
+          />
+        </div>
       </div>
     );
   }
