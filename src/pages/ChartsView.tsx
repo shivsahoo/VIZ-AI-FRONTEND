@@ -36,7 +36,7 @@ import {
 } from "../components/ui/alert-dialog";
 import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
 import { toast } from "sonner";
-import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, deleteChart, type Chart as ApiChart } from "../services/api";
+import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, deleteChart, getUserDashboardCharts, type Chart as ApiChart } from "../services/api";
 import {
   LineChart as RechartsLine,
   Line,
@@ -64,7 +64,7 @@ interface Chart {
   lastUpdated: string;
   query?: string;
   status: 'draft' | 'published';
-  dashboardId?: number;
+  dashboardId?: number | string;
   createdById?: number;
   projectId?: number | string;
   isGenerated?: boolean;
@@ -276,6 +276,10 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   const [selectedDatabaseForGenerate, setSelectedDatabaseForGenerate] = useState("");
   const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
 
+  const resolvedDashboards = dashboards.length > 0
+    ? dashboards
+    : mockDashboards.map((dashboard) => ({ id: dashboard.id, name: dashboard.name }));
+
   // Fetch charts when projectId is available
   useEffect(() => {
     if (projectId) {
@@ -327,10 +331,14 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     
     setIsLoadingCharts(true);
     try {
-      const response = await getCharts(String(projectId));
-      if (response.success && response.data) {
-        // Map API charts to UI format
-        const uiCharts: Chart[] = response.data.map((chart) => ({
+      const [chartsResponse, dashboardChartsResponse] = await Promise.all([
+        getCharts(String(projectId)),
+        getUserDashboardCharts(),
+      ]);
+
+      let projectCharts: Chart[] = [];
+      if (chartsResponse.success && chartsResponse.data) {
+        projectCharts = chartsResponse.data.map((chart) => ({
           id: chart.id,
           name: chart.name,
           type: chart.type,
@@ -338,18 +346,72 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           createdAt: chart.createdAt,
           lastUpdated: formatTimeAgo(chart.updatedAt || chart.createdAt),
           query: chart.query,
-          status: 'published' as const, // API doesn't provide status, default to published
+          status: 'published' as const,
           createdById: currentUser?.id,
           projectId: chart.projectId || projectId,
           isGenerated: false,
-          isFavorite: (chart as any).isFavorite || false, // Include favorite status if available
+          isFavorite: (chart as any).isFavorite || false,
         }));
-        setCharts(uiCharts);
       } else {
-        toast.error(response.error?.message || "Failed to load charts");
-        // Fallback to empty array on error
-        setCharts([]);
+        toast.error(chartsResponse.error?.message || "Failed to load charts");
       }
+
+      let dashboardCharts: Chart[] = [];
+      if (dashboardChartsResponse.success && dashboardChartsResponse.data) {
+        dashboardCharts = dashboardChartsResponse.data
+          .filter((dashboard) => !projectId || String(dashboard.projectId) === String(projectId))
+          .flatMap((dashboard) =>
+            dashboard.charts.map((chart) => {
+              const createdAt = chart.created_at || new Date().toISOString();
+              const status = chart.status?.toString().toLowerCase() === 'draft' ? 'draft' as const : 'published' as const;
+              const chartTypeSource = chart.chart_type || chart.type;
+
+              return {
+                id: chart.id,
+                name: chart.title || "Untitled Chart",
+                type: mapChartType(chartTypeSource),
+                dataSource: chart.database_connection_id ? `Database ${chart.database_connection_id}` : "Unknown Database",
+                createdAt,
+                lastUpdated: formatTimeAgo(createdAt),
+                query: undefined,
+                status,
+                dashboardId: dashboard.dashboardId,
+                createdById: currentUser?.id,
+                projectId: dashboard.projectId || projectId,
+                isGenerated: false,
+                isFavorite: false,
+              };
+            })
+          );
+      } else if (!dashboardChartsResponse.success) {
+        toast.error(dashboardChartsResponse.error?.message || "Failed to load dashboard charts");
+      }
+
+      const combinedChartsMap = new Map<string, Chart>();
+      const addChartToMap = (chart: Chart) => {
+        const key = String(chart.id);
+        if (combinedChartsMap.has(key)) {
+          const existing = combinedChartsMap.get(key)!;
+          combinedChartsMap.set(key, {
+            ...existing,
+            ...chart,
+            dashboardId: chart.dashboardId ?? existing.dashboardId,
+            lastUpdated: chart.lastUpdated || existing.lastUpdated,
+            status: chart.status || existing.status,
+            dataSource: chart.dataSource || existing.dataSource,
+            query: chart.query ?? existing.query,
+            isGenerated: chart.isGenerated ?? existing.isGenerated,
+            isFavorite: chart.isFavorite ?? existing.isFavorite,
+          });
+        } else {
+          combinedChartsMap.set(key, chart);
+        }
+      };
+
+      projectCharts.forEach(addChartToMap);
+      dashboardCharts.forEach(addChartToMap);
+
+      setCharts(Array.from(combinedChartsMap.values()));
     } catch (err: any) {
       toast.error(err.message || "An error occurred while fetching charts");
       setCharts([]);
@@ -478,7 +540,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         setGeneratedCharts(updateChartFavorite);
         
         // Also update context for UI consistency
-        const dashboard = mockDashboards.find(d => d.id === chart.dashboardId);
+        const dashboard = resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId));
         const numericId = chartIdToNumber(chart.id);
         const pinnedChartData = {
           id: numericId,
@@ -514,7 +576,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   const handleOpenChartPreview = (chart: Chart) => {
     // Find which dashboards this chart belongs to
     const chartDashboards = chart.dashboardId 
-      ? [mockDashboards.find(d => d.id === chart.dashboardId)?.name].filter(Boolean) as string[]
+      ? [resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId))?.name].filter(Boolean) as string[]
       : [];
     
     const chartAsSuggestion: ChartSuggestion & { dataSource?: string } = {
@@ -668,8 +730,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           setCharts(prev => [updatedChart, ...prev]);
         }
 
-        const allDashboards = dashboards.length > 0 ? dashboards : mockDashboards.map(d => ({ id: d.id, name: d.name }));
-        const dashboard = allDashboards.find(d => String(d.id) === selectedDashboardForAdd);
+        const dashboard = resolvedDashboards.find(d => String(d.id) === selectedDashboardForAdd);
         toast.success(`"${chart.name}" added to ${dashboard?.name || 'dashboard'}`);
         setChartToAddToDashboard(null);
         setSelectedDashboardForAdd("");
@@ -819,7 +880,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
 
   const renderChartCard = (chart: Chart, isGenerated: boolean = false) => {
     const Icon = chartTypeIcons[chart.type];
-    const dashboard = mockDashboards.find(d => d.id === chart.dashboardId);
+    const dashboard = resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId));
     const colorClass = {
       line: 'text-[#06B6D4] bg-[#06B6D4]/10',
       bar: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
@@ -1057,7 +1118,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                           <SelectContent>
                             <SelectItem value="all">All Dashboards</SelectItem>
                             <SelectItem value="unassigned">Unassigned</SelectItem>
-                            {mockDashboards.map((dashboard) => (
+                            {resolvedDashboards.map((dashboard) => (
                               <SelectItem key={dashboard.id} value={dashboard.id.toString()}>
                                 {dashboard.name}
                               </SelectItem>
@@ -1142,7 +1203,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                   <SelectValue placeholder="Select dashboard" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(dashboards.length > 0 ? dashboards : mockDashboards.map(d => ({ id: d.id, name: d.name }))).map((dashboard) => (
+                  {resolvedDashboards.map((dashboard) => (
                     <SelectItem key={dashboard.id} value={String(dashboard.id)}>
                       {dashboard.name}
                     </SelectItem>
@@ -1179,7 +1240,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             chart={previewChart}
             isOpen={!!previewChart}
             onClose={() => setPreviewChart(null)}
-            dashboards={dashboards.length > 0 ? dashboards : mockDashboards.map(d => ({ id: d.id, name: d.name }))}
+            dashboards={resolvedDashboards}
             projectId={projectId}
             onAddToDashboard={(dashboardId) => {
               // Refresh charts after adding to dashboard

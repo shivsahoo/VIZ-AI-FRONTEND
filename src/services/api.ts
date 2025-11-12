@@ -820,6 +820,64 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
 };
 
 /**
+ * Get charts for dashboards the current user has access to
+ */
+export const getUserDashboardCharts = async (): Promise<ApiResponse<Array<{
+  dashboardId: string;
+  dashboardTitle: string;
+  projectId: string;
+  charts: Array<{
+    id: string;
+    title: string;
+    created_at: string | null;
+    chart_type?: string | null;
+    type?: string | null;
+    status?: string | null;
+    database_connection_id?: string | null;
+  }>;
+}>>> => {
+  try {
+    const response = await apiRequest<{
+      message?: string;
+      dashboards?: Array<{
+        dashboard_id: string;
+        dashboard_title: string;
+        project_id: string;
+        charts: Array<{
+          id: string;
+          title: string;
+          created_at: string | null;
+          chart_type?: string | null;
+          type?: string | null;
+          status?: string | null;
+          database_connection_id?: string | null;
+        }>;
+      }>;
+    }>('/api/v1/backend/dashboards/user/charts');
+
+    const dashboardsArray = response.dashboards || [];
+
+    return {
+      success: true,
+      data: dashboardsArray.map((dashboard) => ({
+        dashboardId: dashboard.dashboard_id,
+        dashboardTitle: dashboard.dashboard_title,
+        projectId: dashboard.project_id,
+        charts: dashboard.charts || [],
+      })),
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'FETCH_USER_DASHBOARD_CHARTS_FAILED',
+        message: error.message || 'Failed to fetch dashboard charts for user',
+      },
+    };
+  }
+};
+
+/**
  * Map backend chart type to frontend type
  */
 function mapChartType(backendType?: string | null): 'line' | 'bar' | 'pie' | 'area' {
@@ -2156,6 +2214,7 @@ const api = {
   getFavoriteCharts,
   updateFavoriteChart,
   deleteChart,
+  getUserDashboardCharts,
   
   // Databases
   getDatabases,

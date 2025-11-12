@@ -529,13 +529,21 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-start justify-between gap-4 mb-3">
                         <div className="flex-1">
                           <h3 className="text-lg text-foreground mb-2">{insight.title}</h3>
                           <p className="text-sm text-muted-foreground leading-relaxed">
                             {insight.description}
                           </p>
                         </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0 whitespace-nowrap"
+                          onClick={() => toast.info("Adding insights to dashboards coming soon.")}
+                        >
+                          + Add to Dashboard
+                        </Button>
                       </div>
 
                       <div className="flex items-center gap-3 text-sm">
