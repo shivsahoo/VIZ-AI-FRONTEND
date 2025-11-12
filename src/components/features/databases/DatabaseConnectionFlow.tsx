@@ -19,9 +19,9 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Database, CheckCircle2, Table2, Sparkles, ArrowLeft } from "lucide-react";
-import { DatabaseSetupGuided } from "./DatabaseSetupGuided";
-import { TableSelectionView } from "./TableSelectionView";
-import { DatabaseContextBot } from "./DatabaseContextBot";
+import { DatabaseSetupGuided } from "./DatabaseSetupGuided.tsx";
+import { TableSelectionView } from "./TableSelectionView.tsx";
+import { DatabaseContextBot } from "./DatabaseContextBot.tsx";
 import { Card } from "../../ui/card";
 import { Button } from "../../ui/button";
 
