@@ -129,13 +129,13 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
   };
 
   return (
-    <Card className="p-12 border border-border shadow-xl">
+    <Card className="px-6 py-10 md:px-12 md:py-12 border border-border shadow-xl max-w-3xl mx-auto">
       <div className="text-center mb-8">
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center mx-auto mb-4 shadow-lg">
-          <Database className="w-8 h-8 text-white" />
+        <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center mx-auto mb-4 shadow-lg">
+          <Database className="w-7 h-7 md:w-8 md:h-8 text-white" />
         </div>
-        <h2 className="text-3xl text-foreground mb-2">Connect Your Database</h2>
-        <p className="text-muted-foreground text-lg">
+        <h2 className="text-2xl md:text-3xl text-foreground mb-2">Connect Your Database</h2>
+        <p className="text-sm md:text-lg text-muted-foreground">
           Let's connect your first data source for "{projectName}"
         </p>
       </div>
@@ -159,7 +159,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
         </div>
 
         <Tabs value={connectionMethod} onValueChange={setConnectionMethod} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-8">
+          <TabsList className="grid w-full grid-cols-2 mb-6 md:mb-8">
             <TabsTrigger value="form" className="flex items-center gap-2">
               <Database className="w-4 h-4" />
               Connection Form
@@ -172,7 +172,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
 
           {/* Connection Form Tab */}
           <TabsContent value="form" className="space-y-6">
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
               <div className="space-y-2">
                 <Label htmlFor="dbType">

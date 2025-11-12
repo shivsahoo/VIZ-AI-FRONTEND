@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { Plus, Database, LayoutDashboard, TrendingUp, Sparkles, Clock, Users as UsersIcon, ArrowRight } from "lucide-react";
+import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
 import { GradientButton } from "../components/shared/GradientButton";
 import { OnboardingFlow } from "./OnboardingFlow";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
@@ -192,6 +191,10 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     setPendingProjectData(null);
   };
 
+  const handleNewProjectCancel = () => {
+    setShowNewProjectFlow(false);
+  };
+
   // Calculate stats from real data
   const stats = [
     { 
@@ -220,7 +223,10 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
   if (showNewProjectFlow) {
     return (
       <div className="min-h-full bg-background">
-        <OnboardingFlow onComplete={handleNewProjectComplete} />
+        <OnboardingFlow 
+          onComplete={handleNewProjectComplete} 
+          onCancel={handleNewProjectCancel}
+        />
       </div>
     );
   }
@@ -305,7 +311,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
       <div className="px-8 py-12 max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h2 className="text-2xl text-foreground mb-1">Your Projects</h2>
+            <h2 className="text-2xl text-foreground mb-1">Your Products</h2>
             <p className="text-muted-foreground">Select a project to view analytics and insights</p>
           </div>
           <GradientButton 

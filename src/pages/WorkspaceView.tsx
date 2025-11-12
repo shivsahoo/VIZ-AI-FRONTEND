@@ -140,17 +140,20 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
 
   const handleCreateDashboard = async (dashboard: {
     name: string;
-    description: string;
+    description?: string;
+    enhancedDescription?: string;
   }) => {
     if (!projectId) {
       toast.error("Project ID is required to create a dashboard");
       return;
     }
 
+    const description = dashboard.enhancedDescription || dashboard.description || "";
+
     try {
       const response = await createDashboard(String(projectId), {
       name: dashboard.name,
-      description: dashboard.description,
+      description: description,
       });
 
       if (response.success && response.data) {
@@ -246,8 +249,14 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
           <DashboardCreationBot
             isOpen={isCreateDialogOpen}
             onClose={() => setIsCreateDialogOpen(false)}
-            onCreate={(name, description) => {
-              handleCreateDashboard({ name, description });
+            projectId={projectId ? String(projectId) : undefined}
+            projectName={projectName}
+            onCreate={(data) => {
+              handleCreateDashboard({
+                name: data.name,
+                description: data.description,
+                enhancedDescription: data.enhancedDescription,
+              });
             }}
           />
         </DialogContent>

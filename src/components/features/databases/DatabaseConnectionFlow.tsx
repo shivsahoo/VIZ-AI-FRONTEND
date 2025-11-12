@@ -18,7 +18,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Database, CheckCircle2, Table2, Sparkles } from "lucide-react";
+import { Database, CheckCircle2, Table2, Sparkles, ArrowLeft } from "lucide-react";
 import { DatabaseSetupGuided } from "./DatabaseSetupGuided";
 import { TableSelectionView } from "./TableSelectionView";
 import { DatabaseContextBot } from "./DatabaseContextBot";
@@ -40,6 +40,19 @@ export function DatabaseConnectionFlow({ projectId, onComplete, onCancel }: Data
   const [databaseConfig, setDatabaseConfig] = useState<any>(null);
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const handleBack = () => {
+    if (currentStep === 1) {
+      onCancel();
+      return;
+    }
+
+    if (currentStep === 2) {
+      setIsAnalyzing(false);
+    }
+
+    setCurrentStep((prev) => Math.max(1, prev - 1));
+  };
 
   const handleDatabaseComplete = (dbConfig: any) => {
     setDatabaseConfig(dbConfig);
@@ -80,15 +93,23 @@ export function DatabaseConnectionFlow({ projectId, onComplete, onCancel }: Data
   };
 
   return (
-    <div className="fixed inset-0 bg-background z-50 flex items-center justify-center p-8 overflow-hidden">
+    <div className="min-h-screen bg-background flex items-center justify-center p-8 relative overflow-hidden">
       {/* Background decorative elements */}
       <div className="absolute inset-0 bg-grid-pattern opacity-30" />
       <div className="absolute top-20 left-20 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
       <div className="absolute bottom-20 right-20 w-96 h-96 bg-accent/5 rounded-full blur-3xl" />
       
       <div className="w-full max-w-5xl relative z-10">
-        {/* Cancel Button */}
-        <div className="flex justify-end mb-4">
+        {/* Back & Cancel Actions */}
+        <div className="flex items-center justify-between mb-4">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleBack}
+            className="border-border"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
           <Button
             variant="ghost"
             onClick={onCancel}

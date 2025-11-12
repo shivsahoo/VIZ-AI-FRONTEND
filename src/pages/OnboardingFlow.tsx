@@ -31,7 +31,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Sparkles, CheckCircle2, Database, Table2 } from "lucide-react";
+import { Sparkles, CheckCircle2, Database, Table2, ArrowLeft } from "lucide-react";
 import { ProjectContextBot } from "../components/features/ai/ProjectContextBot";
 import { DatabaseSetupGuided } from "../components/features/databases/DatabaseSetupGuided";
 import { TableSelectionView } from "../components/features/databases/TableSelectionView";
@@ -60,8 +60,20 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
   const [projectContext, setProjectContext] = useState<Record<string, string>>({});
   const [databaseConfig, setDatabaseConfig] = useState<any>(null);
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
-  const [databaseContext, setDatabaseContext] = useState<Record<string, string>>({});
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const handleBack = () => {
+    if (currentStep === 1) {
+      if (onCancel) {
+        onCancel();
+      }
+      return;
+    }
+    if (currentStep === 3) {
+      setIsAnalyzing(false);
+    }
+    setCurrentStep((prev) => Math.max(1, prev - 1));
+  };
 
   const handleProjectSetupComplete = (data: {
     name: string;
@@ -108,17 +120,23 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
       charts: string[];
     }>;
   }) => {
-    setDatabaseContext(contextData.responses);
+    const contextPayload: Record<string, string> = {
+      ...projectContext,
+      ...contextData.responses,
+    };
+
+    if (enhancedDescription) {
+      contextPayload.enhanced_description = enhancedDescription;
+    }
+    if (projectDomain) {
+      contextPayload.domain = projectDomain;
+    }
+
     // Complete onboarding
     onComplete({
       name: projectName,
       description: enhancedDescription || projectDescription,
-      context: {
-        ...projectContext,
-        enhanced_description: enhancedDescription,
-        domain: projectDomain,
-        ...contextData.responses
-      },
+      context: contextPayload,
       database: databaseConfig,
       selectedTables: selectedTables,
       databaseContext: contextData.responses
@@ -133,16 +151,29 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
       <div className="absolute bottom-20 right-20 w-96 h-96 bg-accent/5 rounded-full blur-3xl" />
       
       <div className="w-full max-w-5xl relative z-10">
-        {/* Cancel Button */}
-        {onCancel && (
-          <div className="flex justify-end mb-4">
-            <Button
-              variant="ghost"
-              onClick={onCancel}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              Cancel Setup
-            </Button>
+        {/* Back & Cancel Actions */}
+        {(currentStep > 1 || onCancel) && (
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={handleBack}
+                className="border-border"
+                disabled={currentStep === 1 && !onCancel}
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </Button>
+            </div>
+            {onCancel && (
+              <Button
+                variant="ghost"
+                onClick={onCancel}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                Cancel Setup
+              </Button>
+            )}
           </div>
         )}
         

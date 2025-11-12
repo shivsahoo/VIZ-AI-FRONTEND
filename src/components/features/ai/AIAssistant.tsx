@@ -5,8 +5,10 @@ import { Card } from "../../ui/card";
 import { Badge } from "../../ui/badge";
 import { GradientButton } from "../../shared/GradientButton";
 import { ChartPreviewDialog } from "../charts/ChartPreviewDialog";
-import { getDashboards, getDatabases } from "../../../services/api";
+import { getDashboards, getDatabases, getCurrentUser } from "../../../services/api";
+import { VizAIWebSocket, WebSocketResponse, type ChartSpec } from "../../../services/websocket";
 import { toast } from "sonner";
+import { AnimatePresence } from "framer-motion";
 
 interface Message {
   id: number;
@@ -23,6 +25,9 @@ interface ChartSuggestion {
   query: string;
   reasoning: string;
   dataSource?: string;
+  dataConnectionId?: string;
+  relevance?: number;
+  spec?: ChartSpec;
 }
 
 interface AIAssistantProps {
@@ -58,6 +63,36 @@ const chartTypeColors = {
   area: "bg-orange-500/10 text-orange-500 border-orange-500/20"
 };
 
+const normalizeChartType = (type?: string): 'line' | 'bar' | 'pie' | 'area' => {
+  if (!type) return 'line';
+  const lower = type.toLowerCase();
+  if (lower.includes('bar')) return 'bar';
+  if (lower.includes('pie') || lower.includes('donut')) return 'pie';
+  if (lower.includes('area')) return 'area';
+  return 'line';
+};
+
+const normalizeDbType = (type?: string): 'postgres' | 'mysql' | 'sqlite' => {
+  if (!type) return 'postgres';
+  const lower = type.toLowerCase();
+  if (lower.includes('mysql')) return 'mysql';
+  if (lower.includes('sqlite')) return 'sqlite';
+  return 'postgres';
+};
+
+const ensureSchemaString = (schema?: string | null): string => {
+  if (!schema) {
+    return JSON.stringify({ tables: [] });
+  }
+  try {
+    JSON.parse(schema);
+    return schema;
+  } catch (error) {
+    console.warn('AIAssistant: Received invalid schema JSON, falling back to empty schema', { error });
+    return JSON.stringify({ tables: [] });
+  }
+};
+
 export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, editingChart }: AIAssistantProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -73,8 +108,12 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
   const [previewChart, setPreviewChart] = useState<ChartSuggestion | null>(null);
   const [showDatabaseSelection, setShowDatabaseSelection] = useState(true);
   const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
-  const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string; schema?: string | null }>>([]);
   const [isLoadingDatabases, setIsLoadingDatabases] = useState(false);
+  const [wsClient, setWsClient] = useState<VizAIWebSocket | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   // Fetch dashboards and databases when projectId is available
   useEffect(() => {
@@ -83,6 +122,130 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       fetchDatabases();
     }
   }, [projectId, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !userId) {
+      return;
+    }
+
+    const client = new VizAIWebSocket(userId);
+    setIsConnecting(true);
+    setConnectionError(null);
+
+    const handleChartCreation = (response: WebSocketResponse) => {
+      if (response.status === 'completed') {
+        setConnectionError(null);
+        const chartSpecs = (response.state?.chart_specs as ChartSpec[]) || [];
+        setIsGenerating(false);
+
+        if (!chartSpecs.length) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: prev.length + 1,
+              type: 'ai',
+              content: "I couldn't find any relevant charts based on that request. Try rephrasing or providing more detail."
+            }
+          ]);
+          return;
+        }
+
+        const suggestions: ChartSuggestion[] = chartSpecs.map((spec, index) => {
+          const chartType = normalizeChartType(spec.chart_type);
+          return {
+            id: `${spec.data_connection_id || 'chart'}-${index}-${Date.now()}`,
+            name: spec.title || `Generated Chart ${index + 1}`,
+            type: chartType,
+            description: spec.report || spec.title || "AI-generated chart suggestion",
+            query: spec.query,
+            reasoning: spec.report || "Generated based on your request.",
+            dataSource: spec.data_connection_id ? `Database ${spec.data_connection_id}` : undefined,
+            dataConnectionId: spec.data_connection_id,
+            relevance: typeof spec.relevance === 'number' ? spec.relevance : undefined,
+            spec,
+          };
+        });
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: prev.length + 1,
+            type: 'chart-suggestions',
+            content: `I've analyzed your request and generated ${suggestions.length} chart suggestion${suggestions.length > 1 ? 's' : ''}.`,
+            chartSuggestions: suggestions,
+          },
+        ]);
+      } else if (response.status === 'error') {
+        setIsGenerating(false);
+        const errorMessage = response.error || response.message || "Unable to generate charts right now.";
+        setConnectionError(errorMessage);
+        console.error('[AIAssistant] chart_creation error:', errorMessage);
+        toast.error(errorMessage);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: prev.length + 1,
+            type: 'ai',
+            content: errorMessage,
+          },
+        ]);
+      }
+    };
+
+    client.on('chart_creation', handleChartCreation);
+    client.onError((error) => {
+      console.error('[AIAssistant] WebSocket error:', error);
+      setIsGenerating(false);
+      setConnectionError(error.message || 'WebSocket connection error');
+      toast.error('Connection lost. Please try again.');
+    });
+
+    client.connect()
+      .then(() => {
+        setWsClient(client);
+        setIsConnecting(false);
+      })
+      .catch((error) => {
+        console.error('[AIAssistant] Failed to connect to WebSocket:', error);
+        setIsConnecting(false);
+        setConnectionError(error?.message || 'Failed to connect to AI assistant');
+        toast.error(error?.message || 'Failed to connect to AI assistant');
+      });
+
+    return () => {
+      client.off('chart_creation', handleChartCreation);
+      client.disconnect();
+      setWsClient(null);
+    };
+  }, [isOpen, userId]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchUserId = async () => {
+      try {
+        const response = await getCurrentUser();
+        if (isMounted && response.success && response.data?.id) {
+          setUserId(response.data.id);
+        }
+      } catch (error: any) {
+        console.error("AIAssistant: Failed to fetch current user:", error);
+        toast.error(error?.message || "Unable to load user information for AI assistant");
+      }
+    };
+
+    if (!userId) {
+      fetchUserId();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, userId]);
 
   const fetchDashboards = async () => {
     if (!projectId) return;
@@ -115,10 +278,11 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
     try {
       const response = await getDatabases(String(projectId));
       if (response.success && response.data) {
-        const fetchedDatabases = response.data.map(db => ({
+        const fetchedDatabases = response.data.map((db) => ({
           id: db.id,
           name: db.name,
           type: db.type,
+          schema: db.schema ?? null,
         }));
         setDatabases(fetchedDatabases);
         console.log('AIAssistant: Fetched databases', { count: fetchedDatabases.length, databases: fetchedDatabases });
@@ -171,14 +335,15 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
         label: db.name,
         id: db.id,
         name: db.name,
-        type: db.type
+        type: db.type,
+        schema: db.schema ?? null,
       }))
     : [
-        { value: "sales-db", label: "Sales Database", id: "sales-db", name: "Sales Database", type: "postgresql" },
-        { value: "inventory-db", label: "Inventory DB", id: "inventory-db", name: "Inventory DB", type: "postgresql" },
-        { value: "analytics-db", label: "Analytics DB", id: "analytics-db", name: "Analytics DB", type: "mysql" },
-        { value: "customer-db", label: "Customer DB", id: "customer-db", name: "Customer DB", type: "mysql" },
-        { value: "marketing-db", label: "Marketing DB", id: "marketing-db", name: "Marketing DB", type: "postgresql" }
+        { value: "sales-db", label: "Sales Database", id: "sales-db", name: "Sales Database", type: "postgresql", schema: null },
+        { value: "inventory-db", label: "Inventory DB", id: "inventory-db", name: "Inventory DB", type: "postgresql", schema: null },
+        { value: "analytics-db", label: "Analytics DB", id: "analytics-db", name: "Analytics DB", type: "mysql", schema: null },
+        { value: "customer-db", label: "Customer DB", id: "customer-db", name: "Customer DB", type: "mysql", schema: null },
+        { value: "marketing-db", label: "Marketing DB", id: "marketing-db", name: "Marketing DB", type: "postgresql", schema: null }
   ];
 
   const handleDatabaseSelect = (dbValue: string) => {
@@ -206,7 +371,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
   const handleSend = () => {
     if (!input.trim()) return;
 
-    // If no database selected, show prompt
+    // If no database selected, prompt the user to choose one
     if (!selectedDatabase) {
       setShowDatabaseSelection(true);
       const aiMessage: Message = {
@@ -218,56 +383,59 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       return;
     }
 
+    if (!wsClient || !wsClient.isConnected()) {
+      toast.error(isConnecting ? "Still connecting to AI assistant..." : "AI assistant is not connected. Please try again.");
+      return;
+    }
+
+    const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
+    if (!selectedDb) {
+      toast.error("Please select a valid database connection first.");
+      return;
+    }
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isRealDatabase = uuidRegex.test(String(selectedDb.id));
+    if (!isRealDatabase && databases.length > 0) {
+      toast.error("Please select a valid database connection from the list.");
+      return;
+    }
+
+    const schemaString = ensureSchemaString(selectedDb.schema);
+    if (!selectedDb.schema) {
+      toast.warning("Schema details for this database are unavailable. Chart quality may be limited.");
+    }
+
     const userMessage: Message = {
       id: messages.length + 1,
       type: 'user',
-      content: input
+      content: input.trim(),
     };
 
-    setMessages([...messages, userMessage]);
-    const currentInput = input;
+    const loadingMessage: Message = {
+      id: messages.length + 2,
+      type: 'ai',
+      content: 'Analyzing your request and generating chart suggestions...'
+    };
+
+    const nlqQuery = input.trim();
+    setMessages(prev => [...prev, userMessage, loadingMessage]);
     setInput("");
     setIsGenerating(true);
 
-    // Simulate AI processing and chart generation
-    setTimeout(() => {
-      const mockSuggestions: ChartSuggestion[] = [
-        {
-          id: `cs-${Date.now()}-1`,
-          name: "Financial Performance Overview",
-          type: "line",
-          description: "Revenue and expenses trend for the last financial year",
-          query: "SELECT \n  DATE_TRUNC('month', transaction_date) as month,\n  SUM(CASE WHEN type = 'revenue' THEN amount ELSE 0 END) as revenue,\n  SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as expenses\nFROM financial_transactions\nWHERE transaction_date >= DATE_SUB(CURRENT_DATE, INTERVAL 12 MONTH)\nGROUP BY month\nORDER BY month ASC;",
-          reasoning: `Based on your request "${currentInput}", this chart shows revenue vs expenses trends over the last fiscal year.`
-        },
-        {
-          id: `cs-${Date.now()}-2`,
-          name: "Expense Breakdown by Category",
-          type: "pie",
-          description: "Distribution of expenses across different categories",
-          query: "SELECT \n  expense_category,\n  SUM(amount) as total_expense\nFROM financial_transactions\nWHERE type = 'expense'\n  AND transaction_date >= DATE_SUB(CURRENT_DATE, INTERVAL 12 MONTH)\nGROUP BY expense_category;",
-          reasoning: "This pie chart helps visualize where the money is being spent across different expense categories."
-        },
-        {
-          id: `cs-${Date.now()}-3`,
-          name: "Quarterly Revenue Comparison",
-          type: "bar",
-          description: "Compare revenue performance across quarters",
-          query: "SELECT \n  CONCAT('Q', QUARTER(transaction_date), ' ', YEAR(transaction_date)) as quarter,\n  SUM(amount) as revenue\nFROM financial_transactions\nWHERE type = 'revenue'\n  AND transaction_date >= DATE_SUB(CURRENT_DATE, INTERVAL 12 MONTH)\nGROUP BY quarter\nORDER BY MIN(transaction_date);",
-          reasoning: "Bar chart for comparing quarterly performance makes it easy to spot trends and seasonal patterns."
-        }
-      ];
-
-      const aiMessage: Message = {
-        id: messages.length + 2,
-        type: 'chart-suggestions',
-        content: `I've analyzed your request and generated ${mockSuggestions.length} chart suggestions. You can review the SQL queries and create the ones you need.`,
-        chartSuggestions: mockSuggestions
-      };
-
-      setMessages(prev => [...prev, aiMessage]);
+    try {
+      wsClient.chartCreation({
+        nlq_query: nlqQuery,
+        data_connection_id: String(selectedDb.id),
+        db_schema: schemaString,
+        db_type: normalizeDbType(selectedDb.type),
+        role: 'Analyst',
+      });
+    } catch (error: any) {
+      console.error('[AIAssistant] Failed to send chart creation request:', error);
       setIsGenerating(false);
-    }, 2000);
+      toast.error(error?.message || 'Failed to submit your request. Please try again.');
+    }
   };
 
   const handleCreateChart = (suggestion: ChartSuggestion) => {
@@ -470,8 +638,14 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-background">
-          {messages.map((message) => (
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-muted/20">
+          {connectionError && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+              {connectionError}
+            </div>
+          )}
+          <AnimatePresence>
+            {messages.map((message) => (
             <div key={message.id}>
               {message.type === 'user' && (
                 <div className="flex justify-end">
@@ -572,6 +746,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
               )}
             </div>
           ))}
+          </AnimatePresence>
 
           {isGenerating && (
             <div className="flex justify-start">
@@ -650,17 +825,27 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
           <div className="p-6 border-t border-border bg-card shrink-0">
             <div className="flex gap-3">
               <input
-                type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && !isGenerating && handleSend()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isGenerating) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
                 placeholder="Describe the charts you need..."
                 disabled={isGenerating}
                 className="flex-1 px-4 py-3 bg-input-background border border-border rounded-lg outline-none focus:ring-2 focus:ring-accent text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
               />
               <GradientButton
                 onClick={handleSend}
-                disabled={!input.trim() || isGenerating}
+                disabled={
+                  !input.trim() ||
+                  isGenerating ||
+                  isConnecting ||
+                  !selectedDatabase ||
+                  !(wsClient && wsClient.isConnected())
+                }
                 size="icon"
                 className="flex-shrink-0 h-11 w-11"
               >

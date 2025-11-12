@@ -12,7 +12,7 @@
 const getWebSocketUrl = (): string => {
   // Try to get from environment variable, otherwise use ngrok URL
   const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
-  const baseUrl = env?.VITE_WEBSOCKET_URL || 'https://nonmyopic-diligently-madden.ngrok-free.dev';
+  const baseUrl = env?.VITE_WEBSOCKET_URL || 'https://mounted-chance-vigilantly.ngrok-free.dev';
   
   // Convert https:// to wss:// and remove trailing slash if present
   let wsUrl = baseUrl.trim().replace(/\/$/, ''); // Remove trailing slash

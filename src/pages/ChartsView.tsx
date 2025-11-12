@@ -594,14 +594,18 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   };
 
   // Helper to map chart type
-  const mapChartType = (type: string): 'line' | 'bar' | 'pie' | 'area' => {
+  const mapChartType = (type: string | undefined | null): 'line' | 'bar' | 'pie' | 'area' => {
+    if (!type) {
+      return 'line';
+    }
+    const normalized = type.toLowerCase();
     const typeMap: Record<string, 'line' | 'bar' | 'pie' | 'area'> = {
       line: 'line',
       bar: 'bar',
       pie: 'pie',
       area: 'area',
     };
-    return typeMap[type.toLowerCase()] || 'line';
+    return typeMap[normalized] || 'line';
   };
 
 
@@ -681,12 +685,15 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
 
   // Filter charts
   const filteredCharts = charts.filter(chart => {
-    const matchesSearch = chart.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         chart.dataSource.toLowerCase().includes(searchQuery.toLowerCase());
+    const name = chart.name ? chart.name.toLowerCase() : '';
+    const dataSource = chart.dataSource ? chart.dataSource.toLowerCase() : '';
+    const query = searchQuery.toLowerCase();
+
+    const matchesSearch = name.includes(query) || dataSource.includes(query);
     const matchesStatus = filterStatus === "all" || chart.status === filterStatus;
     const matchesDashboard = filterDashboard === "all" || 
-                            (filterDashboard === "unassigned" && !chart.dashboardId) ||
-                            (chart.dashboardId && chart.dashboardId.toString() === filterDashboard);
+                           (filterDashboard === "unassigned" && !chart.dashboardId) ||
+                           (chart.dashboardId && chart.dashboardId.toString() === filterDashboard);
     const matchesDatabase = filterDatabase === "all" || chart.dataSource === filterDatabase;
     
     return matchesSearch && matchesStatus && matchesDashboard && matchesDatabase;

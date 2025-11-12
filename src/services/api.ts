@@ -822,14 +822,18 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
 /**
  * Map backend chart type to frontend type
  */
-function mapChartType(backendType: string): 'line' | 'bar' | 'pie' | 'area' {
+function mapChartType(backendType?: string | null): 'line' | 'bar' | 'pie' | 'area' {
+  if (!backendType) {
+    return 'line';
+  }
+  const normalized = backendType.toString().toLowerCase();
   const typeMap: Record<string, 'line' | 'bar' | 'pie' | 'area'> = {
     line: 'line',
     bar: 'bar',
     pie: 'pie',
     area: 'area',
   };
-  return typeMap[backendType.toLowerCase()] || 'line';
+  return typeMap[normalized] || 'line';
 }
 
 /**
@@ -1199,6 +1203,9 @@ export interface Database {
   username: string;
   status: 'connected' | 'disconnected' | 'error';
   lastChecked: string;
+  schema?: string | null;
+  connectionString?: string | null;
+  consentGiven?: boolean;
 }
 
 export interface DatabaseSchema {
@@ -1229,6 +1236,8 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
         db_username?: string;
         project_id: string;
         consent_given?: boolean;
+        db_schema?: string;
+        db_connection_string?: string;
       }>;
     }>(`/api/v1/backend/connections/${projectId}`);
 
@@ -1242,6 +1251,8 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
       db_username?: string;
       project_id: string;
       consent_given?: boolean;
+      db_schema?: string;
+      db_connection_string?: string;
     }> = [];
 
     if (response.connections && Array.isArray(response.connections)) {
@@ -1260,6 +1271,9 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
         username: conn.db_username || '',
         status: 'connected' as const,
         lastChecked: new Date().toISOString(), // Backend doesn't provide created_at in this response
+        schema: conn.db_schema ?? null,
+        connectionString: conn.db_connection_string ?? null,
+        consentGiven: conn.consent_given ?? undefined,
       })),
     };
   } catch (error: any) {

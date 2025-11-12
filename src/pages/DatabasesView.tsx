@@ -170,6 +170,22 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
     toast.success(`Connection "${db.name}" deleted successfully`);
   };
 
+  const handleConnectionFlowCancel = () => {
+    setShowConnectionFlow(false);
+  };
+
+  if (showConnectionFlow) {
+    return (
+      <div className="min-h-full bg-background">
+        <DatabaseConnectionFlow
+          projectId={projectId ? String(projectId) : undefined}
+          onComplete={handleConnectionFlowComplete}
+          onCancel={handleConnectionFlowCancel}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="px-12 py-10">
       <div className="max-w-[1600px] mx-auto">
@@ -314,14 +330,6 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
           </Card>
 
         {/* Database Connection Flow */}
-        {showConnectionFlow && (
-          <DatabaseConnectionFlow
-            projectId={projectId ? String(projectId) : undefined}
-            onComplete={handleConnectionFlowComplete}
-            onCancel={() => setShowConnectionFlow(false)}
-          />
-        )}
-
         {/* View Connection Dialog */}
         <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
           <DialogContent className="max-w-2xl">
