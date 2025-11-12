@@ -14,7 +14,7 @@
  * />
  */
 
-import { ReactNode } from 'react';
+import React, { ReactNode } from 'react';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { Card } from '../ui/card';
 

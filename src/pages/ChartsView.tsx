@@ -1,0 +1,1280 @@
+import { useState, useEffect } from "react";
+import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, Pin, Trash2, Plus, Clock, Filter } from "lucide-react";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
+import { Input } from "../components/ui/input";
+import { GradientButton } from "../components/shared/GradientButton";
+import { StatusBadge } from "../components/shared/StatusBadge";
+import { ActionButtonGroup } from "../components/shared/ActionButtonGroup";
+import { SkeletonGrid } from "../components/shared/SkeletonCard";
+import { usePinnedCharts } from "../context/PinnedChartsContext";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "../components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../components/ui/alert-dialog";
+import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
+import { toast } from "sonner";
+import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, deleteChart, type Chart as ApiChart } from "../services/api";
+import {
+  LineChart as RechartsLine,
+  Line,
+  BarChart as RechartsBar,
+  Bar,
+  AreaChart as RechartsArea,
+  Area,
+  PieChart as RechartsPie,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+} from "recharts";
+
+interface Chart {
+  id: number | string;
+  name: string;
+  type: 'line' | 'bar' | 'pie' | 'area';
+  dataSource: string;
+  createdAt: string;
+  lastUpdated: string;
+  query?: string;
+  status: 'draft' | 'published';
+  dashboardId?: number;
+  createdById?: number;
+  projectId?: number | string;
+  isGenerated?: boolean;
+  isFavorite?: boolean;
+}
+
+interface ChartSuggestion {
+  id: string;
+  name: string;
+  type: 'line' | 'bar' | 'pie' | 'area';
+  description: string;
+  query: string;
+  reasoning: string;
+  dashboards?: string[];
+  dataSource?: string;
+}
+
+interface Dashboard {
+  id: number;
+  name: string;
+}
+
+const initialCharts: Chart[] = [
+  {
+    id: 1,
+    name: "Revenue Trend",
+    type: "line",
+    dataSource: "Sales Database",
+    createdAt: "2025-10-15",
+    lastUpdated: "2 hours ago",
+    query: "SELECT date, SUM(amount) as revenue FROM sales GROUP BY date ORDER BY date",
+    status: "published",
+    dashboardId: 1
+  },
+  {
+    id: 2,
+    name: "Product Distribution",
+    type: "pie",
+    dataSource: "Inventory DB",
+    createdAt: "2025-10-14",
+    lastUpdated: "5 hours ago",
+    query: "SELECT category, COUNT(*) as count FROM products GROUP BY category",
+    status: "published",
+    dashboardId: 1
+  },
+  {
+    id: 3,
+    name: "Monthly Sales",
+    type: "bar",
+    dataSource: "Sales Database",
+    createdAt: "2025-10-13",
+    lastUpdated: "1 day ago",
+    query: "SELECT MONTH(date) as month, SUM(amount) as total FROM sales GROUP BY MONTH(date)",
+    status: "draft"
+  },
+  {
+    id: 4,
+    name: "User Growth",
+    type: "area",
+    dataSource: "Analytics DB",
+    createdAt: "2025-10-12",
+    lastUpdated: "2 days ago",
+    query: "SELECT date, COUNT(DISTINCT user_id) as users FROM events GROUP BY date",
+    status: "published",
+    dashboardId: 2
+  },
+  {
+    id: 5,
+    name: "Conversion Funnel",
+    type: "area",
+    dataSource: "Analytics DB",
+    createdAt: "2025-10-10",
+    lastUpdated: "3 days ago",
+    query: "SELECT stage, COUNT(*) as count FROM funnel GROUP BY stage",
+    status: "draft"
+  },
+  {
+    id: 6,
+    name: "Regional Sales",
+    type: "bar",
+    dataSource: "Sales Database",
+    createdAt: "2025-10-08",
+    lastUpdated: "5 days ago",
+    query: "SELECT region, SUM(revenue) as total FROM sales GROUP BY region",
+    status: "published",
+    dashboardId: 2
+  }
+];
+
+const mockDashboards: Dashboard[] = [
+  { id: 1, name: "Revenue Overview" },
+  { id: 2, name: "Customer Analytics" },
+  { id: 3, name: "Sales Performance" },
+  { id: 4, name: "Product Metrics" },
+  { id: 5, name: "Marketing ROI" },
+  { id: 6, name: "Operations Dashboard" }
+];
+
+const mockDatabases = [
+  { id: 1, name: "Sales Database", type: "PostgreSQL" },
+  { id: 2, name: "Analytics DB", type: "MySQL" },
+  { id: 3, name: "Inventory DB", type: "PostgreSQL" },
+  { id: 4, name: "Customer DB", type: "MySQL" }
+];
+
+const chartTypeIcons = {
+  line: LineChart,
+  bar: BarChart3,
+  pie: PieChart,
+  area: AreaChart
+};
+
+const chartTypeColors = {
+  line: "from-blue-500/20 to-blue-600/20 border-blue-500/30",
+  bar: "from-purple-500/20 to-purple-600/20 border-purple-500/30",
+  pie: "from-green-500/20 to-green-600/20 border-green-500/30",
+  area: "from-orange-500/20 to-orange-600/20 border-orange-500/30"
+};
+
+// Mock chart data
+const mockLineData = [
+  { name: 'Jan', value: 400 },
+  { name: 'Feb', value: 300 },
+  { name: 'Mar', value: 600 },
+  { name: 'Apr', value: 800 },
+];
+
+const mockBarData = [
+  { name: 'A', value: 400 },
+  { name: 'B', value: 300 },
+  { name: 'C', value: 600 },
+];
+
+const mockPieData = [
+  { name: 'A', value: 400 },
+  { name: 'B', value: 300 },
+  { name: 'C', value: 300 },
+];
+
+const mockAreaData = [
+  { name: 'Jan', value: 200 },
+  { name: 'Feb', value: 400 },
+  { name: 'Mar', value: 300 },
+  { name: 'Apr', value: 600 },
+];
+
+const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))"];
+
+interface ChartsViewProps {
+  currentUser?: { id: number; name: string; email: string };
+  projectId?: number | string;
+  onChartCreated?: (chart: Chart) => void;
+  pendingChartFromAI?: {
+    name: string;
+    type: 'line' | 'bar' | 'pie' | 'area';
+    dataSource: string;
+    query: string;
+    status: 'draft' | 'published';
+    dashboardId?: number;
+  } | null;
+  onChartFromAIProcessed?: () => void;
+  onOpenAIAssistant?: () => void;
+  onEditChart?: (chart: { name: string; type: 'line' | 'bar' | 'pie' | 'area'; description?: string }) => void;
+}
+
+// Helper function to format time ago
+const formatTimeAgo = (dateString: string): string => {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins} minutes ago`;
+  if (diffHours < 24) return `${diffHours} hours ago`;
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return date.toLocaleDateString();
+};
+
+// Helper function to convert chart ID to number for PinnedChartData
+const chartIdToNumber = (id: string | number): number => {
+  if (typeof id === 'number') return id;
+  // Try to parse as integer first
+  const parsed = parseInt(id, 10);
+  if (!isNaN(parsed)) return parsed;
+  // If parsing fails (e.g., UUID), create a numeric hash
+  return id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+};
+
+export function ChartsView({ currentUser, projectId, onChartCreated, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart }: ChartsViewProps) {
+  const { isPinned, togglePin } = usePinnedCharts();
+  const [charts, setCharts] = useState<Chart[]>([]);
+  const [generatedCharts, setGeneratedCharts] = useState<Chart[]>([]);
+  const [chartToDelete, setChartToDelete] = useState<Chart | null>(null);
+  const [previewChart, setPreviewChart] = useState<ChartSuggestion | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterDashboard, setFilterDashboard] = useState<string>("all");
+  const [filterDatabase, setFilterDatabase] = useState<string>("all");
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isLoadingCharts, setIsLoadingCharts] = useState(true);
+  const [chartToAddToDashboard, setChartToAddToDashboard] = useState<Chart | null>(null);
+  const [selectedDashboardForAdd, setSelectedDashboardForAdd] = useState("");
+  const [isGeneratingCharts, setIsGeneratingCharts] = useState(false);
+  const [showGenerateDialog, setShowGenerateDialog] = useState(false);
+  const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [selectedDatabaseForGenerate, setSelectedDatabaseForGenerate] = useState("");
+  const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
+
+  // Fetch charts when projectId is available
+  useEffect(() => {
+    if (projectId) {
+      fetchCharts();
+      fetchDatabases();
+      fetchDashboards();
+    } else {
+      setIsLoadingCharts(false);
+    }
+  }, [projectId]);
+
+  const fetchDatabases = async () => {
+    if (!projectId) return;
+    
+    try {
+      const response = await getDatabases(String(projectId));
+      if (response.success && response.data) {
+        setDatabases(response.data.map(db => ({
+          id: db.id,
+          name: db.name,
+          type: db.type,
+        })));
+      }
+    } catch (err: any) {
+      // Silently fail - databases not critical for charts view
+      console.error("Failed to fetch databases:", err);
+    }
+  };
+
+  const fetchDashboards = async () => {
+    if (!projectId) return;
+    
+    try {
+      const response = await getDashboards(String(projectId));
+      if (response.success && response.data) {
+        setDashboards(response.data.map(dashboard => ({
+          id: dashboard.id,
+          name: dashboard.name,
+        })));
+      }
+    } catch (err: any) {
+      // Silently fail - dashboards not critical for charts view
+      console.error("Failed to fetch dashboards:", err);
+    }
+  };
+
+  const fetchCharts = async () => {
+    if (!projectId) return;
+    
+    setIsLoadingCharts(true);
+    try {
+      const response = await getCharts(String(projectId));
+      if (response.success && response.data) {
+        // Map API charts to UI format
+        const uiCharts: Chart[] = response.data.map((chart) => ({
+          id: chart.id,
+          name: chart.name,
+          type: chart.type,
+          dataSource: chart.databaseId ? `Database ${chart.databaseId}` : "Unknown Database",
+          createdAt: chart.createdAt,
+          lastUpdated: formatTimeAgo(chart.updatedAt || chart.createdAt),
+          query: chart.query,
+          status: 'published' as const, // API doesn't provide status, default to published
+          createdById: currentUser?.id,
+          projectId: chart.projectId || projectId,
+          isGenerated: false,
+          isFavorite: (chart as any).isFavorite || false, // Include favorite status if available
+        }));
+        setCharts(uiCharts);
+      } else {
+        toast.error(response.error?.message || "Failed to load charts");
+        // Fallback to empty array on error
+        setCharts([]);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while fetching charts");
+      setCharts([]);
+    } finally {
+      setIsLoadingCharts(false);
+    }
+  };
+
+  // Handle pending chart from AI Assistant - create via API
+  useEffect(() => {
+    if (pendingChartFromAI && projectId) {
+      handleCreateChartFromAI(pendingChartFromAI);
+    }
+  }, [pendingChartFromAI, projectId]);
+
+  const handleCreateChartFromAI = async (chartData: {
+    name: string;
+    type: 'line' | 'bar' | 'pie' | 'area';
+    dataSource: string;
+    query: string;
+    status: 'draft' | 'published';
+    dashboardId?: number;
+  }) => {
+    if (!projectId) {
+      toast.error("Project ID is required to create a chart");
+      return;
+    }
+
+    try {
+      // Extract database ID from dataSource if it's in format "Database {id}"
+      // Support both UUID format and numeric IDs
+      let databaseId: string | undefined;
+      const dbIdMatch = chartData.dataSource.match(/Database ([^\s]+)/);
+      if (dbIdMatch) {
+        databaseId = dbIdMatch[1];
+      } else {
+        // If not in "Database {id}" format, check if dataSource is the ID directly
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (chartData.dataSource && uuidRegex.test(chartData.dataSource)) {
+          databaseId = chartData.dataSource;
+        }
+      }
+
+      if (!databaseId) {
+        toast.error("Database connection ID is required. Please select a database when creating the chart.");
+        return;
+      }
+
+      const response = await createChart(String(projectId), {
+        name: chartData.name,
+        type: chartData.type,
+        query: chartData.query,
+        databaseId: databaseId,
+        config: {},
+      });
+
+      if (response.success && response.data) {
+        // Map API chart to UI format
+        const newChart: Chart = {
+          id: response.data.id,
+          name: response.data.name,
+          type: response.data.type,
+          dataSource: chartData.dataSource,
+          createdAt: response.data.createdAt,
+          lastUpdated: "just now",
+          query: response.data.query,
+          status: chartData.status,
+          dashboardId: chartData.dashboardId,
+          createdById: currentUser?.id,
+          projectId: response.data.projectId || projectId,
+          isGenerated: true,
+        };
+
+        setCharts(prev => [newChart, ...prev]);
+        onChartCreated?.(newChart);
+        
+        if (chartData.status === 'draft') {
+          toast.success(`Chart "${chartData.name}" saved as draft!`);
+        } else {
+          toast.success(`Chart "${chartData.name}" added to dashboard!`);
+        }
+        
+        onChartFromAIProcessed?.();
+      } else {
+        toast.error(response.error?.message || "Failed to create chart");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while creating chart");
+    }
+  };
+
+  const handleDeleteChart = async () => {
+    if (!chartToDelete) return;
+    
+    try {
+      const chartId = typeof chartToDelete.id === 'string' ? chartToDelete.id : String(chartToDelete.id);
+      const response = await deleteChart(chartId, chartToDelete.dashboardId);
+      
+      if (response.success) {
+        setCharts(charts.filter(c => c.id !== chartToDelete.id));
+        setGeneratedCharts(generatedCharts.filter(c => c.id !== chartToDelete.id));
+        toast.success(`Chart "${chartToDelete.name}" deleted successfully!`);
+        setChartToDelete(null);
+      } else {
+        toast.error(response.error?.message || "Failed to delete chart");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while deleting chart");
+    }
+  };
+
+  const handleTogglePin = async (chart: Chart) => {
+    // Ensure chart.id is a string (UUID) for API call
+    const chartId = typeof chart.id === 'string' ? chart.id : String(chart.id);
+    
+    try {
+      const response = await updateFavoriteChart(chartId);
+      if (response.success && response.data) {
+        const newFavoriteStatus = response.data.is_favorite;
+        
+        // Update local chart state
+        const updateChartFavorite = (prevCharts: Chart[]) => 
+          prevCharts.map(c => c.id === chart.id ? { ...c, isFavorite: newFavoriteStatus } : c);
+        
+        setCharts(updateChartFavorite);
+        setGeneratedCharts(updateChartFavorite);
+        
+        // Also update context for UI consistency
+        const dashboard = mockDashboards.find(d => d.id === chart.dashboardId);
+        const numericId = chartIdToNumber(chart.id);
+        const pinnedChartData = {
+          id: numericId,
+          name: chart.name,
+          description: `${chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} chart from ${chart.dataSource}`,
+          lastUpdated: chart.lastUpdated,
+          chartType: chart.type,
+          category: chart.type.charAt(0).toUpperCase() + chart.type.slice(1),
+          dashboardName: dashboard?.name || 'No Dashboard',
+          dataSource: chart.dataSource
+        };
+        
+        // Update context based on new favorite status
+        if (newFavoriteStatus && !isPinned(numericId)) {
+          // Pin if not already pinned in context
+          togglePin(pinnedChartData);
+        } else if (!newFavoriteStatus && isPinned(numericId)) {
+          // Unpin if currently pinned in context
+          togglePin(pinnedChartData);
+        }
+        
+        toast.success(newFavoriteStatus 
+          ? `"${chart.name}" pinned to Home Dashboard`
+          : `"${chart.name}" unpinned from Home Dashboard`);
+      } else {
+        toast.error(response.error?.message || "Failed to update favorite status");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while updating favorite status");
+    }
+  };
+
+  const handleOpenChartPreview = (chart: Chart) => {
+    // Find which dashboards this chart belongs to
+    const chartDashboards = chart.dashboardId 
+      ? [mockDashboards.find(d => d.id === chart.dashboardId)?.name].filter(Boolean) as string[]
+      : [];
+    
+    const chartAsSuggestion: ChartSuggestion & { dataSource?: string } = {
+      id: `existing-${chart.id}`,
+      name: chart.name,
+      type: chart.type,
+      description: `${chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} chart from ${chart.dataSource}`,
+      query: chart.query || "",
+      reasoning: `This is an existing chart from your ${chart.dataSource} database.`,
+      dashboards: chartDashboards,
+      dataSource: chart.dataSource
+    };
+    setPreviewChart(chartAsSuggestion);
+  };
+
+  const handleGenerateCharts = () => {
+    // Always open AI Assistant instead of showing dialog
+    // This provides a better user experience for chart generation
+    if (onOpenAIAssistant) {
+      onOpenAIAssistant();
+    } else {
+      // Fallback: If AI Assistant is not available, show dialog only if databases exist
+      if (databases.length > 0) {
+        setShowGenerateDialog(true);
+        if (databases.length === 1) {
+          setSelectedDatabaseForGenerate(databases[0].id);
+        }
+      } else {
+        toast.error("No databases available. Please add a database connection first.");
+      }
+    }
+  };
+
+  const handleConfirmGenerateCharts = async () => {
+    if (!projectId || !selectedDatabaseForGenerate) {
+      toast.error("Please select a database");
+      return;
+    }
+
+    setIsGeneratingCharts(true);
+    try {
+      const selectedDb = databases.find(db => db.id === selectedDatabaseForGenerate);
+      const response = await generateCharts(String(projectId), selectedDatabaseForGenerate, {
+        db_type: selectedDb?.type || 'postgresql',
+        role: 'admin',
+      });
+
+      if (response.success && response.data) {
+        // Map generated charts to UI format
+        const newCharts: Chart[] = response.data.generated_charts.map((chart) => ({
+          id: chart.id,
+          name: chart.title,
+          type: mapChartType(chart.chart_type) as 'line' | 'bar' | 'pie' | 'area',
+          dataSource: selectedDb?.name || "Unknown Database",
+          createdAt: new Date().toISOString(),
+          lastUpdated: "just now",
+          query: chart.query,
+          status: 'draft' as const,
+          createdById: currentUser?.id,
+          projectId: projectId,
+          isGenerated: true,
+        }));
+
+        setGeneratedCharts(prev => [...newCharts, ...prev]);
+        setCharts(prev => [...newCharts, ...prev]);
+        toast.success(`Generated ${newCharts.length} chart(s) successfully!`);
+        setShowGenerateDialog(false);
+        setSelectedDatabaseForGenerate("");
+      } else {
+        toast.error(response.error?.message || "Failed to generate charts");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while generating charts");
+    } finally {
+      setIsGeneratingCharts(false);
+    }
+  };
+
+  // Helper to map chart type
+  const mapChartType = (type: string | undefined | null): 'line' | 'bar' | 'pie' | 'area' => {
+    if (!type) {
+      return 'line';
+    }
+    const normalized = type.toLowerCase();
+    const typeMap: Record<string, 'line' | 'bar' | 'pie' | 'area'> = {
+      line: 'line',
+      bar: 'bar',
+      pie: 'pie',
+      area: 'area',
+    };
+    return typeMap[normalized] || 'line';
+  };
+
+
+
+  const handleAddToDashboard = async (chart: Chart) => {
+    if (!selectedDashboardForAdd) {
+      toast.error("Please select a dashboard");
+      return;
+    }
+
+    if (!projectId) {
+      toast.error("Project ID is required");
+      return;
+    }
+
+    // Extract database ID from dataSource if it's in format "Database {id}"
+    // Support both UUID format and numeric IDs
+    let databaseId: string | undefined;
+    const dbIdMatch = chart.dataSource.match(/Database ([^\s]+)/);
+    if (dbIdMatch) {
+      databaseId = dbIdMatch[1];
+    } else {
+      // If not in "Database {id}" format, check if dataSource is the ID directly (UUID)
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (chart.dataSource && uuidRegex.test(chart.dataSource)) {
+        databaseId = chart.dataSource;
+      }
+    }
+
+    if (!databaseId) {
+      toast.error("Database connection ID is required to add chart to dashboard");
+      return;
+    }
+
+    try {
+      const response = await addChartToDashboard({
+        title: chart.name,
+        query: chart.query || '',
+        chart_type: chart.type,
+        dashboard_id: selectedDashboardForAdd,
+        data_connection_id: databaseId,
+        type: chart.type,
+      });
+
+      if (response.success) {
+        // Update local state
+        const dashboardId = parseInt(selectedDashboardForAdd);
+        const updatedChart = { ...chart, dashboardId, status: 'published' as const };
+        
+        // Update in generated charts if it exists there
+        if (generatedCharts.find(c => c.id === chart.id)) {
+          setGeneratedCharts(prev => prev.map(c => c.id === chart.id ? updatedChart : c));
+        }
+        
+        // Update in all charts if it exists there
+        if (charts.find(c => c.id === chart.id)) {
+          setCharts(prev => prev.map(c => c.id === chart.id ? updatedChart : c));
+        } else {
+          // If not in charts, add it
+          setCharts(prev => [updatedChart, ...prev]);
+        }
+
+        const allDashboards = dashboards.length > 0 ? dashboards : mockDashboards.map(d => ({ id: d.id, name: d.name }));
+        const dashboard = allDashboards.find(d => String(d.id) === selectedDashboardForAdd);
+        toast.success(`"${chart.name}" added to ${dashboard?.name || 'dashboard'}`);
+        setChartToAddToDashboard(null);
+        setSelectedDashboardForAdd("");
+        // Refresh dashboards to get updated chart counts
+        fetchDashboards();
+      } else {
+        toast.error(response.error?.message || "Failed to add chart to dashboard");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while adding chart to dashboard");
+    }
+  };
+
+  // Filter charts
+  const filteredCharts = charts.filter(chart => {
+    const name = chart.name ? chart.name.toLowerCase() : '';
+    const dataSource = chart.dataSource ? chart.dataSource.toLowerCase() : '';
+    const query = searchQuery.toLowerCase();
+
+    const matchesSearch = name.includes(query) || dataSource.includes(query);
+    const matchesStatus = filterStatus === "all" || chart.status === filterStatus;
+    const matchesDashboard = filterDashboard === "all" || 
+                           (filterDashboard === "unassigned" && !chart.dashboardId) ||
+                           (chart.dashboardId && chart.dashboardId.toString() === filterDashboard);
+    const matchesDatabase = filterDatabase === "all" || chart.dataSource === filterDatabase;
+    
+    return matchesSearch && matchesStatus && matchesDashboard && matchesDatabase;
+  });
+
+  const renderChartPreview = (chart: Chart) => {
+    // Get chart-specific color
+    const chartColor = {
+      line: '#06B6D4',
+      bar: '#8B5CF6',
+      pie: '#10B981',
+      area: '#F59E0B'
+    }[chart.type];
+
+    const PIE_COLORS = ["#06B6D4", "#5B67F1", "#8B5CF6"];
+    
+    return (
+      <div className="h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden p-4">
+        {chart.type === 'line' && (
+          <ResponsiveContainer width="100%" height="100%">
+            <RechartsLine data={mockLineData} margin={{ top: 5, right: 10, bottom: 5, left: -5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+              <XAxis 
+                dataKey="name" 
+                stroke="hsl(var(--muted-foreground))"
+                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+              />
+              <YAxis 
+                stroke="hsl(var(--muted-foreground))"
+                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                width={35}
+              />
+              <Tooltip 
+                contentStyle={{
+                  backgroundColor: '#1F2937',
+                  border: '2px solid #374151',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  color: '#F9FAFB'
+                }}
+              />
+              <Line type="monotone" dataKey="value" stroke={chartColor} strokeWidth={2.5} dot={{ fill: chartColor, r: 3 }} />
+            </RechartsLine>
+          </ResponsiveContainer>
+        )}
+        {chart.type === 'bar' && (
+          <ResponsiveContainer width="100%" height="100%">
+            <RechartsBar data={mockBarData} margin={{ top: 5, right: 10, bottom: 5, left: -5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+              <XAxis 
+                dataKey="name" 
+                stroke="hsl(var(--muted-foreground))"
+                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+              />
+              <YAxis 
+                stroke="hsl(var(--muted-foreground))"
+                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                width={35}
+              />
+              <Tooltip 
+                contentStyle={{
+                  backgroundColor: '#1F2937',
+                  border: '2px solid #374151',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  color: '#F9FAFB'
+                }}
+              />
+              <Bar dataKey="value" fill={chartColor} radius={[8, 8, 0, 0]} />
+            </RechartsBar>
+          </ResponsiveContainer>
+        )}
+        {chart.type === 'pie' && (
+          <ResponsiveContainer width="100%" height="100%">
+            <RechartsPie margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+              <Pie data={mockPieData} dataKey="value" cx="50%" cy="50%" innerRadius={45} outerRadius={75}>
+                {mockPieData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip 
+                contentStyle={{
+                  backgroundColor: '#1F2937',
+                  border: '2px solid #374151',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  color: '#F9FAFB'
+                }}
+              />
+            </RechartsPie>
+          </ResponsiveContainer>
+        )}
+        {chart.type === 'area' && (
+          <ResponsiveContainer width="100%" height="100%">
+            <RechartsArea data={mockAreaData} margin={{ top: 5, right: 10, bottom: 5, left: -5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+              <XAxis 
+                dataKey="name" 
+                stroke="hsl(var(--muted-foreground))"
+                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+              />
+              <YAxis 
+                stroke="hsl(var(--muted-foreground))"
+                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
+                width={35}
+              />
+              <Tooltip 
+                contentStyle={{
+                  backgroundColor: '#1F2937',
+                  border: '2px solid #374151',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  color: '#F9FAFB'
+                }}
+              />
+              <Area type="monotone" dataKey="value" stroke={chartColor} fill={chartColor} fillOpacity={0.3} strokeWidth={2.5} />
+            </RechartsArea>
+          </ResponsiveContainer>
+        )}
+      </div>
+    );
+  };
+
+  const renderChartCard = (chart: Chart, isGenerated: boolean = false) => {
+    const Icon = chartTypeIcons[chart.type];
+    const dashboard = mockDashboards.find(d => d.id === chart.dashboardId);
+    const colorClass = {
+      line: 'text-[#06B6D4] bg-[#06B6D4]/10',
+      bar: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
+      pie: 'text-[#10B981] bg-[#10B981]/10',
+      area: 'text-[#F59E0B] bg-[#F59E0B]/10'
+    }[chart.type];
+
+    return (
+      <Card
+        key={chart.id}
+        className="overflow-hidden border-2 border-border hover:border-primary/30 hover:shadow-xl transition-smooth cursor-pointer group hover-lift card-shadow relative"
+        onClick={() => !isGenerated && handleOpenChartPreview(chart)}
+      >
+        {/* Compact Header - Overlaid on chart */}
+        <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-card via-card/95 to-transparent pb-8">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${colorClass} transition-smooth group-hover:scale-110`}>
+                <Icon className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-foreground group-hover:text-primary transition-colors line-clamp-1 mb-1">
+                  {chart.name}
+                </h3>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="line-clamp-1">{chart.dataSource}</span>
+                  <span>•</span>
+                  <div className="flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    <span>{chart.lastUpdated}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              {isGenerated && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setChartToAddToDashboard(chart);
+                  }}
+                  className="h-7 w-7 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </Button>
+              )}
+              <ActionButtonGroup
+                actions={[
+                  // Edit functionality commented out
+                  // {
+                  //   icon: <Edit2 />,
+                  //   onClick: (e) => {
+                  //     e?.stopPropagation();
+                  //     if (onEditChart) {
+                  //       onEditChart({
+                  //         name: chart.name,
+                  //         type: chart.type,
+                  //         description: chart.dataSource
+                  //       });
+                  //     }
+                  //     if (onOpenAIAssistant) {
+                  //       onOpenAIAssistant();
+                  //     }
+                  //   },
+                  //   label: "Edit chart",
+                  //   variant: "ghost"
+                  // },
+                  {
+                    icon: <Trash2 />,
+                    onClick: (e) => {
+                      e?.stopPropagation();
+                      setChartToDelete(chart);
+                    },
+                    label: "Delete chart",
+                    variant: "ghost",
+                    className: "hover:text-destructive"
+                  },
+                  {
+                    icon: <Pin className={(chart.isFavorite || isPinned(chartIdToNumber(chart.id))) ? 'fill-primary/20 rotate-45' : ''} />,
+                    onClick: (e) => {
+                      e?.stopPropagation();
+                      handleTogglePin(chart);
+                    },
+                    label: (chart.isFavorite || isPinned(chartIdToNumber(chart.id))) ? "Unpin chart" : "Pin chart",
+                    variant: "ghost",
+                    className: (chart.isFavorite || isPinned(chartIdToNumber(chart.id))) ? 'text-primary hover:text-primary/80 opacity-100' : 'hover:text-primary'
+                  }
+                ]}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Chart Visualization */}
+        <div className="pt-24 px-2 pb-2">
+          {renderChartPreview(chart)}
+        </div>
+
+        {/* Status Badge at Bottom */}
+        {chart.status === 'published' && dashboard && (
+          <div className="px-4 pb-3">
+            <StatusBadge status="published" label={dashboard.name} />
+          </div>
+        )}
+        {chart.status === 'draft' && (
+          <div className="px-4 pb-3">
+            <StatusBadge status="draft" />
+          </div>
+        )}
+      </Card>
+    );
+  };
+
+  if (isLoadingCharts) {
+    return (
+      <div className="h-full overflow-auto bg-background">
+        <div className="max-w-[1600px] mx-auto p-10 space-y-10">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-foreground">Charts</h1>
+              <p className="text-muted-foreground mt-0.5">
+                Generate and manage your data visualizations
+              </p>
+            </div>
+            
+            {/* Skeleton for controls */}
+            <div className="w-full sm:w-[140px] h-9 bg-muted/50 rounded-md animate-pulse opacity-50" />
+          </div>
+
+          {/* Skeleton grid */}
+          <SkeletonGrid count={6} variant="chart" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-auto bg-background">
+      <div className="max-w-[1600px] mx-auto p-10 space-y-10">
+        {/* Header with Inline Generation */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-foreground">Charts</h1>
+            <p className="text-muted-foreground mt-0.5">
+              Generate and manage your data visualizations
+            </p>
+          </div>
+          
+          {/* Compact Generation Controls */}
+          <GradientButton
+            onClick={handleGenerateCharts}
+            size="sm"
+            className="h-9"
+          >
+            <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+            Generate Charts
+          </GradientButton>
+        </div>
+
+        {/* Generated Charts Section */}
+        {generatedCharts.length > 0 && (
+          <div className="space-y-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-foreground">Recently Generated</h2>
+              <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5">
+                {generatedCharts.length} charts
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {generatedCharts.map((chart) => renderChartCard(chart, true))}
+            </div>
+          </div>
+        )}
+
+        {/* All Charts Section */}
+        <div className="space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <h2 className="text-foreground">All Charts</h2>
+
+            {/* Filters */}
+            <div className="flex gap-2">
+              <div className="relative flex-1 sm:flex-initial sm:w-[280px]">
+                <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Search charts..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 h-9 border-border text-sm"
+                />
+              </div>
+              <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className={`h-9 w-9 border-border ${
+                      (filterDashboard !== 'all' || filterDatabase !== 'all' || filterStatus !== 'all')
+                        ? 'border-primary text-primary'
+                        : ''
+                    }`}
+                  >
+                    <Filter className="w-4 h-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-4 border-border" align="end">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm text-foreground">Filters</h3>
+                      {(filterDashboard !== 'all' || filterDatabase !== 'all' || filterStatus !== 'all') && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setFilterDashboard('all');
+                            setFilterDatabase('all');
+                            setFilterStatus('all');
+                          }}
+                          className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          Clear all
+                        </Button>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1.5 block">Dashboard</label>
+                        <Select value={filterDashboard} onValueChange={setFilterDashboard}>
+                          <SelectTrigger className="h-9 border-border">
+                            <SelectValue placeholder="All Dashboards" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Dashboards</SelectItem>
+                            <SelectItem value="unassigned">Unassigned</SelectItem>
+                            {mockDashboards.map((dashboard) => (
+                              <SelectItem key={dashboard.id} value={dashboard.id.toString()}>
+                                {dashboard.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1.5 block">Database</label>
+                        <Select value={filterDatabase} onValueChange={setFilterDatabase}>
+                          <SelectTrigger className="h-9 border-border">
+                            <SelectValue placeholder="All Databases" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Databases</SelectItem>
+                            {mockDatabases.map((database) => (
+                              <SelectItem key={database.id} value={database.name}>
+                                {database.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1.5 block">Status</label>
+                        <Select value={filterStatus} onValueChange={setFilterStatus}>
+                          <SelectTrigger className="h-9 border-border">
+                            <SelectValue placeholder="All Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Status</SelectItem>
+                            <SelectItem value="published">Published</SelectItem>
+                            <SelectItem value="draft">Draft</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+
+          {/* Charts Grid */}
+          {filteredCharts.length === 0 ? (
+            <Card className="border-border p-12">
+              <div className="flex flex-col items-center text-center gap-4">
+                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+                  <BarChart3 className="w-8 h-8 text-muted-foreground" />
+                </div>
+                <div>
+                  <h3 className="text-foreground mb-2">No charts found</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {searchQuery || filterStatus !== "all"
+                      ? "Try adjusting your filters"
+                      : "Generate your first chart using AI"}
+                  </p>
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredCharts.map((chart) => renderChartCard(chart, false))}
+            </div>
+          )}
+        </div>
+
+        {/* Add to Dashboard Dialog */}
+        <Dialog open={!!chartToAddToDashboard} onOpenChange={() => setChartToAddToDashboard(null)}>
+          <DialogContent className="border-border">
+            <DialogHeader>
+              <DialogTitle>Add to Dashboard</DialogTitle>
+              <DialogDescription>
+                Select a dashboard to add "{chartToAddToDashboard?.name}"
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <Select value={selectedDashboardForAdd} onValueChange={setSelectedDashboardForAdd}>
+                <SelectTrigger className="border-border">
+                  <SelectValue placeholder="Select dashboard" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(dashboards.length > 0 ? dashboards : mockDashboards.map(d => ({ id: d.id, name: d.name }))).map((dashboard) => (
+                    <SelectItem key={dashboard.id} value={String(dashboard.id)}>
+                      {dashboard.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="flex justify-end gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setChartToAddToDashboard(null);
+                    setSelectedDashboardForAdd("");
+                  }}
+                  className="border-border"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => chartToAddToDashboard && handleAddToDashboard(chartToAddToDashboard)}
+                  disabled={!selectedDashboardForAdd}
+                  className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add to Dashboard
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Chart Preview Dialog */}
+        {previewChart && (
+          <ChartPreviewDialog
+            chart={previewChart}
+            isOpen={!!previewChart}
+            onClose={() => setPreviewChart(null)}
+            dashboards={dashboards.length > 0 ? dashboards : mockDashboards.map(d => ({ id: d.id, name: d.name }))}
+            projectId={projectId}
+            onAddToDashboard={(dashboardId) => {
+              // Refresh charts after adding to dashboard
+              if (projectId) {
+                fetchCharts();
+                fetchDashboards(); // Refresh dashboards too
+              }
+              setPreviewChart(null);
+            }}
+            onSaveAsDraft={() => {
+              toast.success(`Chart "${previewChart.name}" saved as draft!`);
+              setPreviewChart(null);
+            }}
+            isExistingChart={previewChart.id.startsWith('existing-')}
+            chartStatus="published"
+          />
+        )}
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={!!chartToDelete} onOpenChange={() => setChartToDelete(null)}>
+          <AlertDialogContent className="border-border">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Chart</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete "{chartToDelete?.name}"? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="border-border">Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteChart}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Generate Charts Dialog */}
+        <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
+          <DialogContent className="border-border">
+            <DialogHeader>
+              <DialogTitle>Generate Charts</DialogTitle>
+              <DialogDescription>
+                Select a database to automatically generate charts based on its schema.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <Select value={selectedDatabaseForGenerate} onValueChange={setSelectedDatabaseForGenerate}>
+                <SelectTrigger className="border-border">
+                  <SelectValue placeholder="Select a database" />
+                </SelectTrigger>
+                <SelectContent>
+                  {databases.map((database) => (
+                    <SelectItem key={database.id} value={database.id}>
+                      {database.name} ({database.type})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="flex justify-end gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowGenerateDialog(false);
+                    setSelectedDatabaseForGenerate("");
+                  }}
+                  className="border-border"
+                  disabled={isGeneratingCharts}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleConfirmGenerateCharts}
+                  disabled={!selectedDatabaseForGenerate || isGeneratingCharts}
+                  className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
+                >
+                  {isGeneratingCharts ? (
+                    <>
+                      <Clock className="w-4 h-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      Generate Charts
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
+  );
+}
