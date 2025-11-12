@@ -1,5 +1,20 @@
-import { useState, useEffect, useCallback } from "react";
-import { Lightbulb, TrendingUp, TrendingDown, AlertCircle, Filter, Sparkles, Loader2, Database } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { 
+  Lightbulb, 
+  TrendingUp, 
+  TrendingDown, 
+  AlertCircle, 
+  AlertTriangle,
+  AlertOctagon,
+  BarChart3,
+  CheckCircle2,
+  Filter, 
+  LineChart,
+  Loader2, 
+  Sparkles, 
+  Target,
+  Database 
+} from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -50,33 +65,117 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   const [databases, setDatabases] = useState<ApiDatabase[]>([]);
   const [selectedDatabase, setSelectedDatabase] = useState<string>("all");
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
-  const [activeTab, setActiveTab] = useState("all");
+  const [activeFilter, setActiveFilter] = useState("all");
   const [filteredInsights, setFilteredInsights] = useState<Insight[]>([]);
 
+  const insightStats = useMemo(() => {
+    const stats = {
+      total: insights.length,
+      positive: 0,
+      negative: 0,
+      opportunity: 0,
+      anomalies: 0,
+    };
 
-  // Filter insights based on active tab
-  useEffect(() => {
-    let filtered = insights;
-    
-    switch (activeTab) {
-      case "recent":
-        // Show most recent insights (first 10)
-        filtered = insights.slice(0, 10);
-        break;
-      case "trending":
-        // Show positive insights (trending)
-        filtered = insights.filter(i => i.type === "positive");
-        break;
-      case "anomalies":
-        // Show negative insights (anomalies/concerns)
-        filtered = insights.filter(i => i.type === "negative");
-        break;
-      default:
-        filtered = insights;
+    insights.forEach((insight) => {
+      if (insight.type === "positive") {
+        stats.positive += 1;
+      }
+      if (insight.type === "negative") {
+        stats.negative += 1;
+        if (insight.impact === "High") {
+          stats.anomalies += 1;
+        }
+      }
+      if (insight.type === "opportunity") {
+        stats.opportunity += 1;
+      }
+    });
+
+    return stats;
+  }, [insights]);
+
+  type FilterOption = {
+    value: string;
+    label: string;
+    count?: number;
+    filterFn: (items: Insight[]) => Insight[];
+  };
+
+  const filterOptions = useMemo<FilterOption[]>(() => {
+    const options: FilterOption[] = [
+      {
+        value: "all",
+        label: "All Insights",
+        count: insightStats.total,
+        filterFn: (items) => items,
+      },
+    ];
+
+    if (insightStats.total > 0) {
+      options.push({
+        value: "recent",
+        label: "Recent",
+        count: Math.min(10, insightStats.total),
+        filterFn: (items) => items.slice(0, 10),
+      });
     }
-    
-    setFilteredInsights(filtered);
-  }, [activeTab, insights]);
+
+    if (insightStats.opportunity > 0) {
+      options.push({
+        value: "opportunity",
+        label: "Opportunities",
+        count: insightStats.opportunity,
+        filterFn: (items) => items.filter((item) => item.type === "opportunity"),
+      });
+    }
+
+    if (insightStats.positive > 0) {
+      options.push({
+        value: "positive",
+        label: "Positive Trends",
+        count: insightStats.positive,
+        filterFn: (items) => items.filter((item) => item.type === "positive"),
+      });
+    }
+
+    if (insightStats.negative > 0) {
+      options.push({
+        value: "negative",
+        label: "Requires Attention",
+        count: insightStats.negative,
+        filterFn: (items) => items.filter((item) => item.type === "negative"),
+      });
+    }
+
+    if (insightStats.anomalies > 0) {
+      options.push({
+        value: "anomalies",
+        label: "Critical Anomalies",
+        count: insightStats.anomalies,
+        filterFn: (items) =>
+          items.filter((item) => item.type === "negative" && item.impact === "High"),
+      });
+    }
+
+    return options;
+  }, [insightStats]);
+
+  useEffect(() => {
+    if (filterOptions.length === 0) {
+      setFilteredInsights([]);
+      return;
+    }
+
+    const currentFilter = filterOptions.find((option) => option.value === activeFilter);
+
+    if (!currentFilter) {
+      setActiveFilter(filterOptions[0].value);
+      return;
+    }
+
+    setFilteredInsights(currentFilter.filterFn(insights));
+  }, [filterOptions, activeFilter, insights]);
 
   const fetchDatabases = useCallback(async () => {
     if (!projectId) return;
@@ -370,10 +469,39 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   };
 
   // Calculate stats
-  const totalInsights = insights.length;
-  const positiveTrends = insights.filter(i => i.type === "positive").length;
-  const requiresAttention = insights.filter(i => i.type === "negative").length;
-  const anomalies = insights.filter(i => i.type === "negative" && i.impact === "High").length;
+  const totalInsights = insightStats.total;
+  const positiveTrends = insightStats.positive;
+  const requiresAttention = insightStats.negative;
+  const anomalies = insightStats.anomalies;
+
+  const typeStyles = {
+    positive: {
+      color: "text-success",
+      bg: "bg-success/10",
+    },
+    negative: {
+      color: "text-destructive",
+      bg: "bg-destructive/10",
+    },
+    opportunity: {
+      color: "text-accent",
+      bg: "bg-accent/10",
+    },
+    default: {
+      color: "text-muted-foreground",
+      bg: "bg-muted/10",
+    },
+  } as const;
+
+  const categoryIcons: Record<string, typeof Lightbulb> = {
+    "Strategic Priority": Target,
+    Opportunity: Sparkles,
+    Risk: AlertTriangle,
+    Concern: AlertOctagon,
+    "Key Metric": BarChart3,
+    Pattern: LineChart,
+    Recommendation: CheckCircle2,
+  };
 
   return (
     <div className="px-12 py-10">
@@ -465,12 +593,15 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         </div>
 
         {/* Filter Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
+        <Tabs value={activeFilter} onValueChange={setActiveFilter} className="mb-6">
           <TabsList>
-            <TabsTrigger value="all">All Insights</TabsTrigger>
-            <TabsTrigger value="recent">Recent</TabsTrigger>
-            <TabsTrigger value="trending">Trending</TabsTrigger>
-            <TabsTrigger value="anomalies">Anomalies</TabsTrigger>
+            {filterOptions.map((option) => (
+              <TabsTrigger key={option.value} value={option.value}>
+                {option.count !== undefined
+                  ? `${option.label} (${option.count})`
+                  : option.label}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </Tabs>
 
@@ -503,20 +634,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         ) : (
           <div className="space-y-4">
             {filteredInsights.map((insight) => {
-              const iconColor = 
-                insight.type === 'positive' ? 'text-success' :
-                insight.type === 'negative' ? 'text-destructive' :
-                'text-accent';
-              
-              const iconBg = 
-                insight.type === 'positive' ? 'bg-success/10' :
-                insight.type === 'negative' ? 'bg-destructive/10' :
-                'bg-accent/10';
-
-              const Icon = 
-                insight.type === 'positive' ? TrendingUp :
-                insight.type === 'negative' ? TrendingDown :
-                Lightbulb;
+              const style = typeStyles[insight.type as keyof typeof typeStyles] ?? typeStyles.default;
+              const Icon =
+                categoryIcons[insight.category] ??
+                (insight.type === "positive"
+                  ? TrendingUp
+                  : insight.type === "negative"
+                  ? TrendingDown
+                  : Lightbulb);
 
               return (
                 <Card 
@@ -524,8 +649,8 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                   className="p-6 border border-border hover:shadow-lg transition-all cursor-pointer"
                 >
                   <div className="flex gap-4">
-                    <div className={`w-12 h-12 rounded-xl ${iconBg} flex items-center justify-center flex-shrink-0`}>
-                      <Icon className={`w-6 h-6 ${iconColor}`} />
+                    <div className={`w-12 h-12 rounded-xl ${style.bg} flex items-center justify-center flex-shrink-0`}>
+                      <Icon className={`w-6 h-6 ${style.color}`} />
                     </div>
 
                     <div className="flex-1 min-w-0">

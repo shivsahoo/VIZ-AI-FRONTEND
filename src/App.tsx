@@ -30,6 +30,7 @@ export default function App() {
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
   const [chartCreatedTrigger, setChartCreatedTrigger] = useState(0);
   const [pendingChartFromAI, setPendingChartFromAI] = useState<{
+    id?: string;
     name: string;
     type: 'line' | 'bar' | 'pie' | 'area';
     dataSource: string;
@@ -239,6 +240,7 @@ export default function App() {
   };
 
   const handleChartCreatedFromAI = (chart: {
+    id?: string;
     name: string;
     type: 'line' | 'bar' | 'pie' | 'area';
     dataSource: string;
@@ -246,7 +248,7 @@ export default function App() {
     status: 'draft' | 'published';
     dashboardId?: number;
   }) => {
-    // Store the chart data to be passed to ChartsView
+    // Store the chart data to be passed to ChartsView (used to trigger creation/refetch)
     setPendingChartFromAI(chart);
     // Trigger re-render in ChartsView
     setChartCreatedTrigger(prev => prev + 1);

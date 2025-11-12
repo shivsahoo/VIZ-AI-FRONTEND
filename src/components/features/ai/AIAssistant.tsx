@@ -5,7 +5,7 @@ import { Card } from "../../ui/card";
 import { Badge } from "../../ui/badge";
 import { GradientButton } from "../../shared/GradientButton";
 import { ChartPreviewDialog } from "../charts/ChartPreviewDialog";
-import { getDashboards, getDatabases, getCurrentUser } from "../../../services/api";
+import { getDashboards, getDatabases, getCurrentUser, type Chart as SavedChart } from "../../../services/api";
 import { VizAIWebSocket, WebSocketResponse, type ChartSpec } from "../../../services/websocket";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
@@ -35,6 +35,7 @@ interface AIAssistantProps {
   onOpenChange: (isOpen: boolean) => void;
   projectId?: number | string;
   onChartCreated?: (chart: {
+    id?: string;
     name: string;
     type: 'line' | 'bar' | 'pie' | 'area';
     dataSource: string;
@@ -467,7 +468,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
     setPreviewChart(chartWithDataSource);
   };
 
-  const handleSaveAsDraft = () => {
+  const handleSaveAsDraft = (savedChart?: SavedChart) => {
     if (!previewChart) return;
 
     const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
@@ -477,15 +478,14 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       return;
     }
     
-    if (onChartCreated) {
-      onChartCreated({
-        name: previewChart.name,
-        type: previewChart.type,
-        dataSource: `Database ${selectedDb.id}`, // Format: "Database {uuid}" for extraction
-        query: previewChart.query,
-        status: 'draft'
-      });
-    }
+    onChartCreated?.({
+      id: savedChart?.id,
+      name: previewChart.name,
+      type: previewChart.type,
+      dataSource: `Database ${selectedDb.id}`, // Format: "Database {uuid}" for extraction
+      query: previewChart.query,
+      status: 'draft'
+    });
     
     // Remove the suggestion from the message
     setMessages(prevMessages => 

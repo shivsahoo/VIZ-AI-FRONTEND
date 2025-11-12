@@ -57,6 +57,7 @@ interface WorkspaceViewProps {
   projectId?: number | string;
   chartCreatedTrigger?: number;
   pendingChartFromAI?: {
+    id?: string;
     name: string;
     type: 'line' | 'bar' | 'pie' | 'area';
     dataSource: string;

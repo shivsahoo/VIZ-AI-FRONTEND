@@ -20,7 +20,7 @@ import {
 } from "../../ui/dropdown-menu";
 import { ChartCard } from "./ChartCard";
 import { toast } from "sonner";
-import { addChartToDashboard } from "../../../services/api";
+import { addChartToDashboard, createChart, type Chart as SavedChart } from "../../../services/api";
 import * as React from "react";
 
 interface ChartPreviewDialogProps {
@@ -38,7 +38,7 @@ interface ChartPreviewDialogProps {
   dashboards?: Array<{ id: string | number; name: string }>; // Real dashboards from API
   projectId?: string | number;
   onAddToDashboard?: (dashboardId: number | string) => void; // Callback after API call succeeds
-  onSaveAsDraft: () => void;
+  onSaveAsDraft?: (savedChart?: SavedChart) => void;
   isExistingChart?: boolean;
   chartStatus?: 'draft' | 'published';
 }
@@ -92,6 +92,7 @@ const mockAreaData = [
 ];
 
 export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], projectId, onAddToDashboard, onSaveAsDraft, isExistingChart = false, chartStatus }: ChartPreviewDialogProps) {
+  const [isSavingDraft, setIsSavingDraft] = React.useState(false);
   // Debug logging
   React.useEffect(() => {
     if (isOpen && chart) {
@@ -106,13 +107,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
   
   if (!chart) return null;
 
-  const handleAddToDashboard = async (dashboardId: number | string) => {
-    if (!chart || !projectId) {
-      toast.error("Chart or project information is missing");
-      return;
-    }
-
-    // Extract database ID from dataSource
+  const extractDatabaseId = () => {
     // Try format "Database {id}" first (supports UUIDs)
     let databaseId: string | undefined;
     const dbIdMatch = chart.dataSource?.match(/Database ([^\s]+)/);
@@ -120,20 +115,35 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       databaseId = dbIdMatch[1];
     } else {
       // If not in "Database {id}" format, check if dataSource is the ID directly
-      databaseId = chart.dataSource && chart.dataSource !== 'Unknown' && chart.dataSource !== 'Unknown Database' 
-        ? chart.dataSource 
-        : undefined;
+      databaseId =
+        chart.dataSource && chart.dataSource !== "Unknown" && chart.dataSource !== "Unknown Database"
+          ? chart.dataSource
+          : undefined;
     }
 
-    // Validate that databaseId is a UUID (must match UUID format: 8-4-4-4-12 hex characters)
+    return databaseId;
+  };
+
+  const validateDatabaseId = (databaseId?: string) => {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!databaseId || !uuidRegex.test(databaseId)) {
+    return !!databaseId && uuidRegex.test(databaseId);
+  };
+
+  const handleAddToDashboard = async (dashboardId: number | string) => {
+    if (!chart || !projectId) {
+      toast.error("Chart or project information is missing");
+      return;
+    }
+
+    const databaseId = extractDatabaseId();
+
+    if (!validateDatabaseId(databaseId)) {
       toast.error("A valid database connection is required. Please select a database when creating the chart.");
-      console.error("ChartPreviewDialog: Invalid or missing database ID", { 
-        dataSource: chart.dataSource, 
+      console.error("ChartPreviewDialog: Invalid or missing database ID", {
+        dataSource: chart.dataSource,
         extractedId: databaseId,
         chart: chart.name,
-        isValidUUID: databaseId ? uuidRegex.test(databaseId) : false
+        isValidUUID: databaseId ? validateDatabaseId(databaseId) : false,
       });
       return;
     }
@@ -141,10 +151,10 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     try {
       const response = await addChartToDashboard({
         title: chart.name,
-        query: chart.query || '',
-        report: chart.reasoning || chart.description || '',
+        query: chart.query || "",
+        report: chart.reasoning || chart.description || "",
         type: chart.type,
-        relevance: '',
+        relevance: "",
         is_time_based: false,
         chart_type: chart.type,
         dashboard_id: String(dashboardId),
@@ -152,10 +162,10 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       });
 
       if (response.success) {
-        const dashboard = dashboards.find(d => String(d.id) === String(dashboardId));
-        toast.success(`Chart added to "${dashboard?.name || 'dashboard'}"!`);
+        const dashboard = dashboards.find((d) => String(d.id) === String(dashboardId));
+        toast.success(`Chart added to "${dashboard?.name || "dashboard"}"!`);
         onAddToDashboard?.(dashboardId);
-    onClose();
+        onClose();
       } else {
         toast.error(response.error?.message || "Failed to add chart to dashboard");
       }
@@ -164,10 +174,47 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     }
   };
 
-  const handleSaveAsDraft = () => {
-    onSaveAsDraft();
-    toast.success("Chart saved as draft!");
-    onClose();
+  const handleSaveAsDraft = async () => {
+    if (!chart || !projectId) {
+      toast.error("Chart or project information is missing");
+      return;
+    }
+
+    const databaseId = extractDatabaseId();
+
+    if (!validateDatabaseId(databaseId)) {
+      toast.error("A valid database connection is required. Please select a database when creating the chart.");
+      console.error("ChartPreviewDialog: Invalid or missing database ID for draft save", {
+        dataSource: chart.dataSource,
+        extractedId: databaseId,
+        chart: chart.name,
+        isValidUUID: databaseId ? validateDatabaseId(databaseId) : false,
+      });
+      return;
+    }
+
+    setIsSavingDraft(true);
+    try {
+      const response = await createChart(String(projectId), {
+        name: chart.name,
+        type: chart.type,
+        query: chart.query,
+        databaseId,
+        config: {},
+      });
+
+      if (response.success && response.data) {
+        toast.success(`Chart "${chart.name}" saved as draft!`);
+        onSaveAsDraft?.(response.data);
+        onClose();
+      } else {
+        toast.error(response.error?.message || "Failed to save chart as draft");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while saving chart as draft");
+    } finally {
+      setIsSavingDraft(false);
+    }
   };
 
   const getChartData = () => {
@@ -258,8 +305,9 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
             <Button
               variant="outline"
               onClick={handleSaveAsDraft}
+              disabled={isSavingDraft}
             >
-              Save as Draft
+              {isSavingDraft ? "Saving..." : "Save as Draft"}
             </Button>
           )}
           

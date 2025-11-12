@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, Pin, Trash2, Plus, Clock, Filter } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -35,8 +35,9 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
+import { ChartCard } from "../components/features/charts/ChartCard";
 import { toast } from "sonner";
-import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, deleteChart, getUserDashboardCharts, type Chart as ApiChart } from "../services/api";
+import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, deleteChart, getUserDashboardCharts, getChartData, type Chart as ApiChart, type ChartData as ApiChartData } from "../services/api";
 import {
   LineChart as RechartsLine,
   Line,
@@ -60,6 +61,7 @@ interface Chart {
   name: string;
   type: 'line' | 'bar' | 'pie' | 'area';
   dataSource: string;
+  databaseId?: string;
   createdAt: string;
   lastUpdated: string;
   query?: string;
@@ -80,6 +82,14 @@ interface ChartSuggestion {
   reasoning: string;
   dashboards?: string[];
   dataSource?: string;
+  data?: any[];
+  dataKeys?: {
+    primary: string;
+    secondary?: string;
+  };
+  xAxisKey?: string;
+  isLoadingData?: boolean;
+  dataError?: string;
 }
 
 interface Dashboard {
@@ -184,40 +194,111 @@ const chartTypeColors = {
   area: "from-orange-500/20 to-orange-600/20 border-orange-500/30"
 };
 
-// Mock chart data
-const mockLineData = [
-  { name: 'Jan', value: 400 },
-  { name: 'Feb', value: 300 },
-  { name: 'Mar', value: 600 },
-  { name: 'Apr', value: 800 },
-];
-
-const mockBarData = [
-  { name: 'A', value: 400 },
-  { name: 'B', value: 300 },
-  { name: 'C', value: 600 },
-];
-
-const mockPieData = [
-  { name: 'A', value: 400 },
-  { name: 'B', value: 300 },
-  { name: 'C', value: 300 },
-];
-
-const mockAreaData = [
-  { name: 'Jan', value: 200 },
-  { name: 'Feb', value: 400 },
-  { name: 'Mar', value: 300 },
-  { name: 'Apr', value: 600 },
-];
-
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))"];
+
+interface ChartDataConfig {
+  data: any[];
+  dataKeys: {
+    primary: string;
+    secondary?: string;
+  };
+  xAxisKey: string;
+}
+
+interface ChartDataStatus {
+  data?: any[];
+  metadata?: ApiChartData['metadata'];
+  loading: boolean;
+  error?: string;
+}
+
+const getDefaultChartDataConfig = (): ChartDataConfig => ({
+  data: [],
+  dataKeys: { primary: 'value' },
+  xAxisKey: 'label',
+});
+
+const inferChartDataConfig = (rawData: any[] | undefined, chartType: Chart['type']): ChartDataConfig => {
+  if (!rawData || rawData.length === 0) {
+    return getDefaultChartDataConfig();
+  }
+
+  const normalizedRows = rawData.map((row, index) => {
+    if (row && typeof row === 'object' && !Array.isArray(row)) {
+      return { ...row };
+    }
+    return {
+      value: typeof row === 'number' ? row : Number(row) || 0,
+      label: `Row ${index + 1}`,
+    };
+  });
+
+  const sample = normalizedRows[0];
+  const keys = Object.keys(sample);
+
+  if (keys.length === 0) {
+    return getDefaultChartDataConfig();
+  }
+
+  const numericKeys = keys.filter((key) => typeof sample[key] === 'number' || (!isNaN(Number(sample[key])) && sample[key] !== null && sample[key] !== undefined));
+  let primaryKey = numericKeys[0] || keys[1] || keys[0];
+  let secondaryKey = numericKeys.find((key) => key !== primaryKey);
+
+  let potentialXAxisKey = keys.find((key) => key !== primaryKey && typeof sample[key] !== 'number') || keys.find((key) => key !== primaryKey);
+
+  if (!potentialXAxisKey) {
+    potentialXAxisKey = 'index';
+  }
+
+  const data = normalizedRows.map((row, index) => {
+    const coercedRow: Record<string, any> = { ...row };
+    if (!(potentialXAxisKey in coercedRow)) {
+      coercedRow[potentialXAxisKey] = index + 1;
+    }
+
+    coercedRow[primaryKey] =
+      typeof row[primaryKey] === 'number'
+        ? row[primaryKey]
+        : Number(row[primaryKey]) || 0;
+
+    if (secondaryKey) {
+      coercedRow[secondaryKey] =
+        typeof row[secondaryKey] === 'number'
+          ? row[secondaryKey]
+          : Number(row[secondaryKey]) || 0;
+    }
+
+    return coercedRow;
+  });
+
+  if (chartType === 'pie') {
+    const nameKey = potentialXAxisKey === 'index' ? 'label' : potentialXAxisKey;
+    return {
+      data: data.map((row, index) => ({
+        name: row[nameKey] ?? row[potentialXAxisKey] ?? `Slice ${index + 1}`,
+        value: row[primaryKey],
+      })),
+      dataKeys: { primary: 'value' },
+      xAxisKey: 'name',
+    };
+  }
+
+  return {
+    data,
+    dataKeys: {
+      primary: primaryKey,
+      ...(secondaryKey ? { secondary: secondaryKey } : {}),
+    },
+    xAxisKey: potentialXAxisKey,
+  };
+};
 
 interface ChartsViewProps {
   currentUser?: { id: number; name: string; email: string };
   projectId?: number | string;
   onChartCreated?: (chart: Chart) => void;
   pendingChartFromAI?: {
+    id?: string;
     name: string;
     type: 'line' | 'bar' | 'pie' | 'area';
     dataSource: string;
@@ -275,10 +356,135 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [selectedDatabaseForGenerate, setSelectedDatabaseForGenerate] = useState("");
   const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
+  const [chartDataStatus, setChartDataStatus] = useState<Record<string, ChartDataStatus>>({});
+
+  const fetchChartDataForChart = useCallback(async (chart: Chart) => {
+    if (!chart.query || !chart.databaseId) {
+      return;
+    }
+
+    const chartKey = String(chart.id);
+
+    setChartDataStatus((prev) => ({
+      ...prev,
+      [chartKey]: {
+        ...(prev[chartKey] ?? {}),
+        loading: true,
+        error: undefined,
+      },
+    }));
+
+    try {
+      const response = await getChartData(chartKey, chart.databaseId, chart.query);
+
+      if (response.success && response.data) {
+        setChartDataStatus((prev) => ({
+          ...prev,
+          [chartKey]: {
+            data: response.data.data,
+            metadata: response.data.metadata,
+            loading: false,
+            error: undefined,
+          },
+        }));
+      } else {
+        setChartDataStatus((prev) => ({
+          ...prev,
+          [chartKey]: {
+            data: [],
+            metadata: undefined,
+            loading: false,
+            error: response.error?.message || "Failed to fetch chart data",
+          },
+        }));
+      }
+    } catch (error: any) {
+      setChartDataStatus((prev) => ({
+        ...prev,
+        [chartKey]: {
+          data: [],
+            metadata: undefined,
+          loading: false,
+          error: error.message || "Failed to fetch chart data",
+        },
+      }));
+    }
+  }, [getChartData]);
 
   const resolvedDashboards = dashboards.length > 0
     ? dashboards
     : mockDashboards.map((dashboard) => ({ id: dashboard.id, name: dashboard.name }));
+
+  const resolvedDatabases = databases.length > 0
+    ? databases
+    : mockDatabases.map((database) => ({
+        id: String(database.id),
+        name: database.name,
+        type: database.type,
+      }));
+
+  const databaseNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    resolvedDatabases.forEach((database) => {
+      map.set(String(database.id), database.name);
+    });
+    return map;
+  }, [resolvedDatabases]);
+
+  const getDatabaseLabel = useCallback(
+    (chart: Chart) => {
+      if (chart.databaseId) {
+        const matched = databaseNameById.get(String(chart.databaseId));
+        if (matched) {
+          return matched;
+        }
+      }
+      return chart.dataSource || "Unknown Database";
+    },
+    [databaseNameById]
+  );
+
+  const databaseFilterOptions = useMemo(() => {
+    const entries = new Map<string, string>();
+
+    resolvedDatabases.forEach((database) => {
+      if (database.name) {
+        entries.set(database.name.toLowerCase(), database.name);
+      }
+    });
+
+    charts.forEach((chart) => {
+      const label = getDatabaseLabel(chart);
+      if (label) {
+        entries.set(label.toLowerCase(), label);
+      }
+    });
+
+    return Array.from(entries.entries()).sort(([, labelA], [, labelB]) =>
+      labelA.localeCompare(labelB)
+    );
+  }, [charts, getDatabaseLabel, resolvedDatabases]);
+
+  const statusFilterOptions = useMemo(() => {
+    const statuses = new Set<string>();
+    charts.forEach((chart) => {
+      if (chart.status) {
+        statuses.add(chart.status);
+      }
+    });
+    generatedCharts.forEach((chart) => {
+      if (chart.status) {
+        statuses.add(chart.status);
+      }
+    });
+
+    if (statuses.size === 0) {
+      statuses.add("published");
+      statuses.add("draft");
+    }
+
+    return Array.from(statuses);
+  }, [charts, generatedCharts]);
 
   // Fetch charts when projectId is available
   useEffect(() => {
@@ -291,6 +497,24 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     }
   }, [projectId]);
 
+  useEffect(() => {
+    if (!charts.length) {
+      return;
+    }
+
+    charts.forEach((chart) => {
+      const chartKey = String(chart.id);
+      if (!chart.query || !chart.databaseId) {
+        return;
+      }
+
+      const status = chartDataStatus[chartKey];
+      if (!status || (!status.data && !status.loading && !status.error)) {
+        fetchChartDataForChart(chart);
+      }
+    });
+  }, [charts, chartDataStatus, fetchChartDataForChart]);
+
   const fetchDatabases = async () => {
     if (!projectId) return;
     
@@ -298,7 +522,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       const response = await getDatabases(String(projectId));
       if (response.success && response.data) {
         setDatabases(response.data.map(db => ({
-          id: db.id,
+          id: String(db.id),
           name: db.name,
           type: db.type,
         })));
@@ -343,6 +567,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           name: chart.name,
           type: chart.type,
           dataSource: chart.databaseId ? `Database ${chart.databaseId}` : "Unknown Database",
+          databaseId: chart.databaseId,
           createdAt: chart.createdAt,
           lastUpdated: formatTimeAgo(chart.updatedAt || chart.createdAt),
           query: chart.query,
@@ -371,9 +596,10 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                 name: chart.title || "Untitled Chart",
                 type: mapChartType(chartTypeSource),
                 dataSource: chart.database_connection_id ? `Database ${chart.database_connection_id}` : "Unknown Database",
+                databaseId: chart.database_connection_id || undefined,
                 createdAt,
                 lastUpdated: formatTimeAgo(createdAt),
-                query: undefined,
+                query: (chart as any).query || undefined,
                 status,
                 dashboardId: dashboard.dashboardId,
                 createdById: currentUser?.id,
@@ -422,12 +648,27 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
 
   // Handle pending chart from AI Assistant - create via API
   useEffect(() => {
-    if (pendingChartFromAI && projectId) {
-      handleCreateChartFromAI(pendingChartFromAI);
+    if (!pendingChartFromAI || !projectId) {
+      return;
     }
+
+    if (pendingChartFromAI.id) {
+      fetchCharts()
+        .catch((err) => {
+          console.error("Failed to refresh charts after AI draft save:", err);
+          toast.error(err?.message || "Failed to refresh charts");
+        })
+        .finally(() => {
+          onChartFromAIProcessed?.();
+        });
+      return;
+    }
+
+    handleCreateChartFromAI(pendingChartFromAI);
   }, [pendingChartFromAI, projectId]);
 
   const handleCreateChartFromAI = async (chartData: {
+    id?: string;
     name: string;
     type: 'line' | 'bar' | 'pie' | 'area';
     dataSource: string;
@@ -475,6 +716,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           name: response.data.name,
           type: response.data.type,
           dataSource: chartData.dataSource,
+          databaseId: databaseId,
           createdAt: response.data.createdAt,
           lastUpdated: "just now",
           query: response.data.query,
@@ -513,6 +755,11 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       if (response.success) {
         setCharts(charts.filter(c => c.id !== chartToDelete.id));
         setGeneratedCharts(generatedCharts.filter(c => c.id !== chartToDelete.id));
+        setChartDataStatus((prev) => {
+          const updated = { ...prev };
+          delete updated[String(chartToDelete.id)];
+          return updated;
+        });
         toast.success(`Chart "${chartToDelete.name}" deleted successfully!`);
         setChartToDelete(null);
       } else {
@@ -526,6 +773,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   const handleTogglePin = async (chart: Chart) => {
     // Ensure chart.id is a string (UUID) for API call
     const chartId = typeof chart.id === 'string' ? chart.id : String(chart.id);
+    const dataSourceLabel = getDatabaseLabel(chart);
     
     try {
       const response = await updateFavoriteChart(chartId);
@@ -545,12 +793,12 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         const pinnedChartData = {
           id: numericId,
           name: chart.name,
-          description: `${chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} chart from ${chart.dataSource}`,
+          description: `${chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} chart from ${dataSourceLabel}`,
           lastUpdated: chart.lastUpdated,
           chartType: chart.type,
           category: chart.type.charAt(0).toUpperCase() + chart.type.slice(1),
           dashboardName: dashboard?.name || 'No Dashboard',
-          dataSource: chart.dataSource
+          dataSource: dataSourceLabel
         };
         
         // Update context based on new favorite status
@@ -574,6 +822,16 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   };
 
   const handleOpenChartPreview = (chart: Chart) => {
+    const chartKey = String(chart.id);
+    const status = chartDataStatus[chartKey];
+    const dataSourceLabel = getDatabaseLabel(chart);
+
+    if ((!status || (!status.data && !status.loading && !status.error)) && chart.query && chart.databaseId) {
+      fetchChartDataForChart(chart);
+    }
+
+    const preparedData = status?.data ? inferChartDataConfig(status.data, chart.type) : undefined;
+
     // Find which dashboards this chart belongs to
     const chartDashboards = chart.dashboardId 
       ? [resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId))?.name].filter(Boolean) as string[]
@@ -583,11 +841,16 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       id: `existing-${chart.id}`,
       name: chart.name,
       type: chart.type,
-      description: `${chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} chart from ${chart.dataSource}`,
+      description: `${chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} chart from ${dataSourceLabel}`,
       query: chart.query || "",
-      reasoning: `This is an existing chart from your ${chart.dataSource} database.`,
+      reasoning: `This is an existing chart from your ${dataSourceLabel} database.`,
       dashboards: chartDashboards,
-      dataSource: chart.dataSource
+      dataSource: dataSourceLabel,
+      data: preparedData?.data,
+      dataKeys: preparedData?.dataKeys,
+      xAxisKey: preparedData?.xAxisKey,
+      isLoadingData: status ? status.loading : Boolean(chart.query && chart.databaseId),
+      dataError: status?.error,
     };
     setPreviewChart(chartAsSuggestion);
   };
@@ -631,6 +894,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           name: chart.title,
           type: mapChartType(chart.chart_type) as 'line' | 'bar' | 'pie' | 'area',
           dataSource: selectedDb?.name || "Unknown Database",
+          databaseId: selectedDatabaseForGenerate,
           createdAt: new Date().toISOString(),
           lastUpdated: "just now",
           query: chart.query,
@@ -683,17 +947,21 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       return;
     }
 
-    // Extract database ID from dataSource if it's in format "Database {id}"
-    // Support both UUID format and numeric IDs
-    let databaseId: string | undefined;
-    const dbIdMatch = chart.dataSource.match(/Database ([^\s]+)/);
-    if (dbIdMatch) {
-      databaseId = dbIdMatch[1];
-    } else {
-      // If not in "Database {id}" format, check if dataSource is the ID directly (UUID)
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (chart.dataSource && uuidRegex.test(chart.dataSource)) {
-        databaseId = chart.dataSource;
+    // Prefer the explicit databaseId field when available
+    let databaseId: string | undefined = chart.databaseId
+      ? String(chart.databaseId)
+      : undefined;
+
+    // Fallback: infer from dataSource legacy formats
+    if (!databaseId && chart.dataSource) {
+      const dbIdMatch = chart.dataSource.match(/Database ([^\s]+)/);
+      if (dbIdMatch) {
+        databaseId = dbIdMatch[1];
+      } else {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(chart.dataSource)) {
+          databaseId = chart.dataSource;
+        }
       }
     }
 
@@ -747,7 +1015,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   // Filter charts
   const filteredCharts = charts.filter(chart => {
     const name = chart.name ? chart.name.toLowerCase() : '';
-    const dataSource = chart.dataSource ? chart.dataSource.toLowerCase() : '';
+    const databaseLabel = getDatabaseLabel(chart);
+    const dataSource = databaseLabel.toLowerCase();
     const query = searchQuery.toLowerCase();
 
     const matchesSearch = name.includes(query) || dataSource.includes(query);
@@ -755,124 +1024,62 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     const matchesDashboard = filterDashboard === "all" || 
                            (filterDashboard === "unassigned" && !chart.dashboardId) ||
                            (chart.dashboardId && chart.dashboardId.toString() === filterDashboard);
-    const matchesDatabase = filterDatabase === "all" || chart.dataSource === filterDatabase;
+    const matchesDatabase = filterDatabase === "all" || dataSource === filterDatabase;
     
     return matchesSearch && matchesStatus && matchesDashboard && matchesDatabase;
   });
 
   const renderChartPreview = (chart: Chart) => {
-    // Get chart-specific color
-    const chartColor = {
-      line: '#06B6D4',
-      bar: '#8B5CF6',
-      pie: '#10B981',
-      area: '#F59E0B'
-    }[chart.type];
+    const chartKey = String(chart.id);
+    const status = chartDataStatus[chartKey];
+    const hasQueryAndConnection = Boolean(chart.query && chart.databaseId);
+    const preparedData = status?.data ? inferChartDataConfig(status.data, chart.type) : getDefaultChartDataConfig();
+    const isLoading = status ? status.loading : hasQueryAndConnection;
+    const error = status?.error;
 
-    const PIE_COLORS = ["#06B6D4", "#5B67F1", "#8B5CF6"];
-    
     return (
-      <div className="h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden p-4">
-        {chart.type === 'line' && (
-          <ResponsiveContainer width="100%" height="100%">
-            <RechartsLine data={mockLineData} margin={{ top: 5, right: 10, bottom: 5, left: -5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-              <XAxis 
-                dataKey="name" 
-                stroke="hsl(var(--muted-foreground))"
-                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-              />
-              <YAxis 
-                stroke="hsl(var(--muted-foreground))"
-                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                width={35}
-              />
-              <Tooltip 
-                contentStyle={{
-                  backgroundColor: '#1F2937',
-                  border: '2px solid #374151',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  color: '#F9FAFB'
-                }}
-              />
-              <Line type="monotone" dataKey="value" stroke={chartColor} strokeWidth={2.5} dot={{ fill: chartColor, r: 3 }} />
-            </RechartsLine>
-          </ResponsiveContainer>
+      <div className="relative h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden p-4 flex items-center justify-center">
+        {isLoading && hasQueryAndConnection && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/60 backdrop-blur-sm text-muted-foreground">
+            <Clock className="w-5 h-5 animate-spin" />
+            <span className="text-xs">Loading data…</span>
+          </div>
         )}
-        {chart.type === 'bar' && (
-          <ResponsiveContainer width="100%" height="100%">
-            <RechartsBar data={mockBarData} margin={{ top: 5, right: 10, bottom: 5, left: -5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-              <XAxis 
-                dataKey="name" 
-                stroke="hsl(var(--muted-foreground))"
-                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-              />
-              <YAxis 
-                stroke="hsl(var(--muted-foreground))"
-                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                width={35}
-              />
-              <Tooltip 
-                contentStyle={{
-                  backgroundColor: '#1F2937',
-                  border: '2px solid #374151',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  color: '#F9FAFB'
-                }}
-              />
-              <Bar dataKey="value" fill={chartColor} radius={[8, 8, 0, 0]} />
-            </RechartsBar>
-          </ResponsiveContainer>
+
+        {!isLoading && error && (
+          <div className="text-center text-muted-foreground text-xs">
+            <p className="font-medium text-foreground mb-1">Unable to load data</p>
+            <p className="max-w-[220px] mx-auto leading-relaxed">{error}</p>
+          </div>
         )}
-        {chart.type === 'pie' && (
-          <ResponsiveContainer width="100%" height="100%">
-            <RechartsPie margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-              <Pie data={mockPieData} dataKey="value" cx="50%" cy="50%" innerRadius={45} outerRadius={75}>
-                {mockPieData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip 
-                contentStyle={{
-                  backgroundColor: '#1F2937',
-                  border: '2px solid #374151',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  color: '#F9FAFB'
-                }}
-              />
-            </RechartsPie>
-          </ResponsiveContainer>
+
+        {!isLoading && !error && !hasQueryAndConnection && (
+          <div className="text-center text-muted-foreground text-xs">
+            <p className="font-medium text-foreground mb-1">Missing query configuration</p>
+            <p className="max-w-[220px] mx-auto leading-relaxed">
+              This chart does not have a saved SQL query or database connection. Edit the chart to provide both before viewing live data.
+            </p>
+          </div>
         )}
-        {chart.type === 'area' && (
-          <ResponsiveContainer width="100%" height="100%">
-            <RechartsArea data={mockAreaData} margin={{ top: 5, right: 10, bottom: 5, left: -5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-              <XAxis 
-                dataKey="name" 
-                stroke="hsl(var(--muted-foreground))"
-                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-              />
-              <YAxis 
-                stroke="hsl(var(--muted-foreground))"
-                tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                width={35}
-              />
-              <Tooltip 
-                contentStyle={{
-                  backgroundColor: '#1F2937',
-                  border: '2px solid #374151',
-                  borderRadius: '8px',
-                  fontSize: '12px',
-                  color: '#F9FAFB'
-                }}
-              />
-              <Area type="monotone" dataKey="value" stroke={chartColor} fill={chartColor} fillOpacity={0.3} strokeWidth={2.5} />
-            </RechartsArea>
-          </ResponsiveContainer>
+
+        {!isLoading && !error && preparedData.data.length === 0 && hasQueryAndConnection && (
+          <div className="text-center text-muted-foreground text-xs">
+            <p className="font-medium text-foreground mb-1">No data returned</p>
+            <p className="max-w-[220px] mx-auto leading-relaxed">
+              This chart&apos;s query did not return any rows. Try adjusting the query or filters.
+            </p>
+          </div>
+        )}
+
+        {!isLoading && !error && preparedData.data.length > 0 && hasQueryAndConnection && (
+          <ChartCard
+            type={chart.type}
+            data={preparedData.data}
+            dataKeys={preparedData.dataKeys}
+            xAxisKey={preparedData.xAxisKey}
+            showLegend={!!preparedData.dataKeys.secondary && chart.type !== 'pie'}
+            height={240}
+          />
         )}
       </div>
     );
@@ -881,6 +1088,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   const renderChartCard = (chart: Chart, isGenerated: boolean = false) => {
     const Icon = chartTypeIcons[chart.type];
     const dashboard = resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId));
+    const dataSourceLabel = getDatabaseLabel(chart);
     const colorClass = {
       line: 'text-[#06B6D4] bg-[#06B6D4]/10',
       bar: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
@@ -906,7 +1114,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                   {chart.name}
                 </h3>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="line-clamp-1">{chart.dataSource}</span>
+                  <span className="line-clamp-1">{dataSourceLabel}</span>
                   <span>•</span>
                   <div className="flex items-center gap-1">
                     <Clock className="w-3 h-3" />
@@ -1135,9 +1343,9 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">All Databases</SelectItem>
-                            {mockDatabases.map((database) => (
-                              <SelectItem key={database.id} value={database.name}>
-                                {database.name}
+                            {databaseFilterOptions.map(([value, label]) => (
+                              <SelectItem key={value} value={value}>
+                                {label}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -1152,8 +1360,11 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">All Status</SelectItem>
-                            <SelectItem value="published">Published</SelectItem>
-                            <SelectItem value="draft">Draft</SelectItem>
+                            {statusFilterOptions.map((status) => (
+                              <SelectItem key={status} value={status}>
+                                {status.charAt(0).toUpperCase() + status.slice(1)}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -1251,8 +1462,9 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
               setPreviewChart(null);
             }}
             onSaveAsDraft={() => {
-              toast.success(`Chart "${previewChart.name}" saved as draft!`);
-              setPreviewChart(null);
+              if (projectId) {
+                fetchCharts();
+              }
             }}
             isExistingChart={previewChart.id.startsWith('existing-')}
             chartStatus="published"

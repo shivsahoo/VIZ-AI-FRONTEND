@@ -768,6 +768,8 @@ export interface ChartData {
     rowCount: number;
     executionTime: number;
     cachedAt: string | null;
+    xAxis?: string | null;
+    yAxis?: string | null;
   };
 }
 
@@ -1012,8 +1014,13 @@ export const addChartToDashboard = async (data: {
 export const getChartData = async (chartId: string, datasourceConnectionId: string, query: string): Promise<ApiResponse<ChartData>> => {
   try {
     const response = await apiRequest<{
-      data: any[];
+      data?: any[];
       row_count?: number;
+      result?: any[];
+      x_axis?: string | null;
+      y_axis?: string | null;
+      execution_time_ms?: number;
+      cached_at?: string | null;
     }>(`/api/v1/backend/excecute-query/${datasourceConnectionId}/`, {
       method: 'POST',
       body: JSON.stringify({
@@ -1021,14 +1028,22 @@ export const getChartData = async (chartId: string, datasourceConnectionId: stri
       }),
     });
 
+    const normalizedData = Array.isArray(response.result)
+      ? response.result
+      : Array.isArray(response.data)
+        ? response.data
+        : [];
+
     return {
       success: true,
       data: {
-        data: response.data || [],
+        data: normalizedData,
         metadata: {
-          rowCount: response.row_count || response.data?.length || 0,
-          executionTime: 0, // Not provided by backend
-          cachedAt: null,
+          rowCount: response.row_count ?? normalizedData.length ?? 0,
+          executionTime: response.execution_time_ms ?? 0,
+          cachedAt: response.cached_at ?? null,
+          xAxis: response.x_axis ?? null,
+          yAxis: response.y_axis ?? null,
         },
       },
     };
