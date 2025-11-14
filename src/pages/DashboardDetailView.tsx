@@ -17,7 +17,7 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
-import { filterCharts, getChartData, type ChartData } from "../services/api";
+import { getDashboardCharts, getChartData, type ChartData } from "../services/api";
 
 interface DashboardDetailViewProps {
   dashboardId: string;
@@ -88,15 +88,15 @@ export function DashboardDetailView({
 
     setIsLoadingCharts(true);
     try {
-      const response = await filterCharts({ dashboardId });
+      const response = await getDashboardCharts(dashboardId);
       if (response.success && response.data) {
         const mappedCharts: ChartCardData[] = response.data.map((chart) => ({
           id: chart.id,
           title: chart.title,
-          description: chart.query.length > 100 ? `${chart.query.substring(0, 100)}...` : chart.query || 'No description',
-          type: mapChartType(chart.chart_type || chart.type),
-          query: chart.query,
-          databaseConnectionId: chart.database_connection_id,
+          description: 'No description available',
+          type: 'line' as const, // Default type since backend doesn't return chart_type
+          query: '', // Backend doesn't return query, will be fetched when needed
+          databaseConnectionId: chart.connection_id || '',
           created_at: chart.created_at,
         }));
         setCharts(mappedCharts);
@@ -122,8 +122,12 @@ export function DashboardDetailView({
 
   // Fetch chart data for a specific chart
   const fetchChartData = async (chart: ChartCardData): Promise<ChartData | null> => {
-    if (!chart.databaseConnectionId || !chart.query) {
-      toast.error("Chart query or database connection not available");
+    if (!chart.databaseConnectionId) {
+      toast.error("Database connection not available for this chart");
+      return null;
+    }
+    if (!chart.query) {
+      toast.error("Chart query not available. Please refresh the page or contact support.");
       return null;
     }
 

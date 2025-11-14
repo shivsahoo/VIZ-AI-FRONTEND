@@ -1,4 +1,4 @@
-import { Plus, ChevronDown, LayoutDashboard } from "lucide-react";
+import { Plus, ChevronDown, LayoutDashboard, Clock, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,21 +20,35 @@ import {
 } from "../../ui/dropdown-menu";
 import { ChartCard } from "./ChartCard";
 import { toast } from "sonner";
-import { addChartToDashboard, createChart, type Chart as SavedChart } from "../../../services/api";
+import { addChartToDashboard, createChart, getChartData, type Chart as SavedChart, type ChartData as ApiChartData } from "../../../services/api";
+import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../../../utils/chartData";
 import * as React from "react";
+
+interface PreviewChart {
+  id?: string;
+  name: string;
+  type: 'line' | 'bar' | 'pie' | 'area';
+  description?: string;
+  query?: string;
+  reasoning?: string;
+  dashboards?: string[];
+  dataSource?: string;
+  databaseId?: string;
+  dataConnectionId?: string;
+  data?: any[];
+  dataKeys?: {
+    primary: string;
+    secondary?: string;
+  };
+  xAxisKey?: string;
+  isLoadingData?: boolean;
+  dataError?: string;
+}
 
 interface ChartPreviewDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  chart: {
-    name: string;
-    type: 'line' | 'bar' | 'pie' | 'area';
-    description: string;
-    query: string;
-    reasoning: string;
-    dashboards?: string[]; // Array of dashboard names this chart belongs to
-    dataSource?: string; // Database/data source for the chart
-  } | null;
+  chart: PreviewChart | null;
   dashboards?: Array<{ id: string | number; name: string }>; // Real dashboards from API
   projectId?: string | number;
   onAddToDashboard?: (dashboardId: number | string) => void; // Callback after API call succeeds
@@ -48,51 +62,15 @@ interface Dashboard {
   name: string;
 }
 
-// Mock data for different chart types
-const mockLineData = [
-  { month: 'Jan', revenue: 4500, expenses: 3200 },
-  { month: 'Feb', revenue: 5200, expenses: 3400 },
-  { month: 'Mar', revenue: 4800, expenses: 3100 },
-  { month: 'Apr', revenue: 6100, expenses: 3800 },
-  { month: 'May', revenue: 5800, expenses: 3600 },
-  { month: 'Jun', revenue: 7200, expenses: 4200 },
-  { month: 'Jul', revenue: 6900, expenses: 4000 },
-  { month: 'Aug', revenue: 7800, expenses: 4500 },
-  { month: 'Sep', revenue: 8200, expenses: 4800 },
-  { month: 'Oct', revenue: 7500, expenses: 4300 },
-  { month: 'Nov', revenue: 8900, expenses: 5100 },
-  { month: 'Dec', revenue: 9500, expenses: 5400 }
-];
-
-const mockBarData = [
-  { category: 'Electronics', sales: 12500 },
-  { category: 'Clothing', sales: 8900 },
-  { category: 'Food', sales: 15200 },
-  { category: 'Books', sales: 6700 },
-  { category: 'Home', sales: 11300 },
-  { category: 'Sports', sales: 7800 }
-];
-
-const mockPieData = [
-  { name: 'North America', value: 45, color: '#06B6D4' },
-  { name: 'Europe', value: 28, color: '#6366F1' },
-  { name: 'Asia', value: 18, color: '#8B5CF6' },
-  { name: 'South America', value: 6, color: '#F59E0B' },
-  { name: 'Africa', value: 3, color: '#EF4444' }
-];
-
-const mockAreaData = [
-  { date: 'Mon', orders: 120 },
-  { date: 'Tue', orders: 145 },
-  { date: 'Wed', orders: 132 },
-  { date: 'Thu', orders: 168 },
-  { date: 'Fri', orders: 195 },
-  { date: 'Sat', orders: 210 },
-  { date: 'Sun', orders: 178 }
-];
-
 export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], projectId, onAddToDashboard, onSaveAsDraft, isExistingChart = false, chartStatus }: ChartPreviewDialogProps) {
   const [isSavingDraft, setIsSavingDraft] = React.useState(false);
+  const [isAddingToDashboard, setIsAddingToDashboard] = React.useState(false);
+  const [addingToDashboardId, setAddingToDashboardId] = React.useState<number | string | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
+  const [chartDataConfig, setChartDataConfig] = React.useState<ChartDataConfig>(() => getDefaultChartDataConfig());
+  const [chartDataMetadata, setChartDataMetadata] = React.useState<ApiChartData['metadata'] | undefined>(undefined);
+  const [chartDataError, setChartDataError] = React.useState<string | undefined>(undefined);
+  const [isExecutingQuery, setIsExecutingQuery] = React.useState(false);
   // Debug logging
   React.useEffect(() => {
     if (isOpen && chart) {
@@ -105,18 +83,116 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     }
   }, [isOpen, chart, dashboards, projectId]);
   
-  if (!chart) return null;
+  React.useEffect(() => {
+    if (!chart) {
+      setChartDataConfig(getDefaultChartDataConfig());
+      setChartDataMetadata(undefined);
+      setChartDataError(undefined);
+      setIsExecutingQuery(false);
+      return;
+    }
 
+    if (chart.data && chart.dataKeys && chart.xAxisKey) {
+      setChartDataConfig({
+        data: chart.data,
+        dataKeys: chart.dataKeys,
+        xAxisKey: chart.xAxisKey,
+      });
+    } else {
+      setChartDataConfig(getDefaultChartDataConfig());
+    }
+
+    setChartDataMetadata(undefined);
+    setChartDataError(chart.dataError);
+    setIsExecutingQuery(chart.isLoadingData ?? false);
+  }, [chart]);
+
+  React.useEffect(() => {
+    if (!isOpen || !chart) {
+      return;
+    }
+
+    const hasQuery = Boolean(chart.query && chart.query.trim().length > 0);
+    const databaseId = chart.databaseId || chart.dataConnectionId || extractDatabaseId();
+
+    if (!hasQuery) {
+      setChartDataError("No SQL query available for this chart.");
+      setIsExecutingQuery(false);
+      return;
+    }
+
+    if (!databaseId) {
+      setChartDataError("A valid database connection is required to preview data.");
+      setIsExecutingQuery(false);
+      return;
+    }
+
+    if (chart.data && chart.data.length > 0 && !chart.isLoadingData && !chart.dataError) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const executeQuery = async () => {
+      setIsExecutingQuery(true);
+      setChartDataError(undefined);
+
+      try {
+        const response = await getChartData(chart.id ?? "preview", databaseId, chart.query!);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (response.success && response.data) {
+          const config = inferChartDataConfig(response.data.data, chart.type);
+          setChartDataConfig(config);
+          setChartDataMetadata(response.data.metadata);
+          setChartDataError(undefined);
+        } else {
+          setChartDataConfig(getDefaultChartDataConfig());
+          setChartDataMetadata(undefined);
+          setChartDataError(response.error?.message || "Failed to fetch chart data");
+        }
+      } catch (error: any) {
+        if (cancelled) {
+          return;
+        }
+        setChartDataConfig(getDefaultChartDataConfig());
+        setChartDataMetadata(undefined);
+        setChartDataError(error?.message || "Failed to fetch chart data");
+      } finally {
+        if (!cancelled) {
+          setIsExecutingQuery(false);
+        }
+      }
+    };
+
+    executeQuery();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, chart?.id, chart?.query, chart?.type, chart?.databaseId, chart?.dataConnectionId, chart?.dataSource]);
+  
   const extractDatabaseId = () => {
+    if (chart?.databaseId) {
+      return String(chart.databaseId);
+    }
+
+    if (chart?.dataConnectionId) {
+      return String(chart.dataConnectionId);
+    }
+
     // Try format "Database {id}" first (supports UUIDs)
     let databaseId: string | undefined;
-    const dbIdMatch = chart.dataSource?.match(/Database ([^\s]+)/);
+    const dbIdMatch = chart?.dataSource?.match(/Database ([^\s]+)/);
     if (dbIdMatch) {
       databaseId = dbIdMatch[1];
     } else {
       // If not in "Database {id}" format, check if dataSource is the ID directly
       databaseId =
-        chart.dataSource && chart.dataSource !== "Unknown" && chart.dataSource !== "Unknown Database"
+        chart?.dataSource && chart.dataSource !== "Unknown" && chart.dataSource !== "Unknown Database"
           ? chart.dataSource
           : undefined;
     }
@@ -125,9 +201,25 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
   };
 
   const validateDatabaseId = (databaseId?: string) => {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    return !!databaseId && uuidRegex.test(databaseId);
+    return !!databaseId && databaseId.trim().length > 0;
   };
+
+  if (!chart) return null;
+
+  const resolvedDatabaseId = chart.databaseId || chart.dataConnectionId || extractDatabaseId();
+  const hasQuery = Boolean(chart.query && chart.query.trim().length > 0);
+  const hasConnection = Boolean(resolvedDatabaseId);
+  const missingConfigMessage = !hasQuery
+    ? "This chart does not include an SQL query yet. Ask VizAI to generate one before previewing."
+    : !hasConnection
+      ? "Please select a valid database connection before previewing this chart."
+      : undefined;
+  const noDataReturned =
+    !isExecutingQuery && !chartDataError && chartDataConfig.data.length === 0;
+  const cachedAtDisplay =
+    chartDataMetadata?.cachedAt && !Number.isNaN(Date.parse(chartDataMetadata.cachedAt))
+      ? new Date(chartDataMetadata.cachedAt).toLocaleString()
+      : chartDataMetadata?.cachedAt ?? null;
 
   const handleAddToDashboard = async (dashboardId: number | string) => {
     if (!chart || !projectId) {
@@ -135,7 +227,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       return;
     }
 
-    const databaseId = extractDatabaseId();
+    const databaseId = chart.databaseId || chart.dataConnectionId || extractDatabaseId();
 
     if (!validateDatabaseId(databaseId)) {
       toast.error("A valid database connection is required. Please select a database when creating the chart.");
@@ -143,11 +235,14 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
         dataSource: chart.dataSource,
         extractedId: databaseId,
         chart: chart.name,
-        isValidUUID: databaseId ? validateDatabaseId(databaseId) : false,
       });
       return;
     }
 
+    setIsAddingToDashboard(true);
+    setAddingToDashboardId(dashboardId);
+    setIsDropdownOpen(false); // Close dropdown to show loading state in button
+    
     try {
       const response = await addChartToDashboard({
         title: chart.name,
@@ -171,6 +266,9 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       }
     } catch (err: any) {
       toast.error(err.message || "An error occurred while adding chart to dashboard");
+    } finally {
+      setIsAddingToDashboard(false);
+      setAddingToDashboardId(null);
     }
   };
 
@@ -180,7 +278,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       return;
     }
 
-    const databaseId = extractDatabaseId();
+    const databaseId = chart.databaseId || chart.dataConnectionId || extractDatabaseId();
 
     if (!validateDatabaseId(databaseId)) {
       toast.error("A valid database connection is required. Please select a database when creating the chart.");
@@ -188,7 +286,6 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
         dataSource: chart.dataSource,
         extractedId: databaseId,
         chart: chart.name,
-        isValidUUID: databaseId ? validateDatabaseId(databaseId) : false,
       });
       return;
     }
@@ -217,23 +314,6 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     }
   };
 
-  const getChartData = () => {
-    switch (chart.type) {
-      case 'line':
-        return { data: mockLineData, dataKeys: { primary: 'revenue', secondary: 'expenses' }, xAxisKey: 'month', colors: ['#06B6D4', '#6366F1'] };
-      case 'bar':
-        return { data: mockBarData, dataKeys: { primary: 'sales' }, xAxisKey: 'category', colors: ['#8B5CF6'] };
-      case 'pie':
-        return { data: mockPieData, dataKeys: { primary: 'value' }, xAxisKey: 'name' };
-      case 'area':
-        return { data: mockAreaData, dataKeys: { primary: 'orders' }, xAxisKey: 'date', colors: ['#F59E0B'] };
-      default:
-        return { data: [], dataKeys: { primary: 'value' }, xAxisKey: 'name' };
-    }
-  };
-
-  const chartData = getChartData();
-
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -247,7 +327,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
                 </Badge>
               </div>
               <DialogDescription>
-                {chart.description}
+                {chart.description || chart.reasoning || "Review the chart details before saving or adding it to a dashboard."}
               </DialogDescription>
               
               {/* Show dashboards this chart belongs to */}
@@ -270,16 +350,64 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
 
         {/* Chart Visualization */}
         <div className="flex-1 min-h-0 bg-muted/30 rounded-lg border border-border p-6">
-          <div className="w-full h-[400px]">
-            <ChartCard
-              type={chart.type}
-              data={chartData.data}
-              dataKeys={chartData.dataKeys}
-              xAxisKey={chartData.xAxisKey}
-              colors={chartData.colors}
-              height={400}
-            />
+          <div className="relative w-full h-[400px] flex items-center justify-center text-center">
+            {missingConfigMessage ? (
+              <div className="max-w-xs text-sm text-muted-foreground leading-relaxed">
+                {missingConfigMessage}
+              </div>
+            ) : (
+              <>
+                {isExecutingQuery && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/70 backdrop-blur-sm text-muted-foreground">
+                    <Clock className="w-5 h-5 animate-spin" />
+                    <span className="text-xs">Executing query…</span>
+                  </div>
+                )}
+                {!isExecutingQuery && chartDataError && (
+                  <div className="max-w-xs text-sm text-muted-foreground leading-relaxed">
+                    <p className="font-medium text-foreground mb-1">Unable to load data</p>
+                    <p>{chartDataError}</p>
+                  </div>
+                )}
+                {!isExecutingQuery && !chartDataError && noDataReturned && (
+                  <div className="max-w-xs text-sm text-muted-foreground leading-relaxed">
+                    <p className="font-medium text-foreground mb-1">No data returned</p>
+                    <p>Try refining the SQL query or adjusting filters.</p>
+                  </div>
+                )}
+                {!isExecutingQuery && !chartDataError && !noDataReturned && (
+                  <ChartCard
+                    type={chart.type}
+                    data={chartDataConfig.data}
+                    dataKeys={chartDataConfig.dataKeys}
+                    xAxisKey={chartDataConfig.xAxisKey}
+                    showLegend={!!chartDataConfig.dataKeys.secondary && chart.type !== 'pie'}
+                    height={400}
+                  />
+                )}
+              </>
+            )}
           </div>
+
+          {!missingConfigMessage && chartDataMetadata && (
+            <div className="mt-4 flex flex-wrap gap-3 text-xs text-muted-foreground">
+              {typeof chartDataMetadata.rowCount === 'number' && (
+                <span className="px-2 py-1 rounded-md border border-border bg-background/50">
+                  {chartDataMetadata.rowCount} row{chartDataMetadata.rowCount === 1 ? '' : 's'}
+                </span>
+              )}
+              {typeof chartDataMetadata.executionTime === 'number' && chartDataMetadata.executionTime > 0 && (
+                <span className="px-2 py-1 rounded-md border border-border bg-background/50">
+                  {chartDataMetadata.executionTime} ms
+                </span>
+              )}
+              {cachedAtDisplay && (
+                <span className="px-2 py-1 rounded-md border border-border bg-background/50">
+                  Cached at {cachedAtDisplay}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* SQL Query Section */}
@@ -287,13 +415,15 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
           <div>
             <p className="text-sm text-muted-foreground mb-2">AI Reasoning:</p>
             <p className="text-sm text-foreground bg-muted/50 p-3 rounded-lg">
-              {chart.reasoning}
+              {chart.reasoning || "No reasoning summary provided."}
             </p>
           </div>
           <div>
             <p className="text-sm text-muted-foreground mb-2">SQL Query:</p>
             <pre className="text-xs bg-muted/50 p-3 rounded-lg overflow-x-auto">
-              <code className="text-foreground">{chart.query}</code>
+              <code className="text-foreground">
+                {chart.query || "-- No query provided --"}
+              </code>
             </pre>
           </div>
         </div>
@@ -311,12 +441,24 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
             </Button>
           )}
           
-          <DropdownMenu>
+          <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
             <DropdownMenuTrigger asChild>
-              <GradientButton className="gap-2">
-                <Plus className="w-4 h-4" />
-                Add to Dashboard
-                <ChevronDown className="w-4 h-4" />
+              <GradientButton 
+                className="gap-2" 
+                disabled={isAddingToDashboard}
+              >
+                {isAddingToDashboard ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" />
+                    Add to Dashboard
+                    <ChevronDown className="w-4 h-4" />
+                  </>
+                )}
               </GradientButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent 
@@ -327,19 +469,25 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
               <DropdownMenuLabel>Select a dashboard</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {dashboards && dashboards.length > 0 ? (
-                dashboards.map((dashboard) => (
-                <DropdownMenuItem
-                  key={dashboard.id}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      console.log('Dashboard selected:', dashboard);
-                      handleAddToDashboard(dashboard.id);
-                    }}
-                >
-                  {dashboard.name}
-                  </DropdownMenuItem>
-                ))
+                dashboards.map((dashboard) => {
+                  const isAddingToThis = isAddingToDashboard && addingToDashboardId === dashboard.id;
+                  return (
+                    <DropdownMenuItem
+                      key={dashboard.id}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('Dashboard selected:', dashboard);
+                        handleAddToDashboard(dashboard.id);
+                      }}
+                      disabled={isAddingToDashboard}
+                      className="flex items-center gap-2"
+                    >
+                      {isAddingToThis && <Loader2 className="w-3 h-3 animate-spin" />}
+                      {dashboard.name}
+                    </DropdownMenuItem>
+                  );
+                })
               ) : (
                 <DropdownMenuItem disabled className="text-muted-foreground">
                   No dashboards available. Please create a dashboard first.

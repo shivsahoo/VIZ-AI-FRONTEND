@@ -27,6 +27,7 @@ import {
   type BusinessInsightsResponse,
   type Database as ApiDatabase,
 } from "../services/api";
+import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 import { toast } from "sonner";
 import {
   Select,
@@ -57,6 +58,21 @@ interface Insight {
 interface InsightsViewProps {
   projectId?: string | number;
 }
+
+const mapDatabaseMetadataToApiDatabase = (entry: DatabaseMetadataEntry): ApiDatabase => ({
+  id: entry.id,
+  name: entry.name,
+  type: (entry.type as ApiDatabase["type"]) || "postgresql",
+  host: "",
+  port: 0,
+  database: "",
+  username: "",
+  status: "connected",
+  lastChecked: new Date().toISOString(),
+  schema: entry.schema ?? null,
+  connectionString: null,
+  consentGiven: undefined,
+});
 
 export function InsightsView({ projectId }: InsightsViewProps) {
   const [insights, setInsights] = useState<Insight[]>([]);
@@ -185,6 +201,13 @@ export function InsightsView({ projectId }: InsightsViewProps) {
       if (response.success && response.data) {
         // Backend returns all databases for the project
         setDatabases(response.data);
+        const metadataEntries: DatabaseMetadataEntry[] = response.data.map((db) => ({
+          id: db.id,
+          name: db.name,
+          type: db.type,
+          schema: db.schema ?? null,
+        }));
+        storeDatabaseMetadata(String(projectId), metadataEntries);
       } else if (response.error) {
         console.error("Failed to fetch databases:", response.error);
         // Show user-friendly message if no databases found
@@ -199,9 +222,16 @@ export function InsightsView({ projectId }: InsightsViewProps) {
 
   // Fetch databases when projectId is available
   useEffect(() => {
-    if (projectId) {
-      fetchDatabases();
+    if (!projectId) {
+      return;
     }
+
+    const cachedDatabases = loadDatabaseMetadata(String(projectId));
+    if (cachedDatabases && cachedDatabases.length > 0) {
+      setDatabases(cachedDatabases.map(mapDatabaseMetadataToApiDatabase));
+    }
+
+    fetchDatabases();
   }, [projectId, fetchDatabases]);
 
   // Reset selected database to "all" when dialog opens
@@ -216,8 +246,9 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   }, [showGenerateDialog, projectId, fetchDatabases]);
 
   const transformProjectInsights = (data: ProjectInsightsResponse): Insight[] => {
-    const transformed: Insight[] = [];
-    let idCounter = 1;
+    try {
+      const transformed: Insight[] = [];
+      let idCounter = 1;
 
     // Transform consolidated insights (project-wide)
     if (data.consolidated_insights) {
@@ -225,58 +256,151 @@ export function InsightsView({ projectId }: InsightsViewProps) {
       
       // Strategic priorities as opportunities
       consolidated.strategic_priorities?.forEach((priority) => {
-        transformed.push({
-          id: `priority-${idCounter++}`,
-          title: priority.title,
-          description: priority.description,
-          type: "opportunity",
-          category: "Strategic Priority",
-          timestamp: "Just now",
-          impact: priority.impact === "high" ? "High" : priority.impact === "medium" ? "Medium" : "Low",
-          source: "Project-wide",
-        });
+        try {
+          const title = String(priority?.title || 'Untitled Priority');
+          const description = String(priority?.description || '');
+          transformed.push({
+            id: `priority-${idCounter++}`,
+            title: title,
+            description: description,
+            type: "opportunity",
+            category: "Strategic Priority",
+            timestamp: "Just now",
+            impact: priority.impact === "high" ? "High" : priority.impact === "medium" ? "Medium" : "Low",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing strategic priority:", err, priority);
+        }
       });
 
       // Opportunities
       consolidated.opportunities?.forEach((opportunity) => {
-        transformed.push({
-          id: `opportunity-${idCounter++}`,
-          title: opportunity.title,
-          description: `${opportunity.description} - Potential Impact: ${opportunity.potential_impact}`,
-          type: "opportunity",
-          category: "Opportunity",
-          timestamp: "Just now",
-          impact: "Medium",
-          source: "Project-wide",
-        });
+        try {
+          const title = String(opportunity?.title || 'Untitled Opportunity');
+          const description = String(opportunity?.description || '');
+          const potentialImpact = String(opportunity?.potential_impact || '');
+          transformed.push({
+            id: `opportunity-${idCounter++}`,
+            title: title,
+            description: potentialImpact ? `${description} - Potential Impact: ${potentialImpact}` : description,
+            type: "opportunity",
+            category: "Opportunity",
+            timestamp: "Just now",
+            impact: "Medium",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing opportunity:", err, opportunity);
+        }
       });
 
       // Critical risks as negative insights
-      consolidated.risk_assessment?.critical_risks?.forEach((risk) => {
-        transformed.push({
-          id: `risk-critical-${idCounter++}`,
-          title: risk,
-          description: `Critical risk identified: ${risk}`,
-          type: "negative",
-          category: "Risk",
-          timestamp: "Just now",
-          impact: "High",
-          source: "Project-wide",
-        });
+      consolidated.risk_assessment?.critical_risks?.forEach((riskItem) => {
+        try {
+          // Handle both object format { risk, reasoning } and string format
+          const riskText = typeof riskItem === 'string' 
+            ? riskItem 
+            : (riskItem as any)?.risk || '';
+          const reasoning = typeof riskItem === 'string' 
+            ? '' 
+            : (riskItem as any)?.reasoning || '';
+          
+          // Skip if no risk text
+          if (!riskText || typeof riskText !== 'string') {
+            return;
+          }
+          
+          const description = reasoning 
+            ? `Critical risk identified: ${riskText} - ${reasoning}`
+            : `Critical risk identified: ${riskText}`;
+          
+          transformed.push({
+            id: `risk-critical-${idCounter++}`,
+            title: riskText,
+            description: description,
+            type: "negative",
+            category: "Risk",
+            timestamp: "Just now",
+            impact: "High",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing critical risk:", err, riskItem);
+          // Skip this item and continue with others
+        }
       });
 
       // Moderate risks
-      consolidated.risk_assessment?.moderate_risks?.forEach((risk) => {
-        transformed.push({
-          id: `risk-moderate-${idCounter++}`,
-          title: risk,
-          description: `Moderate risk identified: ${risk}`,
-          type: "negative",
-          category: "Risk",
-          timestamp: "Just now",
-          impact: "Medium",
-          source: "Project-wide",
-        });
+      consolidated.risk_assessment?.moderate_risks?.forEach((riskItem) => {
+        try {
+          // Handle both object format { risk, reasoning } and string format
+          const riskText = typeof riskItem === 'string' 
+            ? riskItem 
+            : (riskItem as any)?.risk || '';
+          const reasoning = typeof riskItem === 'string' 
+            ? '' 
+            : (riskItem as any)?.reasoning || '';
+          
+          // Skip if no risk text
+          if (!riskText || typeof riskText !== 'string') {
+            return;
+          }
+          
+          const description = reasoning 
+            ? `Moderate risk identified: ${riskText} - ${reasoning}`
+            : `Moderate risk identified: ${riskText}`;
+          
+          transformed.push({
+            id: `risk-moderate-${idCounter++}`,
+            title: riskText,
+            description: description,
+            type: "negative",
+            category: "Risk",
+            timestamp: "Just now",
+            impact: "Medium",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing moderate risk:", err, riskItem);
+          // Skip this item and continue with others
+        }
+      });
+
+      // Cross-database patterns
+      consolidated.cross_database_patterns?.forEach((patternItem) => {
+        try {
+          // Handle both object format { pattern, reasoning } and string format
+          const patternText = typeof patternItem === 'string' 
+            ? patternItem 
+            : (patternItem as any)?.pattern || '';
+          const reasoning = typeof patternItem === 'string' 
+            ? '' 
+            : (patternItem as any)?.reasoning || '';
+          
+          // Skip if no pattern text
+          if (!patternText || typeof patternText !== 'string') {
+            return;
+          }
+          
+          const description = reasoning 
+            ? `${patternText} - ${reasoning}`
+            : patternText;
+          
+          transformed.push({
+            id: `cross-pattern-${idCounter++}`,
+            title: patternText.substring(0, 60) + (patternText.length > 60 ? "..." : ""),
+            description: description,
+            type: "opportunity",
+            category: "Cross-Database Pattern",
+            timestamp: "Just now",
+            impact: "Medium",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing cross-database pattern:", err, patternItem);
+          // Skip this item and continue with others
+        }
       });
     }
 
@@ -287,136 +411,259 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         
         // Recommendations
         insights.recommendations?.forEach((rec) => {
-          transformed.push({
-            id: `rec-${dbInsight.database_id}-${idCounter++}`,
-            title: rec.title,
-            description: rec.description,
-            type: rec.priority === "high" ? "opportunity" : "positive",
-            category: "Recommendation",
-            timestamp: "Just now",
-            impact: rec.priority === "high" ? "High" : rec.priority === "medium" ? "Medium" : "Low",
-            source: dbInsight.database_name,
-          });
+          try {
+            const title = String(rec?.title || 'Untitled Recommendation');
+            const description = String(rec?.description || '');
+            transformed.push({
+              id: `rec-${dbInsight.database_id}-${idCounter++}`,
+              title: title,
+              description: description,
+              type: rec.priority === "high" ? "opportunity" : "positive",
+              category: "Recommendation",
+              timestamp: "Just now",
+              impact: rec.priority === "high" ? "High" : rec.priority === "medium" ? "Medium" : "Low",
+              source: dbInsight.database_name || "Unknown",
+            });
+          } catch (err) {
+            console.error("Error processing recommendation:", err, rec);
+          }
         });
 
         // Areas of concern as negative insights
-        insights.areas_of_concern?.forEach((concern) => {
-          transformed.push({
-            id: `concern-${dbInsight.database_id}-${idCounter++}`,
-            title: concern,
-            description: `Area requiring attention: ${concern}`,
-            type: "negative",
-            category: "Concern",
-            timestamp: "Just now",
-            impact: "High",
-            source: dbInsight.database_name,
-          });
+        insights.areas_of_concern?.forEach((concernItem) => {
+          try {
+            // Handle both object format { concern, reasoning } and string format
+            const concernText = typeof concernItem === 'string' 
+              ? concernItem 
+              : (concernItem as any)?.concern || '';
+            const reasoning = typeof concernItem === 'string' 
+              ? '' 
+              : (concernItem as any)?.reasoning || '';
+            
+            // Skip if no concern text
+            if (!concernText || typeof concernText !== 'string') {
+              return;
+            }
+            
+            const description = reasoning 
+              ? `Area requiring attention: ${concernText} - ${reasoning}`
+              : `Area requiring attention: ${concernText}`;
+            
+            transformed.push({
+              id: `concern-${dbInsight.database_id}-${idCounter++}`,
+              title: concernText,
+              description: description,
+              type: "negative",
+              category: "Concern",
+              timestamp: "Just now",
+              impact: "High",
+              source: dbInsight.database_name || "Unknown",
+            });
+          } catch (err) {
+            console.error("Error processing area of concern:", err, concernItem);
+            // Skip this item and continue with others
+          }
         });
 
         // Key metrics as positive/negative based on interpretation
         insights.key_metrics?.forEach((metric) => {
-          const isPositive = metric.value_interpretation?.toLowerCase().includes("good") ||
-                           metric.value_interpretation?.toLowerCase().includes("excellent") ||
-                           metric.value_interpretation?.toLowerCase().includes("improving");
-          
-          transformed.push({
-            id: `metric-${dbInsight.database_id}-${idCounter++}`,
-            title: metric.kpi_name,
-            description: `${metric.value_interpretation} - ${metric.business_impact}`,
-            type: isPositive ? "positive" : "negative",
-            category: "Key Metric",
-            timestamp: "Just now",
-            impact: "Medium",
-            source: dbInsight.database_name,
-          });
+          try {
+            const kpiName = String(metric?.kpi_name || 'Unknown KPI');
+            const valueInterpretation = String(metric?.value_interpretation || '');
+            const businessImpact = String(metric?.business_impact || '');
+            const isPositive = valueInterpretation.toLowerCase().includes("good") ||
+                             valueInterpretation.toLowerCase().includes("excellent") ||
+                             valueInterpretation.toLowerCase().includes("improving");
+            
+            transformed.push({
+              id: `metric-${dbInsight.database_id}-${idCounter++}`,
+              title: kpiName,
+              description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
+              type: isPositive ? "positive" : "negative",
+              category: "Key Metric",
+              timestamp: "Just now",
+              impact: "Medium",
+              source: dbInsight.database_name || "Unknown",
+            });
+          } catch (err) {
+            console.error("Error processing key metric:", err, metric);
+          }
         });
 
         // Insights and patterns
-        insights.insights_and_patterns?.forEach((pattern) => {
-          transformed.push({
-            id: `pattern-${dbInsight.database_id}-${idCounter++}`,
-            title: pattern.substring(0, 60) + (pattern.length > 60 ? "..." : ""),
-            description: pattern,
-            type: "opportunity",
-            category: "Pattern",
-            timestamp: "Just now",
-            impact: "Medium",
-            source: dbInsight.database_name,
-          });
+        insights.insights_and_patterns?.forEach((patternItem) => {
+          try {
+            // Handle both object format { insight, reasoning } and string format
+            const insightText = typeof patternItem === 'string' 
+              ? patternItem 
+              : (patternItem as any)?.insight || '';
+            const reasoning = typeof patternItem === 'string' 
+              ? '' 
+              : (patternItem as any)?.reasoning || '';
+            
+            // Skip if no insight text
+            if (!insightText || typeof insightText !== 'string') {
+              return;
+            }
+            
+            const description = reasoning 
+              ? `${insightText} - ${reasoning}`
+              : insightText;
+            
+            transformed.push({
+              id: `pattern-${dbInsight.database_id}-${idCounter++}`,
+              title: insightText.substring(0, 60) + (insightText.length > 60 ? "..." : ""),
+              description: description,
+              type: "opportunity",
+              category: "Pattern",
+              timestamp: "Just now",
+              impact: "Medium",
+              source: dbInsight.database_name || "Unknown",
+            });
+          } catch (err) {
+            console.error("Error processing insight pattern:", err, patternItem);
+            // Skip this item and continue with others
+          }
         });
       }
     });
 
-    return transformed;
+      return transformed;
+    } catch (error) {
+      console.error("Error in transformProjectInsights:", error, data);
+      return []; // Return empty array on error to prevent crash
+    }
   };
 
   const transformBusinessInsights = (data: BusinessInsightsResponse): Insight[] => {
-    const transformed: Insight[] = [];
-    let idCounter = 1;
+    try {
+      const transformed: Insight[] = [];
+      let idCounter = 1;
 
-    const insights = data.insights;
+      const insights = data.insights;
 
     // Recommendations
     insights.recommendations?.forEach((rec) => {
-      transformed.push({
-        id: `rec-${idCounter++}`,
-        title: rec.title,
-        description: rec.description,
-        type: rec.priority === "high" ? "opportunity" : "positive",
-        category: "Recommendation",
-        timestamp: "Just now",
-        impact: rec.priority === "high" ? "High" : rec.priority === "medium" ? "Medium" : "Low",
-        source: data.database_name,
-      });
+      try {
+        const title = String(rec?.title || 'Untitled Recommendation');
+        const description = String(rec?.description || '');
+        transformed.push({
+          id: `rec-${idCounter++}`,
+          title: title,
+          description: description,
+          type: rec.priority === "high" ? "opportunity" : "positive",
+          category: "Recommendation",
+          timestamp: "Just now",
+          impact: rec.priority === "high" ? "High" : rec.priority === "medium" ? "Medium" : "Low",
+          source: data.database_name || "Unknown",
+        });
+      } catch (err) {
+        console.error("Error processing recommendation:", err, rec);
+      }
     });
 
     // Areas of concern
-    insights.areas_of_concern?.forEach((concern) => {
-      transformed.push({
-        id: `concern-${idCounter++}`,
-        title: concern,
-        description: `Area requiring attention: ${concern}`,
-        type: "negative",
-        category: "Concern",
-        timestamp: "Just now",
-        impact: "High",
-        source: data.database_name,
-      });
+    insights.areas_of_concern?.forEach((concernItem) => {
+      try {
+        // Handle both object format { concern, reasoning } and string format
+        const concernText = typeof concernItem === 'string' 
+          ? concernItem 
+          : (concernItem as any)?.concern || '';
+        const reasoning = typeof concernItem === 'string' 
+          ? '' 
+          : (concernItem as any)?.reasoning || '';
+        
+        // Skip if no concern text
+        if (!concernText || typeof concernText !== 'string') {
+          return;
+        }
+        
+        const description = reasoning 
+          ? `Area requiring attention: ${concernText} - ${reasoning}`
+          : `Area requiring attention: ${concernText}`;
+        
+        transformed.push({
+          id: `concern-${idCounter++}`,
+          title: concernText,
+          description: description,
+          type: "negative",
+          category: "Concern",
+          timestamp: "Just now",
+          impact: "High",
+          source: data.database_name || "Unknown",
+        });
+      } catch (err) {
+        console.error("Error processing area of concern:", err, concernItem);
+        // Skip this item and continue with others
+      }
     });
 
     // Key metrics
     insights.key_metrics?.forEach((metric) => {
-      const isPositive = metric.value_interpretation?.toLowerCase().includes("good") ||
-                       metric.value_interpretation?.toLowerCase().includes("excellent") ||
-                       metric.value_interpretation?.toLowerCase().includes("improving");
-      
-      transformed.push({
-        id: `metric-${idCounter++}`,
-        title: metric.kpi_name,
-        description: `${metric.value_interpretation} - ${metric.business_impact}`,
-        type: isPositive ? "positive" : "negative",
-        category: "Key Metric",
-        timestamp: "Just now",
-        impact: "Medium",
-        source: data.database_name,
-      });
+      try {
+        const kpiName = String(metric?.kpi_name || 'Unknown KPI');
+        const valueInterpretation = String(metric?.value_interpretation || '');
+        const businessImpact = String(metric?.business_impact || '');
+        const isPositive = valueInterpretation.toLowerCase().includes("good") ||
+                         valueInterpretation.toLowerCase().includes("excellent") ||
+                         valueInterpretation.toLowerCase().includes("improving");
+        
+        transformed.push({
+          id: `metric-${idCounter++}`,
+          title: kpiName,
+          description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
+          type: isPositive ? "positive" : "negative",
+          category: "Key Metric",
+          timestamp: "Just now",
+          impact: "Medium",
+          source: data.database_name || "Unknown",
+        });
+      } catch (err) {
+        console.error("Error processing key metric:", err, metric);
+      }
     });
 
     // Insights and patterns
-    insights.insights_and_patterns?.forEach((pattern) => {
-      transformed.push({
-        id: `pattern-${idCounter++}`,
-        title: pattern.substring(0, 60) + (pattern.length > 60 ? "..." : ""),
-        description: pattern,
-        type: "opportunity",
-        category: "Pattern",
-        timestamp: "Just now",
-        impact: "Medium",
-        source: data.database_name,
-      });
+    insights.insights_and_patterns?.forEach((patternItem) => {
+      try {
+        // Handle both object format { insight, reasoning } and string format
+        const insightText = typeof patternItem === 'string' 
+          ? patternItem 
+          : (patternItem as any)?.insight || '';
+        const reasoning = typeof patternItem === 'string' 
+          ? '' 
+          : (patternItem as any)?.reasoning || '';
+        
+        // Skip if no insight text
+        if (!insightText || typeof insightText !== 'string') {
+          return;
+        }
+        
+        const description = reasoning 
+          ? `${insightText} - ${reasoning}`
+          : insightText;
+        
+        transformed.push({
+          id: `pattern-${idCounter++}`,
+          title: insightText.substring(0, 60) + (insightText.length > 60 ? "..." : ""),
+          description: description,
+          type: "opportunity",
+          category: "Pattern",
+          timestamp: "Just now",
+          impact: "Medium",
+          source: data.database_name || "Unknown",
+        });
+      } catch (err) {
+        console.error("Error processing insight pattern:", err, patternItem);
+        // Skip this item and continue with others
+      }
     });
 
-    return transformed;
+      return transformed;
+    } catch (error) {
+      console.error("Error in transformBusinessInsights:", error, data);
+      return []; // Return empty array on error to prevent crash
+    }
   };
 
   const handleGenerateInsights = async () => {
@@ -435,9 +682,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         // Generate insights for a specific database
         response = await generateBusinessInsights(selectedDatabase);
         if (response.success && response.data) {
-          const transformed = transformBusinessInsights(response.data);
-          setInsights(prev => [...transformed, ...prev]);
-          toast.success(`Generated ${transformed.length} insights from ${response.data.database_name}`);
+          try {
+            const transformed = transformBusinessInsights(response.data);
+            setInsights(prev => [...transformed, ...prev]);
+            toast.success(`Generated ${transformed.length} insights from ${response.data.database_name}`);
+          } catch (transformError: any) {
+            console.error("Error transforming business insights:", transformError);
+            toast.error("Failed to process insights data. Please try again.");
+          }
         } else {
           toast.error(response.error?.message || "Failed to generate insights");
         }
@@ -445,11 +697,16 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         // Generate project-wide insights
         response = await generateProjectInsights(String(projectId));
         if (response.success && response.data) {
-          const transformed = transformProjectInsights(response.data);
-          setInsights(prev => [...transformed, ...prev]);
-          toast.success(
-            `Generated ${transformed.length} insights from ${response.data.successful_analyses} databases`
-          );
+          try {
+            const transformed = transformProjectInsights(response.data);
+            setInsights(prev => [...transformed, ...prev]);
+            toast.success(
+              `Generated ${transformed.length} insights from ${response.data.successful_analyses} databases`
+            );
+          } catch (transformError: any) {
+            console.error("Error transforming project insights:", transformError);
+            toast.error("Failed to process insights data. Please try again.");
+          }
         } else {
           const errorMessage = response.error?.message || "Failed to generate project insights";
           // Check if the error is about no database connections
@@ -513,14 +770,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             <p className="text-muted-foreground">Automatic discoveries and anomalies detected in your data</p>
           </div>
           <div className="flex gap-3">
-            <Button 
+            {/* <Button 
               variant="outline"
               onClick={() => setShowGenerateDialog(true)}
               disabled={!projectId || isGenerating}
             >
               <Filter className="w-4 h-4 mr-2" />
               Filter
-            </Button>
+            </Button> */}
             <Button 
               className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all"
               onClick={() => setShowGenerateDialog(true)}

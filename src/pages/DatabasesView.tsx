@@ -34,6 +34,7 @@ import {
 import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
 import { getDatabases } from "../services/api";
+import { storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 
 interface DatabaseConnection {
   id: string;
@@ -84,6 +85,14 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
     try {
       const response = await getDatabases(String(projectId));
       if (response.success && response.data) {
+        const metadataEntries: DatabaseMetadataEntry[] = response.data.map((db) => ({
+          id: db.id,
+          name: db.name,
+          type: db.type,
+          schema: db.schema ?? null,
+        }));
+        storeDatabaseMetadata(String(projectId), metadataEntries);
+
         // Map API Database format to DatabaseConnection format
         const mappedDatabases: DatabaseConnection[] = response.data.map((db) => ({
           id: db.id,

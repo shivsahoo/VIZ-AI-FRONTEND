@@ -668,6 +668,7 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
   title: string;
   created_at: string;
   connection_id: string | null;
+  status?: string | null;
 }>>> => {
   try {
     const response = await apiRequest<{
@@ -677,6 +678,7 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
         title: string;
         created_at: string;
         connection_id: string | null;
+        status?: string | null;
       }>;
     }>(`/api/v1/backend/dashboards/${dashboardId}/charts`);
 

@@ -38,6 +38,8 @@ import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDi
 import { ChartCard } from "../components/features/charts/ChartCard";
 import { toast } from "sonner";
 import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, deleteChart, getUserDashboardCharts, getChartData, type Chart as ApiChart, type ChartData as ApiChartData } from "../services/api";
+import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../utils/chartData";
+import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 import {
   LineChart as RechartsLine,
   Line,
@@ -90,6 +92,8 @@ interface ChartSuggestion {
   xAxisKey?: string;
   isLoadingData?: boolean;
   dataError?: string;
+  databaseId?: string;
+  dataConnectionId?: string;
 }
 
 interface Dashboard {
@@ -180,6 +184,13 @@ const mockDatabases = [
   { id: 4, name: "Customer DB", type: "MySQL" }
 ];
 
+const mapDatabaseMetadataToState = (entry: DatabaseMetadataEntry) => ({
+  id: String(entry.id),
+  name: entry.name,
+  type: entry.type || "postgresql",
+  schema: entry.schema ?? null,
+});
+
 const chartTypeIcons = {
   line: LineChart,
   bar: BarChart3,
@@ -195,15 +206,6 @@ const chartTypeColors = {
 };
 
 const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))"];
-
-interface ChartDataConfig {
-  data: any[];
-  dataKeys: {
-    primary: string;
-    secondary?: string;
-  };
-  xAxisKey: string;
-}
 
 interface ChartDataStatus {
   data?: any[];
@@ -283,8 +285,36 @@ const inferChartDataConfig = (rawData: any[] | undefined, chartType: Chart['type
     };
   }
 
+  // Sort data by x-axis key for line and area charts to ensure proper connections
+  let sortedData = data;
+  if (chartType === 'line' || chartType === 'area') {
+    sortedData = [...data].sort((a, b) => {
+      const aVal = a[potentialXAxisKey];
+      const bVal = b[potentialXAxisKey];
+      
+      // Handle date strings
+      if (typeof aVal === 'string' && typeof bVal === 'string') {
+        const aDate = new Date(aVal).getTime();
+        const bDate = new Date(bVal).getTime();
+        if (!isNaN(aDate) && !isNaN(bDate)) {
+          return aDate - bDate;
+        }
+        // If not valid dates, do string comparison
+        return aVal.localeCompare(bVal);
+      }
+      
+      // Handle numeric values
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return aVal - bVal;
+      }
+      
+      // Fallback to string comparison
+      return String(aVal).localeCompare(String(bVal));
+    });
+  }
+
   return {
-    data,
+    data: sortedData,
     dataKeys: {
       primary: primaryKey,
       ...(secondaryKey ? { secondary: secondaryKey } : {}),
@@ -353,7 +383,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   const [selectedDashboardForAdd, setSelectedDashboardForAdd] = useState("");
   const [isGeneratingCharts, setIsGeneratingCharts] = useState(false);
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
-  const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string; schema?: string | null }>>([]);
   const [selectedDatabaseForGenerate, setSelectedDatabaseForGenerate] = useState("");
   const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
   const [chartDataStatus, setChartDataStatus] = useState<Record<string, ChartDataStatus>>({});
@@ -411,9 +441,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     }
   }, [getChartData]);
 
-  const resolvedDashboards = dashboards.length > 0
-    ? dashboards
-    : mockDashboards.map((dashboard) => ({ id: dashboard.id, name: dashboard.name }));
+  // Use only real dashboards from API, no mock data fallback
+  const resolvedDashboards = dashboards;
 
   const resolvedDatabases = databases.length > 0
     ? databases
@@ -421,6 +450,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         id: String(database.id),
         name: database.name,
         type: database.type,
+        schema: null,
       }));
 
   const databaseNameById = useMemo(() => {
@@ -488,13 +518,19 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
 
   // Fetch charts when projectId is available
   useEffect(() => {
-    if (projectId) {
-      fetchCharts();
-      fetchDatabases();
-      fetchDashboards();
-    } else {
+    if (!projectId) {
       setIsLoadingCharts(false);
+      return;
     }
+
+    const cachedDatabases = loadDatabaseMetadata(String(projectId));
+    if (cachedDatabases && cachedDatabases.length > 0) {
+      setDatabases(cachedDatabases.map(mapDatabaseMetadataToState));
+    }
+
+    fetchCharts();
+    fetchDatabases();
+    fetchDashboards();
   }, [projectId]);
 
   useEffect(() => {
@@ -521,11 +557,15 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     try {
       const response = await getDatabases(String(projectId));
       if (response.success && response.data) {
-        setDatabases(response.data.map(db => ({
-          id: String(db.id),
+        const metadataEntries: DatabaseMetadataEntry[] = response.data.map((db) => ({
+          id: db.id,
           name: db.name,
           type: db.type,
-        })));
+          schema: db.schema ?? null,
+        }));
+
+        setDatabases(metadataEntries.map(mapDatabaseMetadataToState));
+        storeDatabaseMetadata(String(projectId), metadataEntries);
       }
     } catch (err: any) {
       // Silently fail - databases not critical for charts view
@@ -652,7 +692,10 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       return;
     }
 
-    if (pendingChartFromAI.id) {
+    // If chart already has an ID, it was already created (e.g., from ChartPreviewDialog)
+    // Just refresh the charts list instead of creating again
+    const hasId = pendingChartFromAI.id && (typeof pendingChartFromAI.id === 'string' ? pendingChartFromAI.id.trim() !== '' : true);
+    if (hasId) {
       fetchCharts()
         .catch((err) => {
           console.error("Failed to refresh charts after AI draft save:", err);
@@ -664,6 +707,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       return;
     }
 
+    // Only create if chart doesn't have an ID yet
     handleCreateChartFromAI(pendingChartFromAI);
   }, [pendingChartFromAI, projectId]);
 
@@ -678,6 +722,14 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   }) => {
     if (!projectId) {
       toast.error("Project ID is required to create a chart");
+      return;
+    }
+
+    // Prevent duplicate creation if chart already has an ID
+    const hasId = chartData.id && (typeof chartData.id === 'string' ? chartData.id.trim() !== '' : true);
+    if (hasId) {
+      console.log('Chart already has ID, skipping creation:', chartData.id);
+      onChartFromAIProcessed?.();
       return;
     }
 
@@ -821,7 +873,12 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     }
   };
 
-  const handleOpenChartPreview = (chart: Chart) => {
+  const handleOpenChartPreview = async (chart: Chart) => {
+    // Refresh dashboards to ensure we have the latest data when opening preview
+    if (projectId) {
+      await fetchDashboards();
+    }
+    
     const chartKey = String(chart.id);
     const status = chartDataStatus[chartKey];
     const dataSourceLabel = getDatabaseLabel(chart);
@@ -832,9 +889,9 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
 
     const preparedData = status?.data ? inferChartDataConfig(status.data, chart.type) : undefined;
 
-    // Find which dashboards this chart belongs to
+    // Find which dashboards this chart belongs to - use current dashboards state
     const chartDashboards = chart.dashboardId 
-      ? [resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId))?.name].filter(Boolean) as string[]
+      ? [dashboards.find((d) => String(d.id) === String(chart.dashboardId))?.name].filter(Boolean) as string[]
       : [];
     
     const chartAsSuggestion: ChartSuggestion & { dataSource?: string } = {
@@ -851,6 +908,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       xAxisKey: preparedData?.xAxisKey,
       isLoadingData: status ? status.loading : Boolean(chart.query && chart.databaseId),
       dataError: status?.error,
+      databaseId: chart.databaseId ? String(chart.databaseId) : undefined,
+      dataConnectionId: chart.databaseId ? String(chart.databaseId) : undefined,
     };
     setPreviewChart(chartAsSuggestion);
   };
@@ -1451,7 +1510,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             chart={previewChart}
             isOpen={!!previewChart}
             onClose={() => setPreviewChart(null)}
-            dashboards={resolvedDashboards}
+            dashboards={dashboards}
             projectId={projectId}
             onAddToDashboard={(dashboardId) => {
               // Refresh charts after adding to dashboard
