@@ -17,7 +17,7 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
-import { filterCharts, getChartData, type ChartData } from "../services/api";
+import { getDashboardCharts, getChartData, type ChartData } from "../services/api";
 
 interface DashboardDetailViewProps {
   dashboardId: string;
@@ -38,6 +38,7 @@ interface ChartCardData {
   created_at: string;
   chartData?: ChartData;
   isLoadingData?: boolean;
+  isExporting?: boolean;
 }
 
 // Helper to map backend chart type to frontend type
@@ -87,15 +88,15 @@ export function DashboardDetailView({
 
     setIsLoadingCharts(true);
     try {
-      const response = await filterCharts({ dashboardId });
+      const response = await getDashboardCharts(dashboardId);
       if (response.success && response.data) {
         const mappedCharts: ChartCardData[] = response.data.map((chart) => ({
           id: chart.id,
           title: chart.title,
-          description: chart.query.length > 100 ? `${chart.query.substring(0, 100)}...` : chart.query || 'No description',
-          type: mapChartType(chart.chart_type || chart.type),
-          query: chart.query,
-          databaseConnectionId: chart.database_connection_id,
+          description: 'No description available',
+          type: 'line' as const, // Default type since backend doesn't return chart_type
+          query: '', // Backend doesn't return query, will be fetched when needed
+          databaseConnectionId: chart.connection_id || '',
           created_at: chart.created_at,
         }));
         setCharts(mappedCharts);
@@ -120,10 +121,14 @@ export function DashboardDetailView({
   }, [dashboardId]);
 
   // Fetch chart data for a specific chart
-  const fetchChartData = async (chart: ChartCardData) => {
-    if (!chart.databaseConnectionId || !chart.query) {
-      toast.error("Chart query or database connection not available");
-      return;
+  const fetchChartData = async (chart: ChartCardData): Promise<ChartData | null> => {
+    if (!chart.databaseConnectionId) {
+      toast.error("Database connection not available for this chart");
+      return null;
+    }
+    if (!chart.query) {
+      toast.error("Chart query not available. Please refresh the page or contact support.");
+      return null;
     }
 
     // Update chart loading state
@@ -137,17 +142,20 @@ export function DashboardDetailView({
         setCharts(prev => prev.map(c => 
           c.id === chart.id ? { ...c, chartData: response.data, isLoadingData: false } : c
         ));
+        return response.data;
       } else {
         toast.error(response.error?.message || "Failed to load chart data");
         setCharts(prev => prev.map(c => 
           c.id === chart.id ? { ...c, isLoadingData: false } : c
         ));
+        return null;
       }
     } catch (error: any) {
       toast.error(error.message || "An error occurred while fetching chart data");
       setCharts(prev => prev.map(c => 
         c.id === chart.id ? { ...c, isLoadingData: false } : c
       ));
+      return null;
     }
   };
 
@@ -202,6 +210,96 @@ export function DashboardDetailView({
     }
   };
 
+  const convertDataToCSV = (rows: any[]): string => {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return "";
+    }
+
+    if (typeof rows[0] !== "object" || rows[0] === null) {
+      return rows.map((value) => {
+        const sanitized = value === undefined || value === null ? "" : String(value);
+        return `"${sanitized.replace(/"/g, '""')}"`;
+      }).join("\n");
+    }
+
+    const headers = Array.from(
+      rows.reduce((keys: Set<string>, row) => {
+        Object.keys(row ?? {}).forEach((key) => keys.add(key));
+        return keys;
+      }, new Set<string>())
+    );
+
+    const escapeCell = (cell: any) => {
+      if (cell === null || cell === undefined) return "";
+      const cellString =
+        typeof cell === "object" ? JSON.stringify(cell) : String(cell);
+      const needsEscaping = /[",\n\r]/.test(cellString);
+      const escapedValue = cellString.replace(/"/g, '""');
+      return needsEscaping ? `"${escapedValue}"` : escapedValue;
+    };
+
+    const csvRows = [
+      headers.join(","),
+      ...rows.map((row) => headers.map((header) => escapeCell(row?.[header])).join(",")),
+    ];
+
+    return csvRows.join("\n");
+  };
+
+  const sanitizeFilename = (title: string) => {
+    const fallback = "chart-export";
+    return (title || fallback)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gi, "_")
+      .replace(/^_+|_+$/g, "") || fallback;
+  };
+
+  const handleExportChart = async (chart: ChartCardData) => {
+    setCharts(prev =>
+      prev.map(c =>
+        c.id === chart.id ? { ...c, isExporting: true } : c
+      )
+    );
+
+    try {
+      let chartData = chart.chartData;
+      if (!chartData?.data || chartData.data.length === 0) {
+        chartData = await fetchChartData(chart);
+      }
+
+      if (!chartData || !chartData.data || chartData.data.length === 0) {
+        toast.error("No data available to export for this chart");
+        return;
+      }
+
+      const csvContent = convertDataToCSV(chartData.data);
+      if (!csvContent) {
+        toast.error("Failed to generate CSV content for this chart");
+        return;
+      }
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${sanitizeFilename(chart.title)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast.success(`"${chart.title}" exported as CSV`);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to export chart");
+    } finally {
+      setCharts(prev =>
+        prev.map(c =>
+          c.id === chart.id ? { ...c, isExporting: false } : c
+        )
+      );
+    }
+  };
+
   // Prepare chart data for display
   const getChartDisplayData = (chart: ChartCardData) => {
     if (chart.chartData?.data && chart.chartData.data.length > 0) {
@@ -246,7 +344,13 @@ export function DashboardDetailView({
               <h2 className="text-2xl text-foreground mb-1">{dashboardName}</h2>
               <div className="flex items-center gap-3">
                 <p className="text-muted-foreground text-sm">
-                  {lastUpdated ? `Last updated ${lastUpdated}` : "Loading..."}
+                  {isLoadingCharts
+                    ? "Loading..."
+                    : charts.length === 0
+                      ? "No charts yet"
+                      : lastUpdated
+                        ? `Last updated ${lastUpdated}`
+                        : "Last updated just now"}
                 </p>
                 <Badge variant="outline" className="border-success/30 text-success bg-success/10">
                   Live
@@ -353,6 +457,20 @@ export function DashboardDetailView({
                       title={isChartPinned ? "Unpin from Home" : "Pin to Home"}
                     >
                       <Pin className={`w-4 h-4 ${isChartPinned ? 'fill-primary/20 rotate-45' : ''}`} />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 border-border hover:bg-muted disabled:opacity-60"
+                      onClick={() => handleExportChart(chart)}
+                      title="Export chart data as CSV"
+                      disabled={chart.isExporting}
+                    >
+                      {chart.isExporting ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Download className="w-4 h-4" />
+                      )}
                     </Button>
                     <Button
                       variant="outline"

@@ -58,6 +58,7 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
   const [enhancedDescription, setEnhancedDescription] = useState<string | undefined>(undefined);
   const [projectDomain, setProjectDomain] = useState<string | undefined>(undefined);
   const [projectContext, setProjectContext] = useState<Record<string, string>>({});
+  const [projectId, setProjectId] = useState<string | undefined>(undefined);
   const [databaseConfig, setDatabaseConfig] = useState<any>(null);
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -81,12 +82,14 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
     context: Record<string, string>;
     enhancedDescription?: string;
     domain?: string;
+    projectId?: string;
   }) => {
     setProjectName(data.name);
     setProjectDescription(data.description);
     setEnhancedDescription(data.enhancedDescription);
     setProjectDomain(data.domain);
     setProjectContext(data.context);
+    setProjectId(data.projectId);
     setCurrentStep(2);
   };
 
@@ -249,6 +252,7 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
             >
               <DatabaseSetupGuided
                 projectName={projectName}
+                projectId={projectId}
                 onComplete={handleDatabaseComplete}
               />
             </motion.div>
@@ -324,6 +328,10 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
             >
               <DatabaseContextBot
                 databaseName={databaseConfig?.name || "Your Database"}
+                projectName={projectName}
+                projectDescription={projectDescription}
+                projectDomain={projectDomain}
+                enhancedDescription={enhancedDescription}
                 onComplete={handleDatabaseContextComplete}
               />
             </motion.div>

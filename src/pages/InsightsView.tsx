@@ -1,5 +1,20 @@
-import { useState, useEffect, useCallback } from "react";
-import { Lightbulb, TrendingUp, TrendingDown, AlertCircle, Filter, Sparkles, Loader2, Database } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { 
+  Lightbulb, 
+  TrendingUp, 
+  TrendingDown, 
+  AlertCircle, 
+  AlertTriangle,
+  AlertOctagon,
+  BarChart3,
+  CheckCircle2,
+  Filter, 
+  LineChart,
+  Loader2, 
+  Sparkles, 
+  Target,
+  Database 
+} from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -12,6 +27,7 @@ import {
   type BusinessInsightsResponse,
   type Database as ApiDatabase,
 } from "../services/api";
+import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 import { toast } from "sonner";
 import {
   Select,
@@ -43,6 +59,21 @@ interface InsightsViewProps {
   projectId?: string | number;
 }
 
+const mapDatabaseMetadataToApiDatabase = (entry: DatabaseMetadataEntry): ApiDatabase => ({
+  id: entry.id,
+  name: entry.name,
+  type: (entry.type as ApiDatabase["type"]) || "postgresql",
+  host: "",
+  port: 0,
+  database: "",
+  username: "",
+  status: "connected",
+  lastChecked: new Date().toISOString(),
+  schema: entry.schema ?? null,
+  connectionString: null,
+  consentGiven: undefined,
+});
+
 export function InsightsView({ projectId }: InsightsViewProps) {
   const [insights, setInsights] = useState<Insight[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -50,33 +81,117 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   const [databases, setDatabases] = useState<ApiDatabase[]>([]);
   const [selectedDatabase, setSelectedDatabase] = useState<string>("all");
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
-  const [activeTab, setActiveTab] = useState("all");
+  const [activeFilter, setActiveFilter] = useState("all");
   const [filteredInsights, setFilteredInsights] = useState<Insight[]>([]);
 
+  const insightStats = useMemo(() => {
+    const stats = {
+      total: insights.length,
+      positive: 0,
+      negative: 0,
+      opportunity: 0,
+      anomalies: 0,
+    };
 
-  // Filter insights based on active tab
-  useEffect(() => {
-    let filtered = insights;
-    
-    switch (activeTab) {
-      case "recent":
-        // Show most recent insights (first 10)
-        filtered = insights.slice(0, 10);
-        break;
-      case "trending":
-        // Show positive insights (trending)
-        filtered = insights.filter(i => i.type === "positive");
-        break;
-      case "anomalies":
-        // Show negative insights (anomalies/concerns)
-        filtered = insights.filter(i => i.type === "negative");
-        break;
-      default:
-        filtered = insights;
+    insights.forEach((insight) => {
+      if (insight.type === "positive") {
+        stats.positive += 1;
+      }
+      if (insight.type === "negative") {
+        stats.negative += 1;
+        if (insight.impact === "High") {
+          stats.anomalies += 1;
+        }
+      }
+      if (insight.type === "opportunity") {
+        stats.opportunity += 1;
+      }
+    });
+
+    return stats;
+  }, [insights]);
+
+  type FilterOption = {
+    value: string;
+    label: string;
+    count?: number;
+    filterFn: (items: Insight[]) => Insight[];
+  };
+
+  const filterOptions = useMemo<FilterOption[]>(() => {
+    const options: FilterOption[] = [
+      {
+        value: "all",
+        label: "All Insights",
+        count: insightStats.total,
+        filterFn: (items) => items,
+      },
+    ];
+
+    if (insightStats.total > 0) {
+      options.push({
+        value: "recent",
+        label: "Recent",
+        count: Math.min(10, insightStats.total),
+        filterFn: (items) => items.slice(0, 10),
+      });
     }
-    
-    setFilteredInsights(filtered);
-  }, [activeTab, insights]);
+
+    if (insightStats.opportunity > 0) {
+      options.push({
+        value: "opportunity",
+        label: "Opportunities",
+        count: insightStats.opportunity,
+        filterFn: (items) => items.filter((item) => item.type === "opportunity"),
+      });
+    }
+
+    if (insightStats.positive > 0) {
+      options.push({
+        value: "positive",
+        label: "Positive Trends",
+        count: insightStats.positive,
+        filterFn: (items) => items.filter((item) => item.type === "positive"),
+      });
+    }
+
+    if (insightStats.negative > 0) {
+      options.push({
+        value: "negative",
+        label: "Requires Attention",
+        count: insightStats.negative,
+        filterFn: (items) => items.filter((item) => item.type === "negative"),
+      });
+    }
+
+    if (insightStats.anomalies > 0) {
+      options.push({
+        value: "anomalies",
+        label: "Critical Anomalies",
+        count: insightStats.anomalies,
+        filterFn: (items) =>
+          items.filter((item) => item.type === "negative" && item.impact === "High"),
+      });
+    }
+
+    return options;
+  }, [insightStats]);
+
+  useEffect(() => {
+    if (filterOptions.length === 0) {
+      setFilteredInsights([]);
+      return;
+    }
+
+    const currentFilter = filterOptions.find((option) => option.value === activeFilter);
+
+    if (!currentFilter) {
+      setActiveFilter(filterOptions[0].value);
+      return;
+    }
+
+    setFilteredInsights(currentFilter.filterFn(insights));
+  }, [filterOptions, activeFilter, insights]);
 
   const fetchDatabases = useCallback(async () => {
     if (!projectId) return;
@@ -86,6 +201,13 @@ export function InsightsView({ projectId }: InsightsViewProps) {
       if (response.success && response.data) {
         // Backend returns all databases for the project
         setDatabases(response.data);
+        const metadataEntries: DatabaseMetadataEntry[] = response.data.map((db) => ({
+          id: db.id,
+          name: db.name,
+          type: db.type,
+          schema: db.schema ?? null,
+        }));
+        storeDatabaseMetadata(String(projectId), metadataEntries);
       } else if (response.error) {
         console.error("Failed to fetch databases:", response.error);
         // Show user-friendly message if no databases found
@@ -100,9 +222,16 @@ export function InsightsView({ projectId }: InsightsViewProps) {
 
   // Fetch databases when projectId is available
   useEffect(() => {
-    if (projectId) {
-      fetchDatabases();
+    if (!projectId) {
+      return;
     }
+
+    const cachedDatabases = loadDatabaseMetadata(String(projectId));
+    if (cachedDatabases && cachedDatabases.length > 0) {
+      setDatabases(cachedDatabases.map(mapDatabaseMetadataToApiDatabase));
+    }
+
+    fetchDatabases();
   }, [projectId, fetchDatabases]);
 
   // Reset selected database to "all" when dialog opens
@@ -117,8 +246,9 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   }, [showGenerateDialog, projectId, fetchDatabases]);
 
   const transformProjectInsights = (data: ProjectInsightsResponse): Insight[] => {
-    const transformed: Insight[] = [];
-    let idCounter = 1;
+    try {
+      const transformed: Insight[] = [];
+      let idCounter = 1;
 
     // Transform consolidated insights (project-wide)
     if (data.consolidated_insights) {
@@ -126,58 +256,151 @@ export function InsightsView({ projectId }: InsightsViewProps) {
       
       // Strategic priorities as opportunities
       consolidated.strategic_priorities?.forEach((priority) => {
-        transformed.push({
-          id: `priority-${idCounter++}`,
-          title: priority.title,
-          description: priority.description,
-          type: "opportunity",
-          category: "Strategic Priority",
-          timestamp: "Just now",
-          impact: priority.impact === "high" ? "High" : priority.impact === "medium" ? "Medium" : "Low",
-          source: "Project-wide",
-        });
+        try {
+          const title = String(priority?.title || 'Untitled Priority');
+          const description = String(priority?.description || '');
+          transformed.push({
+            id: `priority-${idCounter++}`,
+            title: title,
+            description: description,
+            type: "opportunity",
+            category: "Strategic Priority",
+            timestamp: "Just now",
+            impact: priority.impact === "high" ? "High" : priority.impact === "medium" ? "Medium" : "Low",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing strategic priority:", err, priority);
+        }
       });
 
       // Opportunities
       consolidated.opportunities?.forEach((opportunity) => {
-        transformed.push({
-          id: `opportunity-${idCounter++}`,
-          title: opportunity.title,
-          description: `${opportunity.description} - Potential Impact: ${opportunity.potential_impact}`,
-          type: "opportunity",
-          category: "Opportunity",
-          timestamp: "Just now",
-          impact: "Medium",
-          source: "Project-wide",
-        });
+        try {
+          const title = String(opportunity?.title || 'Untitled Opportunity');
+          const description = String(opportunity?.description || '');
+          const potentialImpact = String(opportunity?.potential_impact || '');
+          transformed.push({
+            id: `opportunity-${idCounter++}`,
+            title: title,
+            description: potentialImpact ? `${description} - Potential Impact: ${potentialImpact}` : description,
+            type: "opportunity",
+            category: "Opportunity",
+            timestamp: "Just now",
+            impact: "Medium",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing opportunity:", err, opportunity);
+        }
       });
 
       // Critical risks as negative insights
-      consolidated.risk_assessment?.critical_risks?.forEach((risk) => {
-        transformed.push({
-          id: `risk-critical-${idCounter++}`,
-          title: risk,
-          description: `Critical risk identified: ${risk}`,
-          type: "negative",
-          category: "Risk",
-          timestamp: "Just now",
-          impact: "High",
-          source: "Project-wide",
-        });
+      consolidated.risk_assessment?.critical_risks?.forEach((riskItem) => {
+        try {
+          // Handle both object format { risk, reasoning } and string format
+          const riskText = typeof riskItem === 'string' 
+            ? riskItem 
+            : (riskItem as any)?.risk || '';
+          const reasoning = typeof riskItem === 'string' 
+            ? '' 
+            : (riskItem as any)?.reasoning || '';
+          
+          // Skip if no risk text
+          if (!riskText || typeof riskText !== 'string') {
+            return;
+          }
+          
+          const description = reasoning 
+            ? `Critical risk identified: ${riskText} - ${reasoning}`
+            : `Critical risk identified: ${riskText}`;
+          
+          transformed.push({
+            id: `risk-critical-${idCounter++}`,
+            title: riskText,
+            description: description,
+            type: "negative",
+            category: "Risk",
+            timestamp: "Just now",
+            impact: "High",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing critical risk:", err, riskItem);
+          // Skip this item and continue with others
+        }
       });
 
       // Moderate risks
-      consolidated.risk_assessment?.moderate_risks?.forEach((risk) => {
-        transformed.push({
-          id: `risk-moderate-${idCounter++}`,
-          title: risk,
-          description: `Moderate risk identified: ${risk}`,
-          type: "negative",
-          category: "Risk",
-          timestamp: "Just now",
-          impact: "Medium",
-          source: "Project-wide",
-        });
+      consolidated.risk_assessment?.moderate_risks?.forEach((riskItem) => {
+        try {
+          // Handle both object format { risk, reasoning } and string format
+          const riskText = typeof riskItem === 'string' 
+            ? riskItem 
+            : (riskItem as any)?.risk || '';
+          const reasoning = typeof riskItem === 'string' 
+            ? '' 
+            : (riskItem as any)?.reasoning || '';
+          
+          // Skip if no risk text
+          if (!riskText || typeof riskText !== 'string') {
+            return;
+          }
+          
+          const description = reasoning 
+            ? `Moderate risk identified: ${riskText} - ${reasoning}`
+            : `Moderate risk identified: ${riskText}`;
+          
+          transformed.push({
+            id: `risk-moderate-${idCounter++}`,
+            title: riskText,
+            description: description,
+            type: "negative",
+            category: "Risk",
+            timestamp: "Just now",
+            impact: "Medium",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing moderate risk:", err, riskItem);
+          // Skip this item and continue with others
+        }
+      });
+
+      // Cross-database patterns
+      consolidated.cross_database_patterns?.forEach((patternItem) => {
+        try {
+          // Handle both object format { pattern, reasoning } and string format
+          const patternText = typeof patternItem === 'string' 
+            ? patternItem 
+            : (patternItem as any)?.pattern || '';
+          const reasoning = typeof patternItem === 'string' 
+            ? '' 
+            : (patternItem as any)?.reasoning || '';
+          
+          // Skip if no pattern text
+          if (!patternText || typeof patternText !== 'string') {
+            return;
+          }
+          
+          const description = reasoning 
+            ? `${patternText} - ${reasoning}`
+            : patternText;
+          
+          transformed.push({
+            id: `cross-pattern-${idCounter++}`,
+            title: patternText.substring(0, 60) + (patternText.length > 60 ? "..." : ""),
+            description: description,
+            type: "opportunity",
+            category: "Cross-Database Pattern",
+            timestamp: "Just now",
+            impact: "Medium",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing cross-database pattern:", err, patternItem);
+          // Skip this item and continue with others
+        }
       });
     }
 
@@ -188,136 +411,259 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         
         // Recommendations
         insights.recommendations?.forEach((rec) => {
-          transformed.push({
-            id: `rec-${dbInsight.database_id}-${idCounter++}`,
-            title: rec.title,
-            description: rec.description,
-            type: rec.priority === "high" ? "opportunity" : "positive",
-            category: "Recommendation",
-            timestamp: "Just now",
-            impact: rec.priority === "high" ? "High" : rec.priority === "medium" ? "Medium" : "Low",
-            source: dbInsight.database_name,
-          });
+          try {
+            const title = String(rec?.title || 'Untitled Recommendation');
+            const description = String(rec?.description || '');
+            transformed.push({
+              id: `rec-${dbInsight.database_id}-${idCounter++}`,
+              title: title,
+              description: description,
+              type: rec.priority === "high" ? "opportunity" : "positive",
+              category: "Recommendation",
+              timestamp: "Just now",
+              impact: rec.priority === "high" ? "High" : rec.priority === "medium" ? "Medium" : "Low",
+              source: dbInsight.database_name || "Unknown",
+            });
+          } catch (err) {
+            console.error("Error processing recommendation:", err, rec);
+          }
         });
 
         // Areas of concern as negative insights
-        insights.areas_of_concern?.forEach((concern) => {
-          transformed.push({
-            id: `concern-${dbInsight.database_id}-${idCounter++}`,
-            title: concern,
-            description: `Area requiring attention: ${concern}`,
-            type: "negative",
-            category: "Concern",
-            timestamp: "Just now",
-            impact: "High",
-            source: dbInsight.database_name,
-          });
+        insights.areas_of_concern?.forEach((concernItem) => {
+          try {
+            // Handle both object format { concern, reasoning } and string format
+            const concernText = typeof concernItem === 'string' 
+              ? concernItem 
+              : (concernItem as any)?.concern || '';
+            const reasoning = typeof concernItem === 'string' 
+              ? '' 
+              : (concernItem as any)?.reasoning || '';
+            
+            // Skip if no concern text
+            if (!concernText || typeof concernText !== 'string') {
+              return;
+            }
+            
+            const description = reasoning 
+              ? `Area requiring attention: ${concernText} - ${reasoning}`
+              : `Area requiring attention: ${concernText}`;
+            
+            transformed.push({
+              id: `concern-${dbInsight.database_id}-${idCounter++}`,
+              title: concernText,
+              description: description,
+              type: "negative",
+              category: "Concern",
+              timestamp: "Just now",
+              impact: "High",
+              source: dbInsight.database_name || "Unknown",
+            });
+          } catch (err) {
+            console.error("Error processing area of concern:", err, concernItem);
+            // Skip this item and continue with others
+          }
         });
 
         // Key metrics as positive/negative based on interpretation
         insights.key_metrics?.forEach((metric) => {
-          const isPositive = metric.value_interpretation?.toLowerCase().includes("good") ||
-                           metric.value_interpretation?.toLowerCase().includes("excellent") ||
-                           metric.value_interpretation?.toLowerCase().includes("improving");
-          
-          transformed.push({
-            id: `metric-${dbInsight.database_id}-${idCounter++}`,
-            title: metric.kpi_name,
-            description: `${metric.value_interpretation} - ${metric.business_impact}`,
-            type: isPositive ? "positive" : "negative",
-            category: "Key Metric",
-            timestamp: "Just now",
-            impact: "Medium",
-            source: dbInsight.database_name,
-          });
+          try {
+            const kpiName = String(metric?.kpi_name || 'Unknown KPI');
+            const valueInterpretation = String(metric?.value_interpretation || '');
+            const businessImpact = String(metric?.business_impact || '');
+            const isPositive = valueInterpretation.toLowerCase().includes("good") ||
+                             valueInterpretation.toLowerCase().includes("excellent") ||
+                             valueInterpretation.toLowerCase().includes("improving");
+            
+            transformed.push({
+              id: `metric-${dbInsight.database_id}-${idCounter++}`,
+              title: kpiName,
+              description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
+              type: isPositive ? "positive" : "negative",
+              category: "Key Metric",
+              timestamp: "Just now",
+              impact: "Medium",
+              source: dbInsight.database_name || "Unknown",
+            });
+          } catch (err) {
+            console.error("Error processing key metric:", err, metric);
+          }
         });
 
         // Insights and patterns
-        insights.insights_and_patterns?.forEach((pattern) => {
-          transformed.push({
-            id: `pattern-${dbInsight.database_id}-${idCounter++}`,
-            title: pattern.substring(0, 60) + (pattern.length > 60 ? "..." : ""),
-            description: pattern,
-            type: "opportunity",
-            category: "Pattern",
-            timestamp: "Just now",
-            impact: "Medium",
-            source: dbInsight.database_name,
-          });
+        insights.insights_and_patterns?.forEach((patternItem) => {
+          try {
+            // Handle both object format { insight, reasoning } and string format
+            const insightText = typeof patternItem === 'string' 
+              ? patternItem 
+              : (patternItem as any)?.insight || '';
+            const reasoning = typeof patternItem === 'string' 
+              ? '' 
+              : (patternItem as any)?.reasoning || '';
+            
+            // Skip if no insight text
+            if (!insightText || typeof insightText !== 'string') {
+              return;
+            }
+            
+            const description = reasoning 
+              ? `${insightText} - ${reasoning}`
+              : insightText;
+            
+            transformed.push({
+              id: `pattern-${dbInsight.database_id}-${idCounter++}`,
+              title: insightText.substring(0, 60) + (insightText.length > 60 ? "..." : ""),
+              description: description,
+              type: "opportunity",
+              category: "Pattern",
+              timestamp: "Just now",
+              impact: "Medium",
+              source: dbInsight.database_name || "Unknown",
+            });
+          } catch (err) {
+            console.error("Error processing insight pattern:", err, patternItem);
+            // Skip this item and continue with others
+          }
         });
       }
     });
 
-    return transformed;
+      return transformed;
+    } catch (error) {
+      console.error("Error in transformProjectInsights:", error, data);
+      return []; // Return empty array on error to prevent crash
+    }
   };
 
   const transformBusinessInsights = (data: BusinessInsightsResponse): Insight[] => {
-    const transformed: Insight[] = [];
-    let idCounter = 1;
+    try {
+      const transformed: Insight[] = [];
+      let idCounter = 1;
 
-    const insights = data.insights;
+      const insights = data.insights;
 
     // Recommendations
     insights.recommendations?.forEach((rec) => {
-      transformed.push({
-        id: `rec-${idCounter++}`,
-        title: rec.title,
-        description: rec.description,
-        type: rec.priority === "high" ? "opportunity" : "positive",
-        category: "Recommendation",
-        timestamp: "Just now",
-        impact: rec.priority === "high" ? "High" : rec.priority === "medium" ? "Medium" : "Low",
-        source: data.database_name,
-      });
+      try {
+        const title = String(rec?.title || 'Untitled Recommendation');
+        const description = String(rec?.description || '');
+        transformed.push({
+          id: `rec-${idCounter++}`,
+          title: title,
+          description: description,
+          type: rec.priority === "high" ? "opportunity" : "positive",
+          category: "Recommendation",
+          timestamp: "Just now",
+          impact: rec.priority === "high" ? "High" : rec.priority === "medium" ? "Medium" : "Low",
+          source: data.database_name || "Unknown",
+        });
+      } catch (err) {
+        console.error("Error processing recommendation:", err, rec);
+      }
     });
 
     // Areas of concern
-    insights.areas_of_concern?.forEach((concern) => {
-      transformed.push({
-        id: `concern-${idCounter++}`,
-        title: concern,
-        description: `Area requiring attention: ${concern}`,
-        type: "negative",
-        category: "Concern",
-        timestamp: "Just now",
-        impact: "High",
-        source: data.database_name,
-      });
+    insights.areas_of_concern?.forEach((concernItem) => {
+      try {
+        // Handle both object format { concern, reasoning } and string format
+        const concernText = typeof concernItem === 'string' 
+          ? concernItem 
+          : (concernItem as any)?.concern || '';
+        const reasoning = typeof concernItem === 'string' 
+          ? '' 
+          : (concernItem as any)?.reasoning || '';
+        
+        // Skip if no concern text
+        if (!concernText || typeof concernText !== 'string') {
+          return;
+        }
+        
+        const description = reasoning 
+          ? `Area requiring attention: ${concernText} - ${reasoning}`
+          : `Area requiring attention: ${concernText}`;
+        
+        transformed.push({
+          id: `concern-${idCounter++}`,
+          title: concernText,
+          description: description,
+          type: "negative",
+          category: "Concern",
+          timestamp: "Just now",
+          impact: "High",
+          source: data.database_name || "Unknown",
+        });
+      } catch (err) {
+        console.error("Error processing area of concern:", err, concernItem);
+        // Skip this item and continue with others
+      }
     });
 
     // Key metrics
     insights.key_metrics?.forEach((metric) => {
-      const isPositive = metric.value_interpretation?.toLowerCase().includes("good") ||
-                       metric.value_interpretation?.toLowerCase().includes("excellent") ||
-                       metric.value_interpretation?.toLowerCase().includes("improving");
-      
-      transformed.push({
-        id: `metric-${idCounter++}`,
-        title: metric.kpi_name,
-        description: `${metric.value_interpretation} - ${metric.business_impact}`,
-        type: isPositive ? "positive" : "negative",
-        category: "Key Metric",
-        timestamp: "Just now",
-        impact: "Medium",
-        source: data.database_name,
-      });
+      try {
+        const kpiName = String(metric?.kpi_name || 'Unknown KPI');
+        const valueInterpretation = String(metric?.value_interpretation || '');
+        const businessImpact = String(metric?.business_impact || '');
+        const isPositive = valueInterpretation.toLowerCase().includes("good") ||
+                         valueInterpretation.toLowerCase().includes("excellent") ||
+                         valueInterpretation.toLowerCase().includes("improving");
+        
+        transformed.push({
+          id: `metric-${idCounter++}`,
+          title: kpiName,
+          description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
+          type: isPositive ? "positive" : "negative",
+          category: "Key Metric",
+          timestamp: "Just now",
+          impact: "Medium",
+          source: data.database_name || "Unknown",
+        });
+      } catch (err) {
+        console.error("Error processing key metric:", err, metric);
+      }
     });
 
     // Insights and patterns
-    insights.insights_and_patterns?.forEach((pattern) => {
-      transformed.push({
-        id: `pattern-${idCounter++}`,
-        title: pattern.substring(0, 60) + (pattern.length > 60 ? "..." : ""),
-        description: pattern,
-        type: "opportunity",
-        category: "Pattern",
-        timestamp: "Just now",
-        impact: "Medium",
-        source: data.database_name,
-      });
+    insights.insights_and_patterns?.forEach((patternItem) => {
+      try {
+        // Handle both object format { insight, reasoning } and string format
+        const insightText = typeof patternItem === 'string' 
+          ? patternItem 
+          : (patternItem as any)?.insight || '';
+        const reasoning = typeof patternItem === 'string' 
+          ? '' 
+          : (patternItem as any)?.reasoning || '';
+        
+        // Skip if no insight text
+        if (!insightText || typeof insightText !== 'string') {
+          return;
+        }
+        
+        const description = reasoning 
+          ? `${insightText} - ${reasoning}`
+          : insightText;
+        
+        transformed.push({
+          id: `pattern-${idCounter++}`,
+          title: insightText.substring(0, 60) + (insightText.length > 60 ? "..." : ""),
+          description: description,
+          type: "opportunity",
+          category: "Pattern",
+          timestamp: "Just now",
+          impact: "Medium",
+          source: data.database_name || "Unknown",
+        });
+      } catch (err) {
+        console.error("Error processing insight pattern:", err, patternItem);
+        // Skip this item and continue with others
+      }
     });
 
-    return transformed;
+      return transformed;
+    } catch (error) {
+      console.error("Error in transformBusinessInsights:", error, data);
+      return []; // Return empty array on error to prevent crash
+    }
   };
 
   const handleGenerateInsights = async () => {
@@ -336,9 +682,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         // Generate insights for a specific database
         response = await generateBusinessInsights(selectedDatabase);
         if (response.success && response.data) {
-          const transformed = transformBusinessInsights(response.data);
-          setInsights(prev => [...transformed, ...prev]);
-          toast.success(`Generated ${transformed.length} insights from ${response.data.database_name}`);
+          try {
+            const transformed = transformBusinessInsights(response.data);
+            setInsights(prev => [...transformed, ...prev]);
+            toast.success(`Generated ${transformed.length} insights from ${response.data.database_name}`);
+          } catch (transformError: any) {
+            console.error("Error transforming business insights:", transformError);
+            toast.error("Failed to process insights data. Please try again.");
+          }
         } else {
           toast.error(response.error?.message || "Failed to generate insights");
         }
@@ -346,11 +697,16 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         // Generate project-wide insights
         response = await generateProjectInsights(String(projectId));
         if (response.success && response.data) {
-          const transformed = transformProjectInsights(response.data);
-          setInsights(prev => [...transformed, ...prev]);
-          toast.success(
-            `Generated ${transformed.length} insights from ${response.data.successful_analyses} databases`
-          );
+          try {
+            const transformed = transformProjectInsights(response.data);
+            setInsights(prev => [...transformed, ...prev]);
+            toast.success(
+              `Generated ${transformed.length} insights from ${response.data.successful_analyses} databases`
+            );
+          } catch (transformError: any) {
+            console.error("Error transforming project insights:", transformError);
+            toast.error("Failed to process insights data. Please try again.");
+          }
         } else {
           const errorMessage = response.error?.message || "Failed to generate project insights";
           // Check if the error is about no database connections
@@ -370,10 +726,39 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   };
 
   // Calculate stats
-  const totalInsights = insights.length;
-  const positiveTrends = insights.filter(i => i.type === "positive").length;
-  const requiresAttention = insights.filter(i => i.type === "negative").length;
-  const anomalies = insights.filter(i => i.type === "negative" && i.impact === "High").length;
+  const totalInsights = insightStats.total;
+  const positiveTrends = insightStats.positive;
+  const requiresAttention = insightStats.negative;
+  const anomalies = insightStats.anomalies;
+
+  const typeStyles = {
+    positive: {
+      color: "text-success",
+      bg: "bg-success/10",
+    },
+    negative: {
+      color: "text-destructive",
+      bg: "bg-destructive/10",
+    },
+    opportunity: {
+      color: "text-accent",
+      bg: "bg-accent/10",
+    },
+    default: {
+      color: "text-muted-foreground",
+      bg: "bg-muted/10",
+    },
+  } as const;
+
+  const categoryIcons: Record<string, typeof Lightbulb> = {
+    "Strategic Priority": Target,
+    Opportunity: Sparkles,
+    Risk: AlertTriangle,
+    Concern: AlertOctagon,
+    "Key Metric": BarChart3,
+    Pattern: LineChart,
+    Recommendation: CheckCircle2,
+  };
 
   return (
     <div className="px-12 py-10">
@@ -385,14 +770,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             <p className="text-muted-foreground">Automatic discoveries and anomalies detected in your data</p>
           </div>
           <div className="flex gap-3">
-            <Button 
+            {/* <Button 
               variant="outline"
               onClick={() => setShowGenerateDialog(true)}
               disabled={!projectId || isGenerating}
             >
               <Filter className="w-4 h-4 mr-2" />
               Filter
-            </Button>
+            </Button> */}
             <Button 
               className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all"
               onClick={() => setShowGenerateDialog(true)}
@@ -465,12 +850,15 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         </div>
 
         {/* Filter Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-6">
+        <Tabs value={activeFilter} onValueChange={setActiveFilter} className="mb-6">
           <TabsList>
-            <TabsTrigger value="all">All Insights</TabsTrigger>
-            <TabsTrigger value="recent">Recent</TabsTrigger>
-            <TabsTrigger value="trending">Trending</TabsTrigger>
-            <TabsTrigger value="anomalies">Anomalies</TabsTrigger>
+            {filterOptions.map((option) => (
+              <TabsTrigger key={option.value} value={option.value}>
+                {option.count !== undefined
+                  ? `${option.label} (${option.count})`
+                  : option.label}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </Tabs>
 
@@ -503,20 +891,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         ) : (
           <div className="space-y-4">
             {filteredInsights.map((insight) => {
-              const iconColor = 
-                insight.type === 'positive' ? 'text-success' :
-                insight.type === 'negative' ? 'text-destructive' :
-                'text-accent';
-              
-              const iconBg = 
-                insight.type === 'positive' ? 'bg-success/10' :
-                insight.type === 'negative' ? 'bg-destructive/10' :
-                'bg-accent/10';
-
-              const Icon = 
-                insight.type === 'positive' ? TrendingUp :
-                insight.type === 'negative' ? TrendingDown :
-                Lightbulb;
+              const style = typeStyles[insight.type as keyof typeof typeStyles] ?? typeStyles.default;
+              const Icon =
+                categoryIcons[insight.category] ??
+                (insight.type === "positive"
+                  ? TrendingUp
+                  : insight.type === "negative"
+                  ? TrendingDown
+                  : Lightbulb);
 
               return (
                 <Card 
@@ -524,8 +906,8 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                   className="p-6 border border-border hover:shadow-lg transition-all cursor-pointer"
                 >
                   <div className="flex gap-4">
-                    <div className={`w-12 h-12 rounded-xl ${iconBg} flex items-center justify-center flex-shrink-0`}>
-                      <Icon className={`w-6 h-6 ${iconColor}`} />
+                    <div className={`w-12 h-12 rounded-xl ${style.bg} flex items-center justify-center flex-shrink-0`}>
+                      <Icon className={`w-6 h-6 ${style.color}`} />
                     </div>
 
                     <div className="flex-1 min-w-0">

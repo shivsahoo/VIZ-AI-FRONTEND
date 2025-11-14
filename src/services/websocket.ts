@@ -217,7 +217,7 @@ export class VizAIWebSocket {
     }
 
     // Prepare payload with auth token inside payload
-    const payload = { ...message.payload };
+    const payload: Record<string, any> = { ...message.payload, domain: 'admin' };
     
     // Include auth token in payload (default behavior)
     if (includeAuthToken) {
@@ -400,6 +400,9 @@ export class VizAIWebSocket {
     conversation_summary?: string;
     min_max_dates?: [string, string]; // [min_date, max_date]
     sample_data?: string;
+    user_response?: string;
+    existing_state?: Record<string, any>;
+    continue_workflow?: boolean;
   }): void {
     // Convert min_max_dates array to format expected by backend
     const formattedPayload: any = { ...payload };

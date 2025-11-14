@@ -90,29 +90,51 @@ export function ChartCard({
     case 'line':
       return (
         <ResponsiveContainer width="100%" height={height}>
-          <LineChart data={data}>
-            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />}
-            <XAxis dataKey={xAxisKey} {...commonAxisStyle} />
-            <YAxis {...commonAxisStyle} />
-            <Tooltip content={<CustomChartTooltip />} />
-            {showLegend && <Legend />}
+          <LineChart data={data} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />}
+            <XAxis 
+              dataKey={xAxisKey} 
+              {...commonAxisStyle}
+              type="category"
+              allowDuplicatedCategory={false}
+              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+              axisLine={{ stroke: "hsl(var(--border))" }}
+            />
+            <YAxis 
+              {...commonAxisStyle}
+              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+              axisLine={{ stroke: "hsl(var(--border))" }}
+            />
+            <Tooltip 
+              content={<CustomChartTooltip />}
+              cursor={{ stroke: colors[0], strokeWidth: 1, strokeDasharray: '5 5' }}
+            />
+            {showLegend && <Legend wrapperStyle={{ paddingTop: '10px' }} />}
             <Line
               type="monotone"
               dataKey={dataKeys.primary}
               stroke={colors[0]}
-              strokeWidth={strokeWidth}
-              dot={{ fill: colors[0], r: 4 }}
-              activeDot={{ r: 6 }}
+              strokeWidth={2.5}
+              dot={false}
+              activeDot={{ r: 5, fill: colors[0], strokeWidth: 2, stroke: '#fff' }}
+              connectNulls={false}
+              isAnimationActive={true}
+              animationDuration={800}
+              animationEasing="ease-out"
             />
             {dataKeys.secondary && (
               <Line
                 type="monotone"
                 dataKey={dataKeys.secondary}
                 stroke={colors[1]}
-                strokeWidth={strokeWidth}
-                strokeDasharray="5 5"
-                dot={{ fill: colors[1], r: 4 }}
-                activeDot={{ r: 6 }}
+                strokeWidth={2.5}
+                strokeDasharray="8 4"
+                dot={false}
+                activeDot={{ r: 5, fill: colors[1], strokeWidth: 2, stroke: '#fff' }}
+                connectNulls={false}
+                isAnimationActive={true}
+                animationDuration={800}
+                animationEasing="ease-out"
               />
             )}
           </LineChart>
@@ -162,28 +184,60 @@ export function ChartCard({
     case 'area':
       return (
         <ResponsiveContainer width="100%" height={height}>
-          <AreaChart data={data}>
-            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />}
-            <XAxis dataKey={xAxisKey} {...commonAxisStyle} />
-            <YAxis {...commonAxisStyle} />
-            <Tooltip content={<CustomChartTooltip />} />
-            {showLegend && <Legend />}
+          <AreaChart data={data} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+            <defs>
+              <linearGradient id={`gradient-${dataKeys.primary}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={colors[0]} stopOpacity={0.4}/>
+                <stop offset="95%" stopColor={colors[0]} stopOpacity={0.05}/>
+              </linearGradient>
+              {dataKeys.secondary && (
+                <linearGradient id={`gradient-${dataKeys.secondary}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={colors[1]} stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor={colors[1]} stopOpacity={0.02}/>
+                </linearGradient>
+              )}
+            </defs>
+            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />}
+            <XAxis 
+              dataKey={xAxisKey} 
+              {...commonAxisStyle}
+              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+              axisLine={{ stroke: "hsl(var(--border))" }}
+            />
+            <YAxis 
+              {...commonAxisStyle}
+              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+              axisLine={{ stroke: "hsl(var(--border))" }}
+            />
+            <Tooltip 
+              content={<CustomChartTooltip />}
+              cursor={{ stroke: colors[0], strokeWidth: 1, strokeDasharray: '5 5' }}
+            />
+            {showLegend && <Legend wrapperStyle={{ paddingTop: '10px' }} />}
             <Area
               type="monotone"
               dataKey={dataKeys.primary}
               stroke={colors[0]}
-              fill={colors[0]}
-              fillOpacity={0.3}
-              strokeWidth={strokeWidth}
+              fill={`url(#gradient-${dataKeys.primary})`}
+              strokeWidth={2.5}
+              dot={false}
+              activeDot={{ r: 5, fill: colors[0], strokeWidth: 2, stroke: '#fff' }}
+              isAnimationActive={true}
+              animationDuration={800}
+              animationEasing="ease-out"
             />
             {dataKeys.secondary && (
               <Area
                 type="monotone"
                 dataKey={dataKeys.secondary}
                 stroke={colors[1]}
-                fill={colors[1]}
-                fillOpacity={0.2}
-                strokeWidth={strokeWidth}
+                fill={`url(#gradient-${dataKeys.secondary})`}
+                strokeWidth={2.5}
+                dot={false}
+                activeDot={{ r: 5, fill: colors[1], strokeWidth: 2, stroke: '#fff' }}
+                isAnimationActive={true}
+                animationDuration={800}
+                animationEasing="ease-out"
               />
             )}
           </AreaChart>

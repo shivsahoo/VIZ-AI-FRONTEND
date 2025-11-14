@@ -25,6 +25,7 @@ interface ProjectContextBotProps {
     context: Record<string, string>;
     enhancedDescription?: string;
     domain?: string;
+    projectId?: string;
   }) => void;
   onCancel?: () => void;
   userId?: string; // Optional user ID, will be fetched if not provided
@@ -104,12 +105,18 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
           }, 1500);
 
           setTimeout(() => {
-            // Complete with enhanced description
+            // Complete with enhanced description and project_id
+            // Extract project_id from state.project_id or state.backend_data.project.id
+            const extractedProjectId = state.project_id || 
+                                      state.projectId || 
+                                      state.backend_data?.project?.id;
+            
             onComplete({
               name: state.name || responses.project_name || "My Project",
               description: state.description || responses.project_description || "",
               enhancedDescription: state.enhanced_description || state.description,
               domain: state.domain || responses.domain || "",
+              projectId: extractedProjectId,
               context: {
                 ...responses,
                 enhanced_description: state.enhanced_description,

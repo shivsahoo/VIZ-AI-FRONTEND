@@ -6,10 +6,11 @@ import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { GradientButton } from "../components/shared/GradientButton";
 import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, AreaChart, Area, ResponsiveContainer, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
 import { toast } from "sonner";
 import { PinnedChartData } from "../context/PinnedChartsContext";
-import { getFavoriteCharts, updateFavoriteChart, getFavorites } from "../services/api";
+import { ChartCard } from "../components/features/charts/ChartCard";
+import { getFavoriteCharts, updateFavoriteChart, getFavorites, getChartData, type ChartData as ApiChartData } from "../services/api";
+import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../utils/chartData";
 
 interface HomeDashboardViewProps {
   onNavigate?: (tab: string) => void;
@@ -60,43 +61,11 @@ const chartTypeColors = {
   area: 'text-[#F59E0B] bg-[#F59E0B]/10'
 };
 
-// Sample data for chart visualizations
-const lineChartData = [
-  { month: "Jan", value: 4200 },
-  { month: "Feb", value: 5100 },
-  { month: "Mar", value: 4800 },
-  { month: "Apr", value: 6300 },
-  { month: "May", value: 7200 },
-  { month: "Jun", value: 8100 }
-];
-
-const barChartData = [
-  { name: "A", value: 4500 },
-  { name: "B", value: 7200 },
-  { name: "C", value: 5800 },
-  { name: "D", value: 6100 }
-];
-
-const pieChartData = [
-  { name: "Enterprise", value: 45 },
-  { name: "SMB", value: 30 },
-  { name: "Startup", value: 25 }
-];
-
-const areaChartData = [
-  { month: "Jan", users: 1200 },
-  { month: "Feb", users: 1900 },
-  { month: "Mar", users: 2400 },
-  { month: "Apr", users: 3100 },
-  { month: "May", users: 3800 },
-  { month: "Jun", users: 4500 }
-];
-
-const PIE_COLORS = ["#06B6D4", "#5B67F1", "#8B5CF6"];
-
 // Extended interface to store original API chart ID
 interface FavoriteChartData extends PinnedChartData {
   originalId: string; // Store the original UUID from API
+  query?: string;
+  databaseId?: string;
 }
 
 interface FavoriteDashboard {
@@ -106,14 +75,22 @@ interface FavoriteDashboard {
   user_id: string;
 }
 
+interface FavoriteChartDataStatus {
+  config: ChartDataConfig;
+  metadata?: ApiChartData['metadata'];
+  loading: boolean;
+  error?: string;
+}
+
 export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
   const [favoriteCharts, setFavoriteCharts] = useState<FavoriteChartData[]>([]);
   const [favoriteDashboards, setFavoriteDashboards] = useState<FavoriteDashboard[]>([]);
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
   const [isLoadingDashboards, setIsLoadingDashboards] = useState(true);
   const [isLoadingInsights, setIsLoadingInsights] = useState(true);
-  const [selectedChart, setSelectedChart] = useState<PinnedChartData | null>(null);
+  const [selectedChart, setSelectedChart] = useState<FavoriteChartData | null>(null);
   const [pinnedInsightIds, setPinnedInsightIds] = useState<number[]>(recentInsights.map(i => i.id));
+  const [favoriteChartDataStatus, setFavoriteChartDataStatus] = useState<Record<string, FavoriteChartDataStatus>>({});
 
   // Helper to format time ago
   const formatTimeAgo = useCallback((dateString: string): string => {
@@ -154,6 +131,72 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
   }, []);
 
   // Fetch favorite charts from API
+  const fetchChartDataForFavoriteChart = useCallback(async (chart: FavoriteChartData) => {
+    const chartKey = chart.originalId;
+    const hasQuery = Boolean(chart.query && chart.query.trim().length > 0);
+    const hasConnection = Boolean(chart.databaseId && chart.databaseId.trim().length > 0);
+
+    if (!hasQuery || !hasConnection) {
+      setFavoriteChartDataStatus((prev) => ({
+        ...prev,
+        [chartKey]: {
+          config: getDefaultChartDataConfig(),
+          metadata: undefined,
+          loading: false,
+          error: !hasQuery
+            ? "This chart does not have a saved SQL query."
+            : "Database connection ID is missing for this chart.",
+        },
+      }));
+      return;
+    }
+
+    setFavoriteChartDataStatus((prev) => ({
+      ...prev,
+      [chartKey]: {
+        ...(prev[chartKey] ?? { config: getDefaultChartDataConfig(), metadata: undefined }),
+        loading: true,
+        error: undefined,
+      },
+    }));
+
+    try {
+      const response = await getChartData(chartKey, chart.databaseId!, chart.query!);
+      if (response.success && response.data) {
+        const config = inferChartDataConfig(response.data.data, chart.chartType);
+        setFavoriteChartDataStatus((prev) => ({
+          ...prev,
+          [chartKey]: {
+            config,
+            metadata: response.data.metadata,
+            loading: false,
+            error: undefined,
+          },
+        }));
+      } else {
+        setFavoriteChartDataStatus((prev) => ({
+          ...prev,
+          [chartKey]: {
+            config: getDefaultChartDataConfig(),
+            metadata: undefined,
+            loading: false,
+            error: response.error?.message || "Failed to fetch chart data",
+          },
+        }));
+      }
+    } catch (error: any) {
+      setFavoriteChartDataStatus((prev) => ({
+        ...prev,
+        [chartKey]: {
+          config: getDefaultChartDataConfig(),
+          metadata: undefined,
+          loading: false,
+          error: error?.message || "Failed to fetch chart data",
+        },
+      }));
+    }
+  }, []);
+
   const fetchFavoriteCharts = useCallback(async () => {
     setIsLoadingCharts(true);
     try {
@@ -169,20 +212,40 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
           chartType: inferChartType(chart.query),
           category: 'Analytics', // Default category
           dashboardName: 'My Dashboard', // Default dashboard name
-          dataSource: chart.connection_id || 'Unknown Data Source'
+          dataSource: chart.connection_id ? `Database ${chart.connection_id}` : 'Unknown Data Source',
+          query: chart.query,
+          databaseId: chart.connection_id || undefined,
         }));
         setFavoriteCharts(mappedCharts);
+        setFavoriteChartDataStatus((prev) => {
+          const nextStatus: Record<string, FavoriteChartDataStatus> = {};
+          mappedCharts.forEach((chart) => {
+            nextStatus[chart.originalId] =
+              prev[chart.originalId] ?? {
+                config: getDefaultChartDataConfig(),
+                metadata: undefined,
+                loading: false,
+                error: undefined,
+              };
+          });
+          return nextStatus;
+        });
+        mappedCharts.forEach((chart) => {
+          fetchChartDataForFavoriteChart(chart);
+        });
       } else {
         toast.error(response.error?.message || "Failed to load favorite charts");
         setFavoriteCharts([]);
+        setFavoriteChartDataStatus({});
       }
     } catch (error: any) {
       toast.error(error.message || "An error occurred while fetching favorite charts");
       setFavoriteCharts([]);
+      setFavoriteChartDataStatus({});
     } finally {
       setIsLoadingCharts(false);
     }
-  }, [formatTimeAgo, inferChartType]);
+  }, [fetchChartDataForFavoriteChart, formatTimeAgo, inferChartType]);
 
   // Fetch favorite dashboards from API
   const fetchFavoriteDashboards = useCallback(async () => {
@@ -248,6 +311,78 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
   };
 
   const displayedInsights = recentInsights.filter(insight => pinnedInsightIds.includes(insight.id));
+  const selectedChartStatus = selectedChart ? favoriteChartDataStatus[selectedChart.originalId] : undefined;
+
+  const renderFavoriteChartPreview = useCallback((chart: FavoriteChartData) => {
+    const status = favoriteChartDataStatus[chart.originalId];
+    const hasQueryAndConnection = Boolean(chart.query && chart.databaseId);
+    const config = status?.config ?? getDefaultChartDataConfig();
+    const isLoading = status ? status.loading : hasQueryAndConnection;
+    const error = status?.error;
+
+    return (
+      <div className="relative h-full bg-gradient-to-br from-muted/20 to-muted/5 rounded-xl border border-border/60 flex items-center justify-center p-6">
+        {isLoading && hasQueryAndConnection && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/70 backdrop-blur-sm text-muted-foreground">
+            <Clock className="w-5 h-5 animate-spin" />
+            <span className="text-xs">Loading data…</span>
+          </div>
+        )}
+
+        {!isLoading && error && (
+          <div className="max-w-xs text-sm text-muted-foreground leading-relaxed">
+            <p className="font-medium text-foreground mb-1">Unable to load data</p>
+            <p>{error}</p>
+          </div>
+        )}
+
+        {!isLoading && !error && !hasQueryAndConnection && (
+          <div className="max-w-xs text-sm text-muted-foreground leading-relaxed">
+            <p className="font-medium text-foreground mb-1">Missing configuration</p>
+            <p>Pinning this chart requires a saved SQL query and database connection.</p>
+          </div>
+        )}
+
+        {!isLoading && !error && config.data.length === 0 && hasQueryAndConnection && (
+          <div className="max-w-xs text-sm text-muted-foreground leading-relaxed">
+            <p className="font-medium text-foreground mb-1">No data returned</p>
+            <p>Try refining the SQL query or adjusting filters.</p>
+          </div>
+        )}
+
+        {!isLoading && !error && config.data.length > 0 && hasQueryAndConnection && (
+          <ChartCard
+            type={chart.chartType}
+            data={config.data}
+            dataKeys={config.dataKeys}
+            xAxisKey={config.xAxisKey}
+            showLegend={!!config.dataKeys.secondary && chart.chartType !== 'pie'}
+            height={260}
+          />
+        )}
+
+        {status?.metadata && !isLoading && !error && (
+          <div className="absolute bottom-4 right-4 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+            {typeof status.metadata.rowCount === 'number' && (
+              <span className="px-2 py-1 rounded-md border border-border/60 bg-background/60">
+                {status.metadata.rowCount} row{status.metadata.rowCount === 1 ? '' : 's'}
+              </span>
+            )}
+            {typeof status.metadata.executionTime === 'number' && status.metadata.executionTime > 0 && (
+              <span className="px-2 py-1 rounded-md border border-border/60 bg-background/60">
+                {status.metadata.executionTime} ms
+              </span>
+            )}
+            {status.metadata.cachedAt && (
+              <span className="px-2 py-1 rounded-md border border-border/60 bg-background/60">
+                Cached {new Date(status.metadata.cachedAt).toLocaleString()}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }, [favoriteChartDataStatus]);
 
   return (
     <div className="h-full overflow-auto bg-background">
@@ -347,22 +482,6 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
                 const Icon = chartTypeIcons[chart.chartType];
                 const colorClass = chartTypeColors[chart.chartType];
                 
-                // Determine chart color based on type
-                const chartColor = {
-                  line: '#06B6D4',
-                  bar: '#8B5CF6',
-                  pie: '#10B981',
-                  area: '#F59E0B'
-                }[chart.chartType];
-
-                // Determine which data to use
-                const chartData = {
-                  line: lineChartData,
-                  bar: barChartData,
-                  pie: pieChartData,
-                  area: areaChartData
-                }[chart.chartType];
-                
                 return (
                   <Card 
                     key={chart.id}
@@ -401,187 +520,8 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
                     </div>
 
                     {/* Chart Visualization - Takes up most of the space */}
-                    <div className="h-[480px] bg-gradient-to-br from-muted/20 to-muted/5 px-4 pt-32 pb-6">
-                      {chart.chartType === 'line' && (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                            <XAxis 
-                              dataKey="month" 
-                              stroke="hsl(var(--muted-foreground))"
-                              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                            />
-                            <YAxis 
-                              stroke="hsl(var(--muted-foreground))"
-                              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                            />
-                            <Tooltip 
-                              contentStyle={{
-                                backgroundColor: '#1F2937',
-                                border: '2px solid #374151',
-                                borderRadius: '8px',
-                                fontSize: '12px',
-                                color: '#F9FAFB',
-                                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3)',
-                                padding: '8px 12px'
-                              }}
-                              labelStyle={{
-                                color: '#F9FAFB',
-                                fontWeight: 600,
-                                marginBottom: '4px'
-                              }}
-                              itemStyle={{
-                                color: '#F9FAFB'
-                              }}
-                            />
-                            <Legend 
-                              wrapperStyle={{ fontSize: '11px' }}
-                              verticalAlign="bottom"
-                              height={36}
-                            />
-                            <Line 
-                              type="monotone" 
-                              dataKey="value" 
-                              stroke={chartColor} 
-                              strokeWidth={2.5}
-                              dot={{ fill: chartColor, r: 3 }}
-                              name="Revenue"
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      )}
-                      {chart.chartType === 'bar' && (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                            <XAxis 
-                              dataKey="name" 
-                              stroke="hsl(var(--muted-foreground))"
-                              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                            />
-                            <YAxis 
-                              stroke="hsl(var(--muted-foreground))"
-                              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                            />
-                            <Tooltip 
-                              contentStyle={{
-                                backgroundColor: '#1F2937',
-                                border: '2px solid #374151',
-                                borderRadius: '8px',
-                                fontSize: '12px',
-                                color: '#F9FAFB',
-                                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3)',
-                                padding: '8px 12px'
-                              }}
-                              labelStyle={{
-                                color: '#F9FAFB',
-                                fontWeight: 600,
-                                marginBottom: '4px'
-                              }}
-                              itemStyle={{
-                                color: '#F9FAFB'
-                              }}
-                            />
-                            <Legend 
-                              wrapperStyle={{ fontSize: '11px' }}
-                              verticalAlign="bottom"
-                              height={36}
-                            />
-                            <Bar dataKey="value" fill={chartColor} radius={[8, 8, 0, 0]} name="Sales" />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      )}
-                      {chart.chartType === 'pie' && (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart margin={{ top: 10, right: 10, bottom: 10, left: 0 }}>
-                            <Pie
-                              data={chartData}
-                              dataKey="value"
-                              cx="50%"
-                              cy="45%"
-                              innerRadius={55}
-                              outerRadius={95}
-                            >
-                              {chartData.map((_entry: any, index: number) => (
-                                <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                              ))}
-                            </Pie>
-                            <Tooltip 
-                              contentStyle={{
-                                backgroundColor: '#1F2937',
-                                border: '2px solid #374151',
-                                borderRadius: '8px',
-                                fontSize: '12px',
-                                color: '#F9FAFB',
-                                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3)',
-                                padding: '8px 12px'
-                              }}
-                              labelStyle={{
-                                color: '#F9FAFB',
-                                fontWeight: 600,
-                                marginBottom: '4px'
-                              }}
-                              itemStyle={{
-                                color: '#F9FAFB'
-                              }}
-                            />
-                            <Legend 
-                              wrapperStyle={{ fontSize: '11px' }}
-                              verticalAlign="bottom"
-                              height={36}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      )}
-                      {chart.chartType === 'area' && (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                            <XAxis 
-                              dataKey="month" 
-                              stroke="hsl(var(--muted-foreground))"
-                              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                            />
-                            <YAxis 
-                              stroke="hsl(var(--muted-foreground))"
-                              tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
-                            />
-                            <Tooltip 
-                              contentStyle={{
-                                backgroundColor: '#1F2937',
-                                border: '2px solid #374151',
-                                borderRadius: '8px',
-                                fontSize: '12px',
-                                color: '#F9FAFB',
-                                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3)',
-                                padding: '8px 12px'
-                              }}
-                              labelStyle={{
-                                color: '#F9FAFB',
-                                fontWeight: 600,
-                                marginBottom: '4px'
-                              }}
-                              itemStyle={{
-                                color: '#F9FAFB'
-                              }}
-                            />
-                            <Legend 
-                              wrapperStyle={{ fontSize: '11px' }}
-                              verticalAlign="bottom"
-                              height={36}
-                            />
-                            <Area 
-                              type="monotone" 
-                              dataKey="users" 
-                              stroke={chartColor} 
-                              fill={chartColor}
-                              fillOpacity={0.3}
-                              strokeWidth={2.5}
-                              name="Active Users"
-                            />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      )}
+                    <div className="h-[420px] px-4 pt-32 pb-6">
+                      {renderFavoriteChartPreview(chart)}
                     </div>
 
                     {/* Hover Action Button */}
@@ -833,12 +773,26 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
         isOpen={!!selectedChart}
         onClose={() => setSelectedChart(null)}
         chart={selectedChart ? {
+          id: selectedChart.originalId,
           name: selectedChart.name,
           type: selectedChart.chartType,
           description: selectedChart.description,
-          query: `SELECT * FROM ${selectedChart.dataSource.toLowerCase().replace(' ', '_')} WHERE date >= '2024-01-01';`,
-          reasoning: `This ${selectedChart.chartType} chart analyzes data from ${selectedChart.dataSource} to visualize ${selectedChart.name.toLowerCase()}. The visualization helps identify trends and patterns in ${selectedChart.category.toLowerCase()} metrics.`
+          query: selectedChart.query || "",
+          reasoning: selectedChart.description || `Pinned chart from ${selectedChart.dashboardName}`,
+          dashboards: selectedChart.dashboardName ? [selectedChart.dashboardName] : undefined,
+          dataSource: selectedChart.dataSource,
+          databaseId: selectedChart.databaseId,
+          dataConnectionId: selectedChart.databaseId,
+          data: selectedChartStatus?.config.data,
+          dataKeys: selectedChartStatus?.config.dataKeys,
+          xAxisKey: selectedChartStatus?.config.xAxisKey,
+          isLoadingData: selectedChartStatus?.loading,
+          dataError: selectedChartStatus?.error,
         } : null}
+        dashboards={favoriteDashboards.map((dashboard) => ({
+          id: dashboard.id,
+          name: dashboard.name,
+        }))}
         onAddToDashboard={(dashboardId) => {
           console.log('Added to dashboard:', dashboardId);
         }}
