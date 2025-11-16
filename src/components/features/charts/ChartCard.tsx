@@ -47,17 +47,18 @@ interface ChartCardProps {
 }
 
 /**
- * Default color palette using CSS variables from design system
+ * Default color palette - using purple as primary color to match design reference
  */
 const DEFAULT_COLORS = [
-  "hsl(var(--chart-1))",
-  "hsl(var(--chart-2))",
-  "hsl(var(--chart-3))",
-  "hsl(var(--chart-4))"
+  "#8B5CF6", // Purple - primary color
+  "#6366F1", // Indigo - secondary color
+  "#06B6D4", // Cyan - tertiary color
+  "#F59E0B"  // Amber - quaternary color
 ];
 
 /**
- * Color palette specifically for pie chart segments
+ * Color palette specifically for pie chart segments - matching reference design
+ * Light blue, darker purple, lighter purple, amber, red
  */
 const PIE_COLORS = ["#06B6D4", "#6366F1", "#8B5CF6", "#F59E0B", "#EF4444"];
 
@@ -76,6 +77,75 @@ export function ChartCard({
   strokeWidth = 2
 }: ChartCardProps) {
   
+  // Validate data
+  if (!data || data.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+        No data available
+      </div>
+    );
+  }
+
+  // Validate dataKeys exist in data
+  const sampleData = data[0];
+  if (!sampleData || typeof sampleData !== 'object') {
+    return (
+      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+        Invalid data format
+      </div>
+    );
+  }
+
+  // Check if primary dataKey exists
+  let finalDataKeys = { ...dataKeys };
+  if (!(dataKeys.primary in sampleData)) {
+    console.warn(`ChartCard: Primary dataKey "${dataKeys.primary}" not found in data. Available keys:`, Object.keys(sampleData));
+    // Try to find a numeric key as fallback
+    const numericKey = Object.keys(sampleData).find(key => 
+      typeof sampleData[key] === 'number' && key !== xAxisKey && key !== finalXAxisKey
+    );
+    if (numericKey) {
+      finalDataKeys = { ...dataKeys, primary: numericKey };
+      console.log(`ChartCard: Using fallback primary key: ${numericKey}`);
+    } else {
+      // Last resort: try to find any numeric value
+      const anyNumericKey = Object.keys(sampleData).find(key => {
+        const val = sampleData[key];
+        return (typeof val === 'number' || (!isNaN(Number(val)) && val !== null && val !== undefined)) 
+          && key !== finalXAxisKey;
+      });
+      if (anyNumericKey) {
+        finalDataKeys = { ...dataKeys, primary: anyNumericKey };
+        console.log(`ChartCard: Using last resort numeric key: ${anyNumericKey}`);
+      } else {
+        return (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            Data key "{dataKeys.primary}" not found. Available: {Object.keys(sampleData).join(', ')}
+          </div>
+        );
+      }
+    }
+  }
+
+  // Check if xAxisKey exists
+  let finalXAxisKey = xAxisKey;
+  if (xAxisKey && !(xAxisKey in sampleData)) {
+    console.warn(`ChartCard: X-axis key "${xAxisKey}" not found in data. Available keys:`, Object.keys(sampleData));
+    // Try to find a non-numeric key as fallback
+    const stringKey = Object.keys(sampleData).find(key => 
+      typeof sampleData[key] !== 'number' && key !== dataKeys.primary && key !== dataKeys.secondary
+    );
+    if (stringKey) {
+      finalXAxisKey = stringKey;
+    } else {
+      // Last resort: use first key that's not the primary data key
+      const fallbackKey = Object.keys(sampleData).find(key => key !== dataKeys.primary && key !== dataKeys.secondary);
+      if (fallbackKey) {
+        finalXAxisKey = fallbackKey;
+      }
+    }
+  }
+  
   /**
    * Common styling for X and Y axes across all chart types
    * Uses design system color tokens for consistency
@@ -88,14 +158,52 @@ export function ChartCard({
   // Render appropriate chart type based on props
   switch (type) {
     case 'line':
+      // Check if x-axis values are dates
+      const isDateAxis = data.length > 0 && finalXAxisKey && (() => {
+        const sampleValue = data[0][finalXAxisKey];
+        if (typeof sampleValue === 'string') {
+          const date = new Date(sampleValue);
+          return !isNaN(date.getTime());
+        }
+        return false;
+      })();
+
+      // If using a time scale, convert x-axis values to timestamps for Recharts
+      const displayData = isDateAxis
+        ? data.map((row) => {
+            const value = row[finalXAxisKey];
+            const ts = typeof value === 'string' ? new Date(value).getTime() : value;
+            return { ...row, [finalXAxisKey]: ts };
+          })
+        : data;
+
+      // Ensure we have valid data to render
+      if (data.length === 0) {
+        return (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            No data to display
+          </div>
+        );
+      }
+
       return (
         <ResponsiveContainer width="100%" height={height}>
-          <LineChart data={data} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+          <LineChart data={displayData} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
             {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />}
             <XAxis 
-              dataKey={xAxisKey} 
+              dataKey={finalXAxisKey} 
               {...commonAxisStyle}
-              type="category"
+              type={isDateAxis ? "number" : "category"}
+              scale={isDateAxis ? "time" : undefined}
+              domain={isDateAxis ? ['dataMin', 'dataMax'] : undefined}
+              tickFormatter={isDateAxis ? (value) => {
+                try {
+                  const date = new Date(value);
+                  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                } catch {
+                  return value;
+                }
+              } : undefined}
               allowDuplicatedCategory={false}
               tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
               axisLine={{ stroke: "hsl(var(--border))" }}
@@ -107,36 +215,71 @@ export function ChartCard({
             />
             <Tooltip 
               content={<CustomChartTooltip />}
-              cursor={{ stroke: colors[0], strokeWidth: 1, strokeDasharray: '5 5' }}
+              cursor={{ stroke: colors[0] || "#8B5CF6", strokeWidth: 1, strokeDasharray: '5 5' }}
             />
             {showLegend && <Legend wrapperStyle={{ paddingTop: '10px' }} />}
+            {/* Render primary line */}
             <Line
               type="monotone"
-              dataKey={dataKeys.primary}
-              stroke={colors[0]}
-              strokeWidth={2.5}
+              dataKey={finalDataKeys.primary}
+              stroke={colors[0] || "#8B5CF6"}
+              strokeWidth={3}
               dot={false}
-              activeDot={{ r: 5, fill: colors[0], strokeWidth: 2, stroke: '#fff' }}
-              connectNulls={false}
-              isAnimationActive={true}
-              animationDuration={800}
-              animationEasing="ease-out"
+              activeDot={{ r: 6, fill: colors[0] || "#8B5CF6", strokeWidth: 2, stroke: '#fff' }}
+              connectNulls={true}
+              isAnimationActive={false}
+              name={finalDataKeys.primary}
             />
-            {dataKeys.secondary && (
+            {/* Render secondary line if exists */}
+            {finalDataKeys.secondary && finalDataKeys.secondary in sampleData && (
               <Line
                 type="monotone"
-                dataKey={dataKeys.secondary}
-                stroke={colors[1]}
-                strokeWidth={2.5}
+                dataKey={finalDataKeys.secondary}
+                stroke={colors[1] || "#6366F1"}
+                strokeWidth={3}
                 strokeDasharray="8 4"
                 dot={false}
-                activeDot={{ r: 5, fill: colors[1], strokeWidth: 2, stroke: '#fff' }}
-                connectNulls={false}
-                isAnimationActive={true}
-                animationDuration={800}
-                animationEasing="ease-out"
+                activeDot={{ r: 6, fill: colors[1] || "#6366F1", strokeWidth: 2, stroke: '#fff' }}
+                connectNulls={true}
+                isAnimationActive={false}
+                name={finalDataKeys.secondary}
               />
             )}
+            {/* Render additional series dynamically if they exist in data */}
+            {displayData.length > 0 && (() => {
+              const allKeys = Object.keys(sampleData);
+              const numericKeys = allKeys.filter(key => {
+                if (key === finalXAxisKey) return false;
+                const val = sampleData[key];
+                return typeof val === 'number' || (!isNaN(Number(val)) && val !== null && val !== undefined);
+              });
+              // Get all numeric keys that aren't already rendered
+              const additionalKeys = numericKeys.filter(key => 
+                key !== finalDataKeys.primary && 
+                key !== finalDataKeys.secondary &&
+                key in sampleData
+              );
+              
+              return additionalKeys.map((key, index) => {
+                const colorIndex = (index + 2) % colors.length;
+                const isEven = (index + 2) % 2 === 0;
+                return (
+                  <Line
+                    key={key}
+                    type="monotone"
+                    dataKey={key}
+                    stroke={colors[colorIndex] || DEFAULT_COLORS[colorIndex % DEFAULT_COLORS.length]}
+                    strokeWidth={3}
+                    strokeDasharray={isEven ? undefined : "8 4"}
+                    dot={false}
+                    activeDot={{ r: 6, fill: colors[colorIndex] || DEFAULT_COLORS[colorIndex % DEFAULT_COLORS.length], strokeWidth: 2, stroke: '#fff' }}
+                    connectNulls={true}
+                    isAnimationActive={false}
+                    name={key}
+                  />
+                );
+              });
+            })()}
           </LineChart>
         </ResponsiveContainer>
       );
@@ -144,21 +287,59 @@ export function ChartCard({
     case 'bar':
       return (
         <ResponsiveContainer width="100%" height={height}>
-          <BarChart data={data}>
-            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />}
-            <XAxis dataKey={xAxisKey} {...commonAxisStyle} />
-            <YAxis {...commonAxisStyle} />
+          <BarChart data={data} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />}
+            <XAxis 
+              dataKey={finalXAxisKey} 
+              {...commonAxisStyle}
+              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+              axisLine={{ stroke: "hsl(var(--border))" }}
+            />
+            <YAxis 
+              {...commonAxisStyle}
+              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+              axisLine={{ stroke: "hsl(var(--border))" }}
+            />
             <Tooltip content={<CustomChartTooltip />} />
-            {showLegend && <Legend />}
-            <Bar dataKey={dataKeys.primary} fill={colors[0]} radius={[8, 8, 0, 0]} />
-            {dataKeys.secondary && (
-              <Bar dataKey={dataKeys.secondary} fill={colors[1]} radius={[8, 8, 0, 0]} />
+            {showLegend && <Legend wrapperStyle={{ paddingTop: '10px' }} />}
+            {/* Primary series */}
+            <Bar dataKey={finalDataKeys.primary} fill={colors[0] || "#8B5CF6"} radius={[8, 8, 0, 0]} name={finalDataKeys.primary} />
+            {/* Secondary if present */}
+            {finalDataKeys.secondary && finalDataKeys.secondary in sampleData && (
+              <Bar dataKey={finalDataKeys.secondary} fill={colors[1] || "#6366F1"} radius={[8, 8, 0, 0]} name={finalDataKeys.secondary} />
             )}
+            {/* Additional numeric series */}
+            {(() => {
+              const allKeys = Object.keys(sampleData);
+              const numericKeys = allKeys.filter(key => {
+                if (key === finalXAxisKey) return false;
+                const val = sampleData[key];
+                return typeof val === 'number' || (!isNaN(Number(val)) && val !== null && val !== undefined);
+              });
+              const additionalKeys = numericKeys.filter(key => 
+                key !== finalDataKeys.primary && key !== finalDataKeys.secondary && key in sampleData
+              );
+              return additionalKeys.map((key, index) => {
+                const colorIndex = (index + 2) % colors.length;
+                return (
+                  <Bar 
+                    key={key}
+                    dataKey={key}
+                    fill={colors[colorIndex] || DEFAULT_COLORS[colorIndex % DEFAULT_COLORS.length]}
+                    radius={[8, 8, 0, 0]}
+                    name={key}
+                  />
+                );
+              });
+            })()}
           </BarChart>
         </ResponsiveContainer>
       );
 
     case 'pie':
+      const outerRadius = Math.min(height * 0.3, 100);
+      const innerRadius = outerRadius * 0.6; // Donut chart with 60% inner radius
+      
       return (
         <ResponsiveContainer width="100%" height={height}>
           <PieChart>
@@ -167,16 +348,39 @@ export function ChartCard({
               cx="50%"
               cy="50%"
               labelLine={false}
-              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-              outerRadius={Math.min(height * 0.35, 120)}
+              label={({ name, percent }) => {
+                const percentage = (percent * 100).toFixed(0);
+                return (
+                  <text 
+                    x={0} 
+                    y={0} 
+                    textAnchor="middle" 
+                    fill="hsl(var(--foreground))"
+                    fontSize="11px"
+                    fontWeight="500"
+                  >
+                    {`${name} ${percentage}%`}
+                  </text>
+                );
+              }}
+              outerRadius={outerRadius}
+              innerRadius={innerRadius}
               fill="#8884d8"
-              dataKey={dataKeys.primary}
+              dataKey={finalDataKeys.primary}
+              paddingAngle={2}
             >
               {data.map((_, index) => (
                 <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
               ))}
             </Pie>
             <Tooltip content={<CustomChartTooltip />} />
+            <Legend 
+              verticalAlign="bottom" 
+              height={36}
+              iconType="square"
+              wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }}
+              formatter={(value) => <span style={{ fontSize: '11px', color: 'hsl(var(--muted-foreground))' }}>{value}</span>}
+            />
           </PieChart>
         </ResponsiveContainer>
       );
@@ -199,7 +403,7 @@ export function ChartCard({
             </defs>
             {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />}
             <XAxis 
-              dataKey={xAxisKey} 
+              dataKey={finalXAxisKey} 
               {...commonAxisStyle}
               tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
               axisLine={{ stroke: "hsl(var(--border))" }}
@@ -211,33 +415,33 @@ export function ChartCard({
             />
             <Tooltip 
               content={<CustomChartTooltip />}
-              cursor={{ stroke: colors[0], strokeWidth: 1, strokeDasharray: '5 5' }}
+              cursor={{ stroke: colors[0] || "#8B5CF6", strokeWidth: 1, strokeDasharray: '5 5' }}
             />
             {showLegend && <Legend wrapperStyle={{ paddingTop: '10px' }} />}
             <Area
               type="monotone"
-              dataKey={dataKeys.primary}
-              stroke={colors[0]}
-              fill={`url(#gradient-${dataKeys.primary})`}
-              strokeWidth={2.5}
+              dataKey={finalDataKeys.primary}
+              stroke={colors[0] || "#8B5CF6"}
+              fill={`url(#gradient-${finalDataKeys.primary})`}
+              strokeWidth={3}
               dot={false}
-              activeDot={{ r: 5, fill: colors[0], strokeWidth: 2, stroke: '#fff' }}
-              isAnimationActive={true}
-              animationDuration={800}
-              animationEasing="ease-out"
+              activeDot={{ r: 6, fill: colors[0] || "#8B5CF6", strokeWidth: 2, stroke: '#fff' }}
+              connectNulls={true}
+              isAnimationActive={false}
+              name={finalDataKeys.primary}
             />
-            {dataKeys.secondary && (
+            {finalDataKeys.secondary && finalDataKeys.secondary in sampleData && (
               <Area
                 type="monotone"
-                dataKey={dataKeys.secondary}
-                stroke={colors[1]}
-                fill={`url(#gradient-${dataKeys.secondary})`}
-                strokeWidth={2.5}
+                dataKey={finalDataKeys.secondary}
+                stroke={colors[1] || "#8B5CF6"}
+                fill={`url(#gradient-${finalDataKeys.secondary})`}
+                strokeWidth={3}
                 dot={false}
-                activeDot={{ r: 5, fill: colors[1], strokeWidth: 2, stroke: '#fff' }}
-                isAnimationActive={true}
-                animationDuration={800}
-                animationEasing="ease-out"
+                activeDot={{ r: 6, fill: colors[1] || "#8B5CF6", strokeWidth: 2, stroke: '#fff' }}
+                connectNulls={true}
+                isAnimationActive={false}
+                name={finalDataKeys.secondary}
               />
             )}
           </AreaChart>

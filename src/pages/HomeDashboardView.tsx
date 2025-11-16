@@ -9,7 +9,7 @@ import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDi
 import { toast } from "sonner";
 import { PinnedChartData } from "../context/PinnedChartsContext";
 import { ChartCard } from "../components/features/charts/ChartCard";
-import { getFavoriteCharts, updateFavoriteChart, getFavorites, getChartData, type ChartData as ApiChartData } from "../services/api";
+import { getFavoriteCharts, updateFavoriteChart, getFavorites, getChartData, getCharts, type ChartData as ApiChartData } from "../services/api";
 import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../utils/chartData";
 
 interface HomeDashboardViewProps {
@@ -200,22 +200,39 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
   const fetchFavoriteCharts = useCallback(async () => {
     setIsLoadingCharts(true);
     try {
-      const response = await getFavoriteCharts();
-      if (response.success && response.data) {
+      const [favoriteResponse, chartsResponse] = await Promise.all([
+        getFavoriteCharts(),
+        getCharts() // Fetch all charts to get actual chart types
+      ]);
+      
+      if (favoriteResponse.success && favoriteResponse.data) {
+        // Create a map of chart ID to chart type from all charts
+        const chartTypeMap = new Map<string, 'line' | 'bar' | 'pie' | 'area'>();
+        if (chartsResponse.success && chartsResponse.data) {
+          chartsResponse.data.forEach((chart) => {
+            chartTypeMap.set(chart.id, chart.type);
+          });
+        }
+        
         // Map API response to FavoriteChartData format (includes originalId)
-        const mappedCharts: FavoriteChartData[] = response.data.map((chart, index) => ({
+        const mappedCharts: FavoriteChartData[] = favoriteResponse.data.map((chart, index) => {
+          // Use actual chart type from charts API, fallback to inference
+          const actualChartType = chartTypeMap.get(chart.id) || inferChartType(chart.query);
+          
+          return {
           id: parseInt(chart.id.replace(/-/g, '').substring(0, 8), 16) || index + 1, // Convert UUID to number for compatibility
           originalId: chart.id, // Store original UUID for API calls
           name: chart.title,
           description: chart.query.length > 50 ? `Chart query: ${chart.query.substring(0, 50)}...` : `Chart query: ${chart.query}` || 'No description available',
           lastUpdated: formatTimeAgo(chart.created_at),
-          chartType: inferChartType(chart.query),
+            chartType: actualChartType, // Use actual chart type instead of inference
           category: 'Analytics', // Default category
           dashboardName: 'My Dashboard', // Default dashboard name
           dataSource: chart.connection_id ? `Database ${chart.connection_id}` : 'Unknown Data Source',
           query: chart.query,
           databaseId: chart.connection_id || undefined,
-        }));
+          };
+        });
         setFavoriteCharts(mappedCharts);
         setFavoriteChartDataStatus((prev) => {
           const nextStatus: Record<string, FavoriteChartDataStatus> = {};
@@ -234,7 +251,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
           fetchChartDataForFavoriteChart(chart);
         });
       } else {
-        toast.error(response.error?.message || "Failed to load favorite charts");
+        toast.error(favoriteResponse.error?.message || "Failed to load favorite charts");
         setFavoriteCharts([]);
         setFavoriteChartDataStatus({});
       }
@@ -363,11 +380,6 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
 
         {status?.metadata && !isLoading && !error && (
           <div className="absolute bottom-4 right-4 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-            {typeof status.metadata.rowCount === 'number' && (
-              <span className="px-2 py-1 rounded-md border border-border/60 bg-background/60">
-                {status.metadata.rowCount} row{status.metadata.rowCount === 1 ? '' : 's'}
-              </span>
-            )}
             {typeof status.metadata.executionTime === 'number' && status.metadata.executionTime > 0 && (
               <span className="px-2 py-1 rounded-md border border-border/60 bg-background/60">
                 {status.metadata.executionTime} ms

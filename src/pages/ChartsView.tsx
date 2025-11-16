@@ -38,7 +38,7 @@ import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDi
 import { ChartCard } from "../components/features/charts/ChartCard";
 import { toast } from "sonner";
 import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, deleteChart, getUserDashboardCharts, getChartData, type Chart as ApiChart, type ChartData as ApiChartData } from "../services/api";
-import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../utils/chartData";
+import type { ChartDataConfig } from "../utils/chartData";
 import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 import {
   LineChart as RechartsLine,
@@ -243,6 +243,12 @@ const inferChartDataConfig = (rawData: any[] | undefined, chartType: Chart['type
   }
 
   const numericKeys = keys.filter((key) => typeof sample[key] === 'number' || (!isNaN(Number(sample[key])) && sample[key] !== null && sample[key] !== undefined));
+  
+  // Identify string keys for potential categorical data
+  const stringKeys = keys.filter(
+    (key) => typeof sample[key] === "string" || typeof sample[key] === "object"
+  );
+  
   let primaryKey = numericKeys[0] || keys[1] || keys[0];
   let secondaryKey = numericKeys.find((key) => key !== primaryKey);
 
@@ -250,6 +256,47 @@ const inferChartDataConfig = (rawData: any[] | undefined, chartType: Chart['type
 
   if (!potentialXAxisKey) {
     potentialXAxisKey = 'index';
+  }
+
+  // Handle case where there are NO numeric columns at all (backend sends string data)
+  // We'll aggregate by counting occurrences of each category for bar charts
+  if (numericKeys.length === 0 && chartType === 'bar') {
+    console.log('[ChartsView/inferChartDataConfig] No numeric columns found for bar chart, aggregating...');
+    console.log('[ChartsView/inferChartDataConfig] String keys:', stringKeys);
+    console.log('[ChartsView/inferChartDataConfig] Sample data:', sample);
+    
+    // Find the categorical column (usually "value" or last string column)
+    const categoryKey = stringKeys.find(key => 
+      key.toLowerCase().includes('value') || 
+      key.toLowerCase().includes('name') ||
+      key.toLowerCase().includes('category') ||
+      key.toLowerCase().includes('institute')
+    ) || stringKeys[stringKeys.length - 1];
+    
+    console.log('[ChartsView/inferChartDataConfig] Category key selected:', categoryKey);
+    
+    if (categoryKey) {
+      // Count occurrences of each category
+      const counts = new Map<string, number>();
+      normalizedRows.forEach(row => {
+        const category = String(row[categoryKey] || 'Unknown');
+        counts.set(category, (counts.get(category) || 0) + 1);
+      });
+      
+      // Convert to chart data format
+      const aggregatedData = Array.from(counts.entries()).map(([name, count]) => ({
+        name,
+        value: count
+      }));
+      
+      console.log('[ChartsView/inferChartDataConfig] Aggregated data:', aggregatedData);
+      
+      return {
+        data: aggregatedData,
+        dataKeys: { primary: 'value' },
+        xAxisKey: 'name',
+      };
+    }
   }
 
   const data = normalizedRows.map((row, index) => {
@@ -411,8 +458,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         setChartDataStatus((prev) => ({
           ...prev,
           [chartKey]: {
-            data: response.data.data,
-            metadata: response.data.metadata,
+            data: response.data?.data ?? [],
+            metadata: response.data?.metadata,
             loading: false,
             error: undefined,
           },
@@ -874,10 +921,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   };
 
   const handleOpenChartPreview = async (chart: Chart) => {
-    // Refresh dashboards to ensure we have the latest data when opening preview
-    if (projectId) {
-      await fetchDashboards();
-    }
+    // Use cached dashboards - don't refetch every time
+    // Dashboards are already fetched on mount and after adding to dashboard
     
     const chartKey = String(chart.id);
     const status = chartDataStatus[chartKey];
