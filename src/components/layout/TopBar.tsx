@@ -108,7 +108,7 @@ export function TopBar({
                 className="gap-2.5 py-2.5"
               >
                 <Home className="w-4 h-4" />
-                All Projects
+                All Products
               </DropdownMenuItem>
               <Separator className="my-1.5" />
               {projects.map((project) => (

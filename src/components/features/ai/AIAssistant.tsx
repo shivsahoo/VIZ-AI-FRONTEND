@@ -138,6 +138,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
   const [userId, setUserId] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [dynamicSuggestions, setDynamicSuggestions] = useState<string[]>([]);
   const chartRequestRef = useRef<ChartCreationRequestPayload | null>(null);
   const [isAwaitingClarification, setIsAwaitingClarification] = useState(false);
   const [chartWorkflowState, setChartWorkflowState] = useState<Record<string, any> | null>(null);
@@ -220,6 +221,14 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
         });
       };
 
+      // Update quick suggestions from clarity questions if present
+      const clarityQs = Array.isArray(response.state?.clarity_questions)
+        ? (response.state?.clarity_questions as string[])
+        : [];
+      if (clarityQs.length > 0) {
+        setDynamicSuggestions(clarityQs.slice(0, 3));
+      }
+
       // Helper function to process and display chart specs
       const processChartSpecs = (chartSpecs: ChartSpec[], message?: string) => {
         if (!chartSpecs.length) {
@@ -252,6 +261,15 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
             spec,
           };
         });
+
+        // If no clarity questions, derive suggestions from chart titles/reports
+        if (clarityQs.length === 0 && suggestions.length > 0) {
+          const qs = suggestions
+            .map(s => s.name || s.description || '')
+            .filter(Boolean)
+            .slice(0, 3);
+          if (qs.length > 0) setDynamicSuggestions(qs);
+        }
 
         const contentMessage = message || `I've analyzed your request and generated ${suggestions.length} chart suggestion${suggestions.length > 1 ? 's' : ''}.`;
         
@@ -487,15 +505,35 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       content: `Selected: ${selectedDb?.label}`
     };
     
-    // Add AI confirmation
-    const aiMessage: Message = {
-      id: messages.length + 2,
-      type: 'ai',
-      content: `Great! I'll help you create charts from your ${selectedDb?.label}. What kind of data visualization do you need?`
-    };
-    
-    setMessages(prev => [...prev, userMessage, aiMessage]);
+    // Push user selection to the chat
+    setMessages(prev => [...prev, userMessage]);
     setShowDatabaseSelection(false);
+
+    // Kick off chart_creation workflow immediately after DB selection per contract
+    const dbId = selectedDb?.id;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isRealDatabase = dbId && uuidRegex.test(String(dbId));
+
+    if (wsClient && wsClient.isConnected() && isRealDatabase) {
+      // Show analyzing message and send request
+      setIsGenerating(true);
+      setMessages(prev => ([
+        ...prev,
+        { id: prev.length + 1, type: 'ai', content: 'Analyzing your request and generating chart suggestions...' }
+      ]));
+
+      wsClient.send({
+        event_type: 'chart_creation',
+        user_id: userId!,
+        payload: {
+          data_connection_id: String(dbId),
+          role: 'Analyst',
+          domain: 'admin',
+          project_id: projectId || undefined,
+          suggestion_count: 3,
+        },
+      });
+    }
   };
 
   const handleSend = () => {
@@ -714,7 +752,9 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
     setMessages(prev => [...prev, aiMessage]);
   };
 
-  const suggestions = [
+  const suggestions = dynamicSuggestions.length > 0
+    ? dynamicSuggestions
+    : [
     "I want reports on finance data for last financial year",
     "Show me sales trends for Q4",
     "Customer demographics breakdown"
@@ -920,7 +960,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
           )}
 
           {/* Suggestions */}
-          {messages.length <= 4 && selectedDatabase && !messages.some(m => m.type === 'chart-suggestions') && !editingChart && (
+          {messages.length <= 4 && selectedDatabase && !messages.some(m => m.type === 'chart-suggestions') && !editingChart && dynamicSuggestions.length > 0 && (
             <div className="space-y-2 pt-4">
               <p className="text-xs text-muted-foreground px-2">Try asking:</p>
               {suggestions.map((suggestion, idx) => (

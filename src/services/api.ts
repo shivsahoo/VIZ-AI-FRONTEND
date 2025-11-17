@@ -666,6 +666,7 @@ export const getDashboards = async (projectId: string): Promise<ApiResponse<Dash
 export const getDashboardCharts = async (dashboardId: string): Promise<ApiResponse<Array<{
   id: string;
   title: string;
+  query: string;
   created_at: string;
   connection_id: string | null;
   status?: string | null;
@@ -676,6 +677,7 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
       charts: Array<{
         id: string;
         title: string;
+        query: string;
         created_at: string;
         connection_id: string | null;
         status?: string | null;
@@ -699,6 +701,9 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
 
 /**
  * Create new dashboard
+ * @deprecated Dashboard creation is now handled through WebSocket events.
+ * This function is kept for backward compatibility but should not be used for new dashboard creation.
+ * Use DashboardCreationBot component with WebSocket for dashboard creation workflow.
  */
 export const createDashboard = async (projectId: string, data: { name: string; description: string }): Promise<ApiResponse<Dashboard>> => {
   try {
@@ -739,6 +744,34 @@ export const createDashboard = async (projectId: string, data: { name: string; d
       error: {
         code: 'CREATE_DASHBOARD_FAILED',
         message: error.message || 'Failed to create dashboard',
+      },
+    };
+  }
+};
+
+/**
+ * Delete a dashboard
+ */
+export const deleteDashboard = async (projectId: string, dashboardId: string): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{
+      message?: string;
+    }>(`/api/v1/backend/projects/${projectId}/dashboard/${dashboardId}`, {
+      method: 'DELETE',
+    });
+
+    return {
+      success: true,
+      data: {
+        message: response.message || 'Dashboard deleted successfully',
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'DELETE_DASHBOARD_FAILED',
+        message: error.message || 'Failed to delete dashboard',
       },
     };
   }
@@ -1819,6 +1852,8 @@ export const generateCharts = async (
 
 /**
  * Create dashboard from conversational prompt
+ * @note This function still uses the deprecated createDashboard API call.
+ * Consider migrating to WebSocket-based dashboard creation workflow if this is still in use.
  */
 export const createDashboardFromPrompt = async (prompt: string, databaseId: string, projectId: string): Promise<ApiResponse<{ dashboardId: string; charts: Chart[] }>> => {
   try {
@@ -1834,6 +1869,7 @@ export const createDashboardFromPrompt = async (prompt: string, databaseId: stri
     }
 
     // Create dashboard first
+    // TODO: Migrate to WebSocket-based dashboard creation
     const dashboard = await createDashboard(projectId, {
       name: 'AI Generated Dashboard',
       description: `Generated from: ${prompt}`,
@@ -2218,6 +2254,7 @@ const api = {
   // Dashboards
   getDashboards,
   createDashboard,
+  deleteDashboard,
   getDashboardCharts,
   getFavorites,
   

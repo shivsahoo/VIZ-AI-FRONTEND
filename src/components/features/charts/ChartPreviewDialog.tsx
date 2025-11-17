@@ -64,6 +64,7 @@ interface Dashboard {
 
 export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], projectId, onAddToDashboard, onSaveAsDraft, isExistingChart = false, chartStatus }: ChartPreviewDialogProps) {
   const [isSavingDraft, setIsSavingDraft] = React.useState(false);
+  const isSavingDraftRef = React.useRef(false);
   const [isAddingToDashboard, setIsAddingToDashboard] = React.useState(false);
   const [addingToDashboardId, setAddingToDashboardId] = React.useState<number | string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
@@ -93,8 +94,35 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     }
 
     if (chart.data && chart.dataKeys && chart.xAxisKey) {
+      // Ensure data is sorted for line/area charts even when pre-populated
+      let processedData = chart.data;
+      if ((chart.type === 'line' || chart.type === 'area') && chart.data.length > 0) {
+        processedData = [...chart.data].sort((a, b) => {
+          const aVal = a[chart.xAxisKey!];
+          const bVal = b[chart.xAxisKey!];
+          
+          // Handle date strings
+          if (typeof aVal === 'string' && typeof bVal === 'string') {
+            const aDate = new Date(aVal).getTime();
+            const bDate = new Date(bVal).getTime();
+            if (!isNaN(aDate) && !isNaN(bDate)) {
+              return aDate - bDate;
+            }
+            return aVal.localeCompare(bVal);
+          }
+          
+          // Handle numeric values
+          if (typeof aVal === 'number' && typeof bVal === 'number') {
+            return aVal - bVal;
+          }
+          
+          // Fallback to string comparison
+          return String(aVal).localeCompare(String(bVal));
+        });
+      }
+      
       setChartDataConfig({
-        data: chart.data,
+        data: processedData,
         dataKeys: chart.dataKeys,
         xAxisKey: chart.xAxisKey,
       });
@@ -242,7 +270,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     setIsAddingToDashboard(true);
     setAddingToDashboardId(dashboardId);
     setIsDropdownOpen(false); // Close dropdown to show loading state in button
-    
+
     try {
       const response = await addChartToDashboard({
         title: chart.name,
@@ -278,6 +306,11 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       return;
     }
 
+    // Reentry guard: prevent duplicate POSTs
+    if (isSavingDraftRef.current) {
+      return;
+    }
+
     const databaseId = chart.databaseId || chart.dataConnectionId || extractDatabaseId();
 
     if (!validateDatabaseId(databaseId)) {
@@ -290,6 +323,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       return;
     }
 
+    isSavingDraftRef.current = true;
     setIsSavingDraft(true);
     try {
       const response = await createChart(String(projectId), {
@@ -311,6 +345,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       toast.error(err.message || "An error occurred while saving chart as draft");
     } finally {
       setIsSavingDraft(false);
+      isSavingDraftRef.current = false;
     }
   };
 
@@ -391,11 +426,6 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
 
           {!missingConfigMessage && chartDataMetadata && (
             <div className="mt-4 flex flex-wrap gap-3 text-xs text-muted-foreground">
-              {typeof chartDataMetadata.rowCount === 'number' && (
-                <span className="px-2 py-1 rounded-md border border-border bg-background/50">
-                  {chartDataMetadata.rowCount} row{chartDataMetadata.rowCount === 1 ? '' : 's'}
-                </span>
-              )}
               {typeof chartDataMetadata.executionTime === 'number' && chartDataMetadata.executionTime > 0 && (
                 <span className="px-2 py-1 rounded-md border border-border bg-background/50">
                   {chartDataMetadata.executionTime} ms
@@ -454,9 +484,9 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
                   </>
                 ) : (
                   <>
-                    <Plus className="w-4 h-4" />
-                    Add to Dashboard
-                    <ChevronDown className="w-4 h-4" />
+                <Plus className="w-4 h-4" />
+                Add to Dashboard
+                <ChevronDown className="w-4 h-4" />
                   </>
                 )}
               </GradientButton>
@@ -472,20 +502,20 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
                 dashboards.map((dashboard) => {
                   const isAddingToThis = isAddingToDashboard && addingToDashboardId === dashboard.id;
                   return (
-                    <DropdownMenuItem
-                      key={dashboard.id}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        console.log('Dashboard selected:', dashboard);
-                        handleAddToDashboard(dashboard.id);
-                      }}
+                <DropdownMenuItem
+                  key={dashboard.id}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      console.log('Dashboard selected:', dashboard);
+                      handleAddToDashboard(dashboard.id);
+                    }}
                       disabled={isAddingToDashboard}
                       className="flex items-center gap-2"
-                    >
+                >
                       {isAddingToThis && <Loader2 className="w-3 h-3 animate-spin" />}
-                      {dashboard.name}
-                    </DropdownMenuItem>
+                  {dashboard.name}
+                  </DropdownMenuItem>
                   );
                 })
               ) : (

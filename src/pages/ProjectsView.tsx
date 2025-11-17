@@ -312,14 +312,14 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h2 className="text-2xl text-foreground mb-1">Your Products</h2>
-            <p className="text-muted-foreground">Select a project to view analytics and insights</p>
+            <p className="text-muted-foreground">Select a product to view analytics and insights</p>
           </div>
           <GradientButton 
             onClick={() => setShowNewProjectFlow(true)}
             className="shadow-lg hover:shadow-xl transition-all"
           >
             <Plus className="w-4 h-4 mr-2" />
-            New Project
+            New Product
           </GradientButton>
         </div>
 
