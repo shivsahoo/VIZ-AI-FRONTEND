@@ -36,7 +36,7 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
     {
       id: 1,
       type: "bot",
-      content: "Hi! 👋 I'm your VizAI assistant. I'll help you set up your analytics project through a quick conversation. Ready to get started?",
+      content: "Hi! 👋 I'm your VizAI assistant. I'll help you set up your analytics product through a quick conversation. Ready to get started?",
       timestamp: new Date()
     }
   ]);
@@ -390,7 +390,7 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
                   setMessages([{
                     id: 1,
                     type: "bot",
-                    content: "Hi! 👋 I'm your VizAI assistant. I'll help you set up your analytics project through a quick conversation. Ready to get started?",
+                    content: "Hi! 👋 I'm your VizAI assistant. I'll help you set up your analytics product through a quick conversation. Ready to get started?",
                     timestamp: new Date()
                   }]);
                 }}

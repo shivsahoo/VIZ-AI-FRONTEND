@@ -168,7 +168,7 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
                 <ArrowLeft className="w-4 h-4" />
               </Button>
             </div>
-            {onCancel && (
+            {/* {onCancel && (
               <Button
                 variant="ghost"
                 onClick={onCancel}
@@ -176,7 +176,7 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
               >
                 Cancel Setup
               </Button>
-            )}
+            )} */}
           </div>
         )}
         
