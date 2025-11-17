@@ -82,6 +82,8 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
 
       addBotMessage(summary);
 
+      // Call onCreate after a short delay to allow user to see the completion message
+      // The parent component will handle closing the dialog and refreshing the dashboard list
       setTimeout(() => {
         onCreate({
           name,
@@ -89,7 +91,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
           enhancedDescription: enhancedDescription || undefined,
           state,
         });
-      }, 1200);
+      }, 800);
     } else if (response.status === "error") {
       const errorMessage = response.error || response.message || "Something went wrong while creating the dashboard.";
       setConnectionError(errorMessage);

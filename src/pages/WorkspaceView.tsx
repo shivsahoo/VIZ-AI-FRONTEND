@@ -11,7 +11,7 @@ import { DashboardCreationBot } from "../components/features/dashboards/Dashboar
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "../components/ui/dialog";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import { toast } from "sonner";
-import { getDashboards, createDashboard, type Dashboard as ApiDashboard } from "../services/api";
+import { getDashboards, deleteDashboard, type Dashboard as ApiDashboard } from "../services/api";
 
 // UI Dashboard type (extends API Dashboard with display fields)
 interface Dashboard {
@@ -149,35 +149,50 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
       return;
     }
 
-    const description = dashboard.enhancedDescription || dashboard.description || "";
+    // Dashboard creation is now handled through websocket events
+    // The websocket workflow creates the dashboard and sends the created dashboard data
+    // We just need to close the dialog and refresh the dashboards list
+    try {
+      // Close the Dashboard Assistant dialog immediately
+      setIsCreateDialogOpen(false);
+      
+      toast.success(`Dashboard "${dashboard.name}" created successfully!`);
+      
+      // Add a small delay to ensure the backend has saved the dashboard
+      // before we refresh the list
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Refresh dashboards to get the newly created one
+      await fetchDashboards();
+    } catch (err: any) {
+      toast.error(err.message || "An error occurred while fetching dashboard");
+    }
+  };
+
+  const handleDeleteDashboard = async (dashboardId: string | number, dashboardName: string) => {
+    if (!projectId) {
+      toast.error("Project ID is required to delete a dashboard");
+      return;
+    }
 
     try {
-      const response = await createDashboard(String(projectId), {
-      name: dashboard.name,
-      description: description,
-      });
-
-      if (response.success && response.data) {
-        // Add new dashboard to list with UI formatting
-        const newDashboard: Dashboard = {
-          id: response.data.id,
-          name: response.data.name,
-          description: response.data.description,
-          charts: response.data.chartCount || 0,
-          lastUpdated: "just now",
-          icon: defaultIcon,
-      createdById: currentUser?.id,
-          projectId: response.data.projectId || projectId.toString(),
-          status: 'active' as const,
-    };
-    setDashboards([newDashboard, ...dashboards]);
-        setIsCreateDialogOpen(false);
-    toast.success(`Dashboard "${dashboard.name}" created successfully!`);
+      const response = await deleteDashboard(String(projectId), String(dashboardId));
+      
+      if (response.success) {
+        // Remove dashboard from local state
+        setDashboards(prevDashboards => prevDashboards.filter(d => d.id !== dashboardId));
+        
+        // If the deleted dashboard is currently selected, go back to dashboards list
+        if (selectedDashboard && selectedDashboard.id === String(dashboardId)) {
+          setSelectedDashboard(null);
+        }
+        
+        toast.success(response.data?.message || `Dashboard "${dashboardName}" deleted successfully`);
       } else {
-        toast.error(response.error?.message || "Failed to create dashboard");
+        toast.error(response.error?.message || "Failed to delete dashboard");
       }
     } catch (err: any) {
-      toast.error(err.message || "An error occurred while creating dashboard");
+      toast.error(err.message || "An error occurred while deleting dashboard");
     }
   };
 
@@ -190,6 +205,10 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
           dashboardName={selectedDashboard.name}
           projectId={projectId ? String(projectId) : undefined}
           onBack={handleBackToDashboards}
+          onDelete={(dashboardId, dashboardName) => {
+            handleDeleteDashboard(dashboardId, dashboardName);
+            handleBackToDashboards(); // Navigate back after deletion
+          }}
           onOpenAIAssistant={onOpenAIAssistant}
           onEditChart={onEditChart}
         />
@@ -210,6 +229,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
             dashboards={dashboards}
             onViewDashboard={handleViewDashboard}
             onCreateDashboard={handleOpenCreateDialog}
+            onDeleteDashboard={handleDeleteDashboard}
             isLoading={isLoadingDashboards}
           />
         );
@@ -240,7 +260,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
 
       {/* Create Dashboard Dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-w-5xl border-border p-0">
+        <DialogContent className="max-w-5xl border-border p-0" hideCloseButton>
           <div className="sr-only">
             <DialogTitle>Create New Dashboard</DialogTitle>
             <DialogDescription>

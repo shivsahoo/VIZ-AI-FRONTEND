@@ -36,10 +36,11 @@ interface DashboardsViewProps {
   dashboards: Dashboard[];
   onViewDashboard?: (dashboardName: string, dashboardId?: string | number) => void;
   onCreateDashboard?: () => void;
+  onDeleteDashboard?: (dashboardId: string | number, dashboardName: string) => void;
   isLoading?: boolean;
 }
 
-export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard, isLoading: externalIsLoading }: DashboardsViewProps) {
+export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard, onDeleteDashboard, isLoading: externalIsLoading }: DashboardsViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [dashboardToDelete, setDashboardToDelete] = useState<Dashboard | null>(null);
@@ -54,7 +55,8 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard,
 
   const handleDeleteDashboard = () => {
     if (dashboardToDelete) {
-      toast.success(`"${dashboardToDelete.name}" deleted successfully`);
+      // Call the parent's delete handler which will handle the API call
+      onDeleteDashboard?.(dashboardToDelete.id, dashboardToDelete.name);
       setDashboardToDelete(null);
     }
   };

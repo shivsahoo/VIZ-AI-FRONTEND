@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2 } from "lucide-react";
+import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2, Trash2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -17,13 +17,14 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
-import { getDashboardCharts, getChartData, type ChartData } from "../services/api";
+import { getDashboardCharts, getChartData, deleteChart, type ChartData } from "../services/api";
 
 interface DashboardDetailViewProps {
   dashboardId: string;
   dashboardName: string;
   projectId?: string;
   onBack: () => void;
+  onDelete?: (dashboardId: string, dashboardName: string) => void;
   onOpenAIAssistant?: () => void;
   onEditChart?: (chart: { name: string; type: 'line' | 'bar' | 'pie' | 'area'; description?: string }) => void;
 }
@@ -40,17 +41,6 @@ interface ChartCardData {
   isLoadingData?: boolean;
   isExporting?: boolean;
 }
-
-// Helper to map backend chart type to frontend type
-const mapChartType = (backendType: string): 'line' | 'bar' | 'pie' | 'area' => {
-  const typeMap: Record<string, 'line' | 'bar' | 'pie' | 'area'> = {
-    line: 'line',
-    bar: 'bar',
-    pie: 'pie',
-    area: 'area',
-  };
-  return typeMap[backendType.toLowerCase()] || 'line';
-};
 
 // Helper to format time ago
 const formatTimeAgo = (dateString: string): string => {
@@ -71,54 +61,18 @@ const formatTimeAgo = (dateString: string): string => {
 export function DashboardDetailView({ 
   dashboardId, 
   dashboardName, 
-  projectId,
-  onBack, 
+  projectId: _projectId,
+  onBack,
+  onDelete,
   onOpenAIAssistant, 
   onEditChart 
 }: DashboardDetailViewProps) {
   const { isPinned, togglePin } = usePinnedCharts();
   const [chartToRemove, setChartToRemove] = useState<ChartCardData | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [charts, setCharts] = useState<ChartCardData[]>([]);
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>("");
-
-  // Fetch charts for the dashboard
-  const fetchDashboardCharts = useCallback(async () => {
-    if (!dashboardId) return;
-
-    setIsLoadingCharts(true);
-    try {
-      const response = await getDashboardCharts(dashboardId);
-      if (response.success && response.data) {
-        const mappedCharts: ChartCardData[] = response.data.map((chart) => ({
-          id: chart.id,
-          title: chart.title,
-          description: 'No description available',
-          type: 'line' as const, // Default type since backend doesn't return chart_type
-          query: '', // Backend doesn't return query, will be fetched when needed
-          databaseConnectionId: chart.connection_id || '',
-          created_at: chart.created_at,
-        }));
-        setCharts(mappedCharts);
-        
-        // Set last updated to the most recent chart's created_at
-        if (mappedCharts.length > 0) {
-          const mostRecent = mappedCharts.reduce((latest, chart) => 
-            new Date(chart.created_at) > new Date(latest.created_at) ? chart : latest
-          );
-          setLastUpdated(formatTimeAgo(mostRecent.created_at));
-        }
-      } else {
-        toast.error(response.error?.message || "Failed to load dashboard charts");
-        setCharts([]);
-      }
-    } catch (error: any) {
-      toast.error(error.message || "An error occurred while fetching dashboard charts");
-      setCharts([]);
-    } finally {
-      setIsLoadingCharts(false);
-    }
-  }, [dashboardId]);
 
   // Fetch chart data for a specific chart
   const fetchChartData = async (chart: ChartCardData): Promise<ChartData | null> => {
@@ -159,6 +113,51 @@ export function DashboardDetailView({
     }
   };
 
+  // Fetch charts for the dashboard
+  const fetchDashboardCharts = useCallback(async () => {
+    if (!dashboardId) return;
+
+    setIsLoadingCharts(true);
+    try {
+      const response = await getDashboardCharts(dashboardId);
+      if (response.success && response.data) {
+        const mappedCharts: ChartCardData[] = response.data.map((chart) => ({
+          id: chart.id,
+          title: chart.title,
+          description: 'No description available',
+          type: 'line' as const, // Default type since backend doesn't return chart_type
+          query: chart.query || '', // Extract query from API response
+          databaseConnectionId: chart.connection_id || '',
+          created_at: chart.created_at,
+        }));
+        setCharts(mappedCharts);
+        
+        // Set last updated to the most recent chart's created_at
+        if (mappedCharts.length > 0) {
+          const mostRecent = mappedCharts.reduce((latest, chart) => 
+            new Date(chart.created_at) > new Date(latest.created_at) ? chart : latest
+          );
+          setLastUpdated(formatTimeAgo(mostRecent.created_at));
+        }
+
+        // Automatically execute queries for all charts
+        mappedCharts.forEach((chart) => {
+          if (chart.query && chart.databaseConnectionId) {
+            fetchChartData(chart);
+          }
+        });
+      } else {
+        toast.error(response.error?.message || "Failed to load dashboard charts");
+        setCharts([]);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while fetching dashboard charts");
+      setCharts([]);
+    } finally {
+      setIsLoadingCharts(false);
+    }
+  }, [dashboardId]);
+
   // Load charts on mount
   useEffect(() => {
     fetchDashboardCharts();
@@ -179,11 +178,25 @@ export function DashboardDetailView({
     }
   };
 
-  const handleRemoveChart = (chartId: string) => {
-    setCharts(prev => prev.filter(chart => chart.id !== chartId));
-    toast.success(`Chart removed from dashboard`);
-    setChartToRemove(null);
-    // TODO: Call API to remove chart from dashboard
+  const handleRemoveChart = async (chartId: string) => {
+    if (!dashboardId) {
+      toast.error("Dashboard ID is missing");
+      return;
+    }
+
+    try {
+      const response = await deleteChart(chartId, dashboardId);
+      
+      if (response.success) {
+        setCharts(prev => prev.filter(chart => chart.id !== chartId));
+        toast.success(response.data?.message || `Chart removed from dashboard`);
+        setChartToRemove(null);
+      } else {
+        toast.error(response.error?.message || "Failed to remove chart from dashboard");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while removing the chart");
+    }
   };
 
   const handleTogglePin = (chartData: ChartCardData) => {
@@ -262,7 +275,7 @@ export function DashboardDetailView({
     );
 
     try {
-      let chartData = chart.chartData;
+      let chartData: ChartData | null | undefined = chart.chartData;
       if (!chartData?.data || chartData.data.length === 0) {
         chartData = await fetchChartData(chart);
       }
@@ -310,7 +323,7 @@ export function DashboardDetailView({
   };
 
   // Determine data keys based on chart type
-  const getDataKeys = (chart: ChartCardData, data: any[]) => {
+  const getDataKeys = (_chart: ChartCardData, data: any[]) => {
     if (data.length === 0) return { primary: 'value' };
     
     const keys = Object.keys(data[0]);
@@ -360,10 +373,16 @@ export function DashboardDetailView({
           </div>
           
           <div className="flex items-center gap-3">
-            <Button variant="outline" className="border-border">
-              <Download className="w-4 h-4 mr-2" />
-              Export
-            </Button>
+            {onDelete && (
+              <Button 
+                variant="outline" 
+                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete Dashboard
+              </Button>
+            )}
             <GradientButton 
               onClick={onOpenAIAssistant}
             >
@@ -527,6 +546,31 @@ export function DashboardDetailView({
             })}
           </div>
         )}
+
+        {/* Delete Dashboard Confirmation Dialog */}
+        <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Dashboard</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete "{dashboardName}"? This action cannot be undone. 
+                All charts in this dashboard will be moved back to your Charts library.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  onDelete?.(dashboardId, dashboardName);
+                  setShowDeleteConfirm(false);
+                }}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete Dashboard
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Remove Chart Confirmation Dialog */}
         <AlertDialog open={!!chartToRemove} onOpenChange={() => setChartToRemove(null)}>
