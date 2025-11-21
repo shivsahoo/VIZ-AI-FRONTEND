@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -63,13 +63,12 @@ export function DashboardDetailView({
   dashboardName, 
   projectId: _projectId,
   onBack,
-  onDelete,
+  onDelete: _onDelete,
   onOpenAIAssistant, 
   onEditChart 
 }: DashboardDetailViewProps) {
   const { isPinned, togglePin } = usePinnedCharts();
   const [chartToRemove, setChartToRemove] = useState<ChartCardData | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [charts, setCharts] = useState<ChartCardData[]>([]);
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>("");
@@ -373,16 +372,6 @@ export function DashboardDetailView({
           </div>
           
           <div className="flex items-center gap-3">
-            {onDelete && (
-              <Button 
-                variant="outline" 
-                className="border-destructive/30 text-destructive hover:bg-destructive/10"
-                onClick={() => setShowDeleteConfirm(true)}
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete Dashboard
-              </Button>
-            )}
             <GradientButton 
               onClick={onOpenAIAssistant}
             >
@@ -546,31 +535,6 @@ export function DashboardDetailView({
             })}
           </div>
         )}
-
-        {/* Delete Dashboard Confirmation Dialog */}
-        <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete Dashboard</AlertDialogTitle>
-              <AlertDialogDescription>
-                Are you sure you want to delete "{dashboardName}"? This action cannot be undone. 
-                All charts in this dashboard will be moved back to your Charts library.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => {
-                  onDelete?.(dashboardId, dashboardName);
-                  setShowDeleteConfirm(false);
-                }}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                Delete Dashboard
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
 
         {/* Remove Chart Confirmation Dialog */}
         <AlertDialog open={!!chartToRemove} onOpenChange={() => setChartToRemove(null)}>

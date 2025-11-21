@@ -46,6 +46,8 @@ export default function App() {
     description?: string;
   } | null>(null);
 
+  const isInWorkspace = currentView === 'workspace' && Boolean(selectedProject);
+
   useEffect(() => {
     if (isDark) {
       document.documentElement.classList.add('dark');
@@ -294,7 +296,13 @@ export default function App() {
     }
   };
 
-  const isInWorkspace = currentView === 'workspace' && selectedProject;
+  useEffect(() => {
+    const shouldCloseAssistant = !isInWorkspace || workspaceTab !== 'charts';
+
+    if (shouldCloseAssistant && isAIAssistantOpen) {
+      setIsAIAssistantOpen(false);
+    }
+  }, [isInWorkspace, workspaceTab, isAIAssistantOpen]);
 
   // Show loading state while checking authentication
   if (isCheckingAuth) {

@@ -11,6 +11,7 @@ import { PinnedChartData } from "../context/PinnedChartsContext";
 import { ChartCard } from "../components/features/charts/ChartCard";
 import { getFavoriteCharts, updateFavoriteChart, getFavorites, getChartData, getCharts, type ChartData as ApiChartData } from "../services/api";
 import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../utils/chartData";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 
 interface HomeDashboardViewProps {
   onNavigate?: (tab: string) => void;
@@ -493,6 +494,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
               {favoriteCharts.map((chart) => {
                 const Icon = chartTypeIcons[chart.chartType];
                 const colorClass = chartTypeColors[chart.chartType];
+                const chartName = chart.name?.trim() || "Untitled Chart";
                 
                 return (
                   <Card 
@@ -508,9 +510,20 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
                             <Icon className="w-4 h-4" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-foreground group-hover:text-primary transition-colors line-clamp-1 mb-1.5">
-                              {chart.name}
-                            </h3>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <h3 className="text-foreground line-clamp-1 mb-1.5">
+                                  {chartName}
+                                </h3>
+                              </TooltipTrigger>
+                              <TooltipContent
+                                side="top"
+                                align="start"
+                                className="bg-card text-foreground border border-border shadow-lg whitespace-normal break-words max-w-xs"
+                              >
+                                {chartName}
+                              </TooltipContent>
+                            </Tooltip>
                             <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
                               <span className="line-clamp-1">{chart.dashboardName}</span>
                               <span>•</span>

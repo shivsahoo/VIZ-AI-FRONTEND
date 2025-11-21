@@ -137,7 +137,7 @@ export function AuthView({ onAuthenticated }: AuthViewProps) {
 
               {/* Login Form */}
               <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-2">
+                {/* <div className="space-y-2">
                   <Label>Login As</Label>
                   <RadioGroup value={userRole} onValueChange={(value) => setUserRole(value as UserRole)}>
                     <div className="flex items-center space-x-2">
@@ -153,7 +153,7 @@ export function AuthView({ onAuthenticated }: AuthViewProps) {
                       </Label>
                     </div>
                   </RadioGroup>
-                </div>
+                </div> */}
 
                 <div className="space-y-2">
                   <Label htmlFor="login-username">Username</Label>

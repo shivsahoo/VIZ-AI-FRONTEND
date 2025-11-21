@@ -1,11 +1,11 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Bot, Send, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "../../ui/button";
-import { Input } from "../../ui/input";
 import { Card } from "../../ui/card";
 import { Avatar } from "../../ui/avatar";
+import { Textarea } from "../../ui/textarea";
 import { VizAIWebSocket, WebSocketResponse } from "../../../services/websocket";
 import { getCurrentUser } from "../../../services/api";
 import { toast } from "sonner";
@@ -48,9 +48,9 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
-  const [projectState, setProjectState] = useState<any>(null);
   const [questionsAsked, setQuestionsAsked] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -59,6 +59,16 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
+
+  useEffect(() => {
+    if (!inputRef.current) {
+      return;
+    }
+    const textarea = inputRef.current;
+    textarea.style.height = "auto";
+    const maxHeight = 200;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+  }, [userInput]);
 
   // Initialize WebSocket connection (lazy - only when user clicks start)
   const initWebSocket = async (): Promise<VizAIWebSocket | null> => {
@@ -89,14 +99,12 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
           const question = response.message;
           setCurrentQuestion(question);
           setQuestionsAsked(response.state?.questions_asked_count || 0);
-          setProjectState(response.state || {});
           
           // Add bot message with question
           addBotMessage(question);
         } else if (response.status === 'completed') {
           // Project info collection complete
           const state = response.state || {};
-          setProjectState(state);
           
           addBotMessage("Thank you for answering all questions! Enhanced description generated.");
           
@@ -278,7 +286,19 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
     });
   };
 
-  const handleKeyPress = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+  const handleSkipQuestion = () => {
+    if (!wsClient || !wsClient.isConnected() || isTyping || !currentQuestion) {
+      return;
+    }
+
+    setIsTyping(true);
+
+    wsClient.projectInfo({
+      user_response: "skip"
+    });
+  };
+
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -334,22 +354,37 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
-                className={`flex gap-3 ${message.type === "user" ? "flex-row-reverse" : ""}`}
               >
-                {message.type === "bot" && (
-                  <Avatar className="w-8 h-8 bg-gradient-to-br from-primary to-accent flex items-center justify-center flex-shrink-0">
-                    <Bot className="w-4 h-4 text-white" />
-                  </Avatar>
+                {message.type === "bot" ? (
+                  <div className="flex gap-3">
+                    <Avatar className="w-8 h-8 bg-gradient-to-br from-primary to-accent flex items-center justify-center flex-shrink-0">
+                      <Bot className="w-4 h-4 text-white" />
+                    </Avatar>
+                    <div className="flex flex-col gap-2">
+                      <div className="max-w-full sm:max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
+                        <p className="text-sm leading-relaxed">{message.content}</p>
+                      </div>
+                      {message.content === currentQuestion && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="self-start"
+                          onClick={handleSkipQuestion}
+                          disabled={isTyping || !currentQuestion || !wsClient || !wsClient.isConnected() || !!connectionError}
+                        >
+                          Skip
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex gap-3 flex-row-reverse">
+                    <div className="max-w-full sm:max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-3 bg-gradient-to-r from-primary to-accent text-white">
+                      <p className="text-sm leading-relaxed">{message.content}</p>
+                    </div>
+                  </div>
                 )}
-                <div
-                  className={`max-w-[70%] rounded-2xl px-4 py-3 ${
-                    message.type === "bot"
-                      ? "bg-card border border-border text-foreground"
-                      : "bg-gradient-to-r from-primary to-accent text-white"
-                  }`}
-                >
-                  <p className="text-sm leading-relaxed">{message.content}</p>
-                </div>
               </motion.div>
             ))}
           </AnimatePresence>
@@ -426,13 +461,14 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
               </Button>
             </div>
           ) : (
-            <div className="flex gap-3">
-              <Input
+            <div className="flex gap-3 items-end flex-wrap">
+              <Textarea
+                ref={inputRef}
                 value={userInput}
                 onChange={(e) => setUserInput(e.target.value)}
-                onKeyPress={handleKeyPress}
+                onKeyDown={handleKeyDown}
                 placeholder={currentPlaceholder}
-                className="flex-1 h-12"
+                className="flex-1 min-w-[220px] text-sm min-h-[3rem] max-h-52"
                 disabled={isTyping || !currentQuestion || !wsClient || !wsClient.isConnected() || !!connectionError}
                 autoFocus
               />

@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -54,7 +55,6 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
   Legend,
 } from "recharts";
 
@@ -1199,6 +1199,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       pie: 'text-[#10B981] bg-[#10B981]/10',
       area: 'text-[#F59E0B] bg-[#F59E0B]/10'
     }[chart.type];
+    const chartName = chart.name?.trim() || "Untitled Chart";
 
     return (
       <Card
@@ -1214,9 +1215,20 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                 <Icon className="w-4 h-4" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="text-foreground group-hover:text-primary transition-colors line-clamp-1 mb-1">
-                  {chart.name}
-                </h3>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <h3 className="text-foreground line-clamp-1 mb-1">
+                      {chartName}
+                    </h3>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="top"
+                    align="start"
+                    className="bg-card text-foreground border border-border shadow-lg whitespace-normal break-words max-w-xs"
+                  >
+                    {chartName}
+                  </TooltipContent>
+                </Tooltip>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="line-clamp-1">{dataSourceLabel}</span>
                   <span>•</span>
