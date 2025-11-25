@@ -120,7 +120,8 @@ wsClient?.kpiInfo({
   project_name: "My Analytics Project",
   project_description: "Enhanced description from project_info",
   project_domain: "data analytics",
-  product_description: "Enhanced description from project_info questions" // Optional, has priority
+  product_description: "Enhanced description from project_info questions", // Optional, has priority
+  data_connection_id: "connection-uuid-123" // Optional but recommended once a DB is connected
 });
 ```
 
@@ -142,7 +143,8 @@ wsClient?.on('kpi_info', (response) => {
 **Send User Response**:
 ```typescript
 wsClient?.kpiInfo({
-  user_response: "Revenue, User Growth, Conversion Rate"
+  user_response: "Revenue, User Growth, Conversion Rate",
+  data_connection_id: "connection-uuid-123"
 });
 ```
 

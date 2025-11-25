@@ -508,6 +508,44 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     return map;
   }, [resolvedDatabases]);
 
+  useEffect(() => {
+    if (!databaseNameById || databaseNameById.size === 0) {
+      return;
+    }
+
+    setCharts((prevCharts) => {
+      let didUpdate = false;
+      const nextCharts = prevCharts.map((chart) => {
+        if (!chart.databaseId) {
+          return chart;
+        }
+        const resolvedName = databaseNameById.get(String(chart.databaseId));
+        if (!resolvedName || chart.dataSource === resolvedName) {
+          return chart;
+        }
+        didUpdate = true;
+        return { ...chart, dataSource: resolvedName };
+      });
+      return didUpdate ? nextCharts : prevCharts;
+    });
+
+    setGeneratedCharts((prevCharts) => {
+      let didUpdate = false;
+      const nextCharts = prevCharts.map((chart) => {
+        if (!chart.databaseId) {
+          return chart;
+        }
+        const resolvedName = databaseNameById.get(String(chart.databaseId));
+        if (!resolvedName || chart.dataSource === resolvedName) {
+          return chart;
+        }
+        didUpdate = true;
+        return { ...chart, dataSource: resolvedName };
+      });
+      return didUpdate ? nextCharts : prevCharts;
+    });
+  }, [databaseNameById]);
+
   const getDatabaseLabel = useCallback(
     (chart: Chart) => {
       if (chart.databaseId) {
@@ -958,6 +996,40 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     };
     setPreviewChart(chartAsSuggestion);
   };
+
+  useEffect(() => {
+    if (!previewChart || !previewChart.databaseId || databaseNameById.size === 0) {
+      return;
+    }
+
+    const resolvedName = databaseNameById.get(String(previewChart.databaseId));
+    if (!resolvedName || previewChart.dataSource === resolvedName) {
+      return;
+    }
+
+    setPreviewChart((current) => {
+      if (!current || !current.databaseId) {
+        return current;
+      }
+
+      const sameDatabase = String(current.databaseId) === String(previewChart.databaseId);
+      if (!sameDatabase) {
+        return current;
+      }
+
+      const updatedDescription = `${current.type.charAt(0).toUpperCase() + current.type.slice(1)} chart from ${resolvedName}`;
+      const shouldUpdateReasoning = current.id?.startsWith('existing-') && current.reasoning?.includes('existing chart');
+
+      return {
+        ...current,
+        dataSource: resolvedName,
+        description: updatedDescription,
+        reasoning: shouldUpdateReasoning
+          ? `This is an existing chart from your ${resolvedName} database.`
+          : current.reasoning,
+      };
+    });
+  }, [databaseNameById, previewChart, setPreviewChart]);
 
   const handleGenerateCharts = () => {
     // Always open AI Assistant instead of showing dialog

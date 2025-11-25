@@ -161,6 +161,7 @@ export function DatabaseConnectionFlow({ projectId, onComplete, onCancel }: Data
             >
               <DatabaseContextBot
                 databaseName={databaseConfig?.connectionName || databaseConfig?.name || "Your Database"}
+                databaseConnectionId={databaseConfig?.id}
                 onComplete={handleDatabaseContextComplete}
               />
             </motion.div>

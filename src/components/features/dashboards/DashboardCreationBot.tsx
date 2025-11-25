@@ -237,6 +237,33 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
     }
   };
 
+  const handleSkipQuestion = () => {
+    if (
+      !projectId ||
+      !wsClient ||
+      !wsClient.isConnected() ||
+      isTyping ||
+      !currentQuestion ||
+      isCompleted ||
+      !!connectionError
+    ) {
+      return;
+    }
+
+    setIsTyping(true);
+
+    try {
+      wsClient.dashboardCreation({
+        project_id: String(projectId),
+        user_response: "skip",
+      });
+    } catch (error: any) {
+      console.error("[DashboardCreationBot] Failed to skip question:", error);
+      setIsTyping(false);
+      toast.error(error?.message || "Failed to skip. Please try again.");
+    }
+  };
+
   const handleRetryConnection = () => {
     setConnectionError(null);
     setHasStarted(false);
@@ -324,14 +351,34 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
                     <Bot className="w-4 h-4 text-white" />
                   </Avatar>
                 )}
-                <div
-                  className={`max-w-[75%] rounded-2xl px-4 py-3 ${
-                    message.type === "bot"
-                      ? "bg-card border border-border text-foreground"
-                      : "bg-gradient-to-r from-primary to-accent text-white"
-                  }`}
-                >
-                  <p className="text-sm leading-relaxed">{message.content}</p>
+                <div className="flex flex-col gap-2 max-w-[75%]">
+                  <div
+                    className={`rounded-2xl px-4 py-3 ${
+                      message.type === "bot"
+                        ? "bg-card border border-border text-foreground"
+                        : "bg-gradient-to-r from-primary to-accent text-white"
+                    }`}
+                  >
+                    <p className="text-sm leading-relaxed">{message.content}</p>
+                  </div>
+                  {message.type === "bot" && message.content === currentQuestion && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="self-start"
+                      onClick={handleSkipQuestion}
+                      disabled={
+                        isTyping ||
+                        !currentQuestion ||
+                        !wsClient ||
+                        !wsClient.isConnected() ||
+                        isCompleted ||
+                        !!connectionError
+                      }
+                    >
+                      Skip
+                    </Button>
+                  )}
                 </div>
               </motion.div>
             ))}

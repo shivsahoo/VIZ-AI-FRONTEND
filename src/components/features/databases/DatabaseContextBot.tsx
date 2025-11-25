@@ -20,6 +20,7 @@ interface Message {
 
 interface DatabaseContextBotProps {
   databaseName: string;
+  databaseConnectionId?: string;
   projectName?: string;
   projectDescription?: string;
   projectDomain?: string;
@@ -39,6 +40,7 @@ interface DatabaseContextBotProps {
 
 export function DatabaseContextBot({ 
   databaseName, 
+  databaseConnectionId,
   projectName,
   projectDescription,
   projectDomain,
@@ -234,7 +236,8 @@ export function DatabaseContextBot({
           project_name: projectName,
           project_description: projectDescription,
           project_domain: projectDomain,
-          product_description: enhancedDescription // Has priority
+          product_description: enhancedDescription, // Has priority
+          ...(databaseConnectionId ? { data_connection_id: databaseConnectionId } : {})
         });
       }, 500);
     } else {
@@ -313,9 +316,15 @@ export function DatabaseContextBot({
     }));
 
     // Send user response via WebSocket
-    wsClient.kpiInfo({
+    const payload: Record<string, string> = {
       user_response: inputValue
-    });
+    };
+
+    if (databaseConnectionId) {
+      payload.data_connection_id = databaseConnectionId;
+    }
+
+    wsClient.kpiInfo(payload);
   };
 
   const handleKeyPress = (e: ReactKeyboardEvent<HTMLInputElement>) => {

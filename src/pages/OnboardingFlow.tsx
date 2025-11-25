@@ -237,6 +237,7 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
             >
               <DatabaseContextBot
                 databaseName={databaseConfig?.name || "Your Database"}
+                databaseConnectionId={databaseConfig?.id}
                 projectName={projectName}
                 projectDescription={projectDescription}
                 projectDomain={projectDomain}

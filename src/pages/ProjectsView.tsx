@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type MouseEvent } from "react";
 import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -77,6 +77,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     projectDomain?: string;
     enhancedDescription?: string;
   } | null>(null);
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
 
   // Fetch projects and user ID on mount
   useEffect(() => {
@@ -205,6 +206,14 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
 
   const handleNewProjectCancel = () => {
     setShowNewProjectFlow(false);
+  };
+
+  const handleToggleDescription = (projectId: string, event: MouseEvent) => {
+    event.stopPropagation();
+    setExpandedProjects((prev) => ({
+      ...prev,
+      [projectId]: !prev[projectId],
+    }));
   };
 
   const handleConfirmDelete = async () => {
@@ -384,9 +393,22 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
                     <h3 className="text-lg text-foreground mb-1 group-hover:text-primary transition-colors">
                       {project.name}
                     </h3>
-                    <p className="text-sm text-muted-foreground leading-relaxed">
+                    <p
+                      className={`text-sm text-muted-foreground leading-relaxed transition-all ${
+                        expandedProjects[project.id] ? "" : "line-clamp-1"
+                      }`}
+                    >
                         {project.description || "No description"}
                     </p>
+                    {project.description && project.description.length > 80 && (
+                      <button
+                        className="mt-1 text-xs font-medium text-primary hover:underline"
+                        onClick={(event) => handleToggleDescription(project.id, event)}
+                        type="button"
+                      >
+                        {expandedProjects[project.id] ? "View less" : "View more"}
+                      </button>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <Button

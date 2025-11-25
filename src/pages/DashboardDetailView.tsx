@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2 } from "lucide-react";
+import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2, Calendar as CalendarIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -18,6 +18,8 @@ import {
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
 import { getDashboardCharts, getChartData, deleteChart, type ChartData } from "../services/api";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 interface DashboardDetailViewProps {
   dashboardId: string;
@@ -72,6 +74,28 @@ export function DashboardDetailView({
   const [charts, setCharts] = useState<ChartCardData[]>([]);
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
+
+  // Helper to format date as YYYY-MM-DD for API calls
+  const formatDateForAPI = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Helper to format date for display (e.g., "Nov 2, 2025")
+  const formatDateForDisplay = (date: Date): string => {
+    const monthNames = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ];
+    const month = monthNames[date.getMonth()];
+    const day = date.getDate();
+    const year = date.getFullYear();
+    return `${month} ${day}, ${year}`;
+  };
 
   // Fetch chart data for a specific chart
   const fetchChartData = async (chart: ChartCardData): Promise<ChartData | null> => {
@@ -90,7 +114,17 @@ export function DashboardDetailView({
     ));
 
     try {
-      const response = await getChartData(chart.id, chart.databaseConnectionId, chart.query);
+      // Only send dates if both start and end dates are selected
+      const fromDate = startDate && endDate ? formatDateForAPI(startDate) : undefined;
+      const toDate = startDate && endDate ? formatDateForAPI(endDate) : undefined;
+      
+      const response = await getChartData(
+        chart.id, 
+        chart.databaseConnectionId, 
+        chart.query,
+        fromDate,
+        toDate
+      );
       if (response.success && response.data) {
         setCharts(prev => prev.map(c => 
           c.id === chart.id ? { ...c, chartData: response.data, isLoadingData: false } : c
@@ -161,6 +195,18 @@ export function DashboardDetailView({
   useEffect(() => {
     fetchDashboardCharts();
   }, [fetchDashboardCharts]);
+
+  // Refetch chart data when date range changes (only when both dates are selected)
+  useEffect(() => {
+    if (charts.length > 0 && startDate && endDate) {
+      charts.forEach((chart) => {
+        if (chart.query && chart.databaseConnectionId) {
+          fetchChartData(chart);
+        }
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDate, endDate]);
 
   const handleEditChart = (chart: ChartCardData) => {
     // Pass chart info to parent
@@ -372,6 +418,47 @@ export function DashboardDetailView({
           </div>
           
           <div className="flex items-center gap-3">
+            {/* Date Range Picker */}
+            <DatePicker
+              selectsRange
+              startDate={startDate}
+              endDate={endDate}
+              onChange={(dates) => {
+                const [start, end] = dates as [Date | null, Date | null];
+                setStartDate(start);
+                setEndDate(end);
+              }}
+              isClearable
+              clearButtonTitle="Clear"
+              placeholderText="Pick a date range"
+              dateFormat="MMM d, yyyy"
+              showPopperArrow={false}
+              popperPlacement="bottom-end"
+              wrapperClassName="w-full"
+              customInput={
+                <Button
+                  variant="outline"
+                  type="button"
+                  className="w-[260px] sm:w-[280px] justify-start text-left font-normal border-border h-10"
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+                  <span className="truncate">
+                    {startDate && endDate ? (
+                      <>
+                        {formatDateForDisplay(startDate)} - {formatDateForDisplay(endDate)}
+                      </>
+                    ) : startDate ? (
+                      <>
+                        {formatDateForDisplay(startDate)} - <span className="text-muted-foreground">End date</span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">Pick a date range</span>
+                    )}
+                  </span>
+                </Button>
+              }
+            />
+            
             <GradientButton 
               onClick={onOpenAIAssistant}
             >
