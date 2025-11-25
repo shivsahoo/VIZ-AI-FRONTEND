@@ -22,9 +22,12 @@ import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { 
   generateProjectInsights, 
   generateBusinessInsights,
+  getLatestBusinessInsight,
   getDatabases,
   type ProjectInsightsResponse,
   type BusinessInsightsResponse,
+  type LatestBusinessInsightResponse,
+  type BusinessInsightRecord,
   type Database as ApiDatabase,
 } from "../services/api";
 import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
@@ -234,6 +237,37 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     fetchDatabases();
   }, [projectId, fetchDatabases]);
 
+  // Load existing insights when component mounts
+  const loadExistingInsights = useCallback(async () => {
+    if (!projectId) return;
+
+    setIsLoading(true);
+    try {
+      const response = await getLatestBusinessInsight(String(projectId));
+      if (response.success && response.data) {
+        const transformed = transformBusinessInsightRecord(response.data.insight);
+        if (transformed.length > 0) {
+          setInsights(transformed);
+        }
+      } else if (response.error) {
+        // It's okay if there are no existing insights - don't show error
+        if (!response.error.message?.includes("No business insights found")) {
+          console.log("No existing insights found for this project");
+        }
+      }
+    } catch (error) {
+      // Silently fail - it's okay if there are no existing insights
+      console.log("Could not load existing insights:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [projectId]);
+
+  // Load existing insights on mount
+  useEffect(() => {
+    loadExistingInsights();
+  }, [loadExistingInsights]);
+
   // Reset selected database to "all" when dialog opens
   useEffect(() => {
     if (showGenerateDialog) {
@@ -258,7 +292,10 @@ export function InsightsView({ projectId }: InsightsViewProps) {
       consolidated.strategic_priorities?.forEach((priority) => {
         try {
           const title = String(priority?.title || 'Untitled Priority');
-          const description = String(priority?.description || '');
+          const description = formatWithReasoning(
+            String(priority?.description || ''),
+            (priority as any)?.reasoning
+          );
           transformed.push({
             id: `priority-${idCounter++}`,
             title: title,
@@ -278,12 +315,17 @@ export function InsightsView({ projectId }: InsightsViewProps) {
       consolidated.opportunities?.forEach((opportunity) => {
         try {
           const title = String(opportunity?.title || 'Untitled Opportunity');
-          const description = String(opportunity?.description || '');
+          const baseDescription = String(opportunity?.description || '');
           const potentialImpact = String(opportunity?.potential_impact || '');
+          const reasoning = (opportunity as any)?.reasoning;
+          const descriptionWithImpact = potentialImpact
+            ? `${baseDescription} - Potential Impact: ${potentialImpact}`
+            : baseDescription;
+          const description = formatWithReasoning(descriptionWithImpact, reasoning);
           transformed.push({
             id: `opportunity-${idCounter++}`,
             title: title,
-            description: potentialImpact ? `${description} - Potential Impact: ${potentialImpact}` : description,
+            description: description,
             type: "opportunity",
             category: "Opportunity",
             timestamp: "Just now",
@@ -311,9 +353,10 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             return;
           }
           
-          const description = reasoning 
-            ? `Critical risk identified: ${riskText} - ${reasoning}`
-            : `Critical risk identified: ${riskText}`;
+          const description = formatWithReasoning(
+            `Critical risk identified: ${riskText}`,
+            reasoning
+          );
           
           transformed.push({
             id: `risk-critical-${idCounter++}`,
@@ -347,9 +390,10 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             return;
           }
           
-          const description = reasoning 
-            ? `Moderate risk identified: ${riskText} - ${reasoning}`
-            : `Moderate risk identified: ${riskText}`;
+          const description = formatWithReasoning(
+            `Moderate risk identified: ${riskText}`,
+            reasoning
+          );
           
           transformed.push({
             id: `risk-moderate-${idCounter++}`,
@@ -383,9 +427,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             return;
           }
           
-          const description = reasoning 
-            ? `${patternText} - ${reasoning}`
-            : patternText;
+          const description = formatWithReasoning(patternText, reasoning);
           
           transformed.push({
             id: `cross-pattern-${idCounter++}`,
@@ -413,7 +455,10 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         insights.recommendations?.forEach((rec) => {
           try {
             const title = String(rec?.title || 'Untitled Recommendation');
-            const description = String(rec?.description || '');
+            const description = formatWithReasoning(
+              String(rec?.description || ''),
+              (rec as any)?.reasoning
+            );
             transformed.push({
               id: `rec-${dbInsight.database_id}-${idCounter++}`,
               title: title,
@@ -445,9 +490,10 @@ export function InsightsView({ projectId }: InsightsViewProps) {
               return;
             }
             
-            const description = reasoning 
-              ? `Area requiring attention: ${concernText} - ${reasoning}`
-              : `Area requiring attention: ${concernText}`;
+            const description = formatWithReasoning(
+              `Area requiring attention: ${concernText}`,
+              reasoning
+            );
             
             transformed.push({
               id: `concern-${dbInsight.database_id}-${idCounter++}`,
@@ -506,9 +552,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
               return;
             }
             
-            const description = reasoning 
-              ? `${insightText} - ${reasoning}`
-              : insightText;
+            const description = formatWithReasoning(insightText, reasoning);
             
             transformed.push({
               id: `pattern-${dbInsight.database_id}-${idCounter++}`,
@@ -535,6 +579,277 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     }
   };
 
+  const formatWithReasoning = (text: string, reasoning?: unknown) => {
+    if (typeof reasoning !== "string") {
+      return text;
+    }
+    const trimmed = reasoning.trim();
+    if (!trimmed) {
+      return text;
+    }
+    return `${text}\nReasoning: ${trimmed}`;
+  };
+
+  const transformBusinessInsightRecord = (record: BusinessInsightRecord): Insight[] => {
+    try {
+      const transformed: Insight[] = [];
+      let idCounter = 1;
+
+      // Helper to format timestamp
+      const formatTimestamp = (dateString: string) => {
+        try {
+          const date = new Date(dateString);
+          const now = new Date();
+          const diffMs = now.getTime() - date.getTime();
+          const diffMins = Math.floor(diffMs / 60000);
+          const diffHours = Math.floor(diffMs / 3600000);
+          const diffDays = Math.floor(diffMs / 86400000);
+
+          if (diffMins < 1) return "Just now";
+          if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+          if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+          if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+          return date.toLocaleDateString();
+        } catch {
+          return "Recently";
+        }
+      };
+
+      const timestamp = formatTimestamp(record.created_at);
+
+      // Transform key_metrics - can be object or array
+      if (record.key_metrics) {
+        if (Array.isArray(record.key_metrics)) {
+          // Handle array format (from fresh generation)
+          record.key_metrics.forEach((metric: any) => {
+            try {
+              const kpiName = String(metric?.kpi_name || 'Unknown KPI');
+              const valueInterpretation = String(metric?.value_interpretation || '');
+              const businessImpact = String(metric?.business_impact || '');
+              const isPositive = valueInterpretation.toLowerCase().includes("good") ||
+                               valueInterpretation.toLowerCase().includes("excellent") ||
+                               valueInterpretation.toLowerCase().includes("improving");
+              
+              transformed.push({
+                id: `record-metric-${record.id}-${idCounter++}`,
+                title: kpiName,
+                description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
+                type: isPositive ? "positive" : "negative",
+                category: "Key Metric",
+                timestamp: timestamp,
+                impact: "Medium",
+                source: "Project-wide",
+              });
+            } catch (err) {
+              console.error("Error processing key metric from record:", err, metric);
+            }
+          });
+        } else if (typeof record.key_metrics === 'object') {
+          // Handle object format (from stored insights) - show as summary
+          const metrics = record.key_metrics as any;
+          if (metrics.overall_health_score) {
+            const healthScore = String(metrics.overall_health_score || 'unknown');
+            const totalDbs = metrics.total_databases_analyzed || 0;
+            const successful = metrics.successful_analyses || 0;
+            const isPositive = healthScore.toLowerCase() === "excellent" || healthScore.toLowerCase() === "good";
+            
+            transformed.push({
+              id: `record-metric-summary-${record.id}-${idCounter++}`,
+              title: `Overall Health: ${healthScore.charAt(0).toUpperCase() + healthScore.slice(1)}`,
+              description: `Analyzed ${totalDbs} database(s) with ${successful} successful analysis(es)`,
+              type: isPositive ? "positive" : "negative",
+              category: "Key Metric",
+              timestamp: timestamp,
+              impact: "High",
+              source: "Project-wide",
+            });
+          }
+        }
+      }
+
+      // Transform insights_and_patterns - check for both 'pattern' and 'insight' fields
+      if (record.insights_and_patterns && Array.isArray(record.insights_and_patterns)) {
+        record.insights_and_patterns.forEach((patternItem: any) => {
+          try {
+            // Handle both 'pattern' (from stored) and 'insight' (from fresh) field names
+            const patternText = typeof patternItem === 'string' 
+              ? patternItem 
+              : (patternItem as any)?.pattern || (patternItem as any)?.insight || '';
+            const reasoning = typeof patternItem === 'string' 
+              ? '' 
+              : (patternItem as any)?.reasoning || '';
+            
+            if (!patternText || typeof patternText !== 'string') {
+              return;
+            }
+            
+            const description = formatWithReasoning(patternText, reasoning);
+            
+            transformed.push({
+              id: `record-pattern-${record.id}-${idCounter++}`,
+              title: patternText.substring(0, 60) + (patternText.length > 60 ? "..." : ""),
+              description: description,
+              type: "opportunity",
+              category: "Pattern",
+              timestamp: timestamp,
+              impact: "Medium",
+              source: "Project-wide",
+            });
+          } catch (err) {
+            console.error("Error processing insight pattern from record:", err, patternItem);
+          }
+        });
+      }
+
+      // Transform recommendations - check for both 'priority' and 'impact' fields
+      if (record.recommendations && Array.isArray(record.recommendations)) {
+        record.recommendations.forEach((rec: any) => {
+          try {
+            const title = String(rec?.title || 'Untitled Recommendation');
+            const description = formatWithReasoning(
+              String(rec?.description || ''),
+              rec?.reasoning
+            );
+            // Handle both 'priority' (from fresh) and 'impact' (from stored) field names
+            const priority = rec.priority || rec.impact || 'medium';
+            const impactLevel = priority === "high" ? "High" : priority === "medium" ? "Medium" : "Low";
+            transformed.push({
+              id: `record-rec-${record.id}-${idCounter++}`,
+              title: title,
+              description: description,
+              type: priority === "high" ? "opportunity" : "positive",
+              category: "Recommendation",
+              timestamp: timestamp,
+              impact: impactLevel,
+              source: "Project-wide",
+            });
+          } catch (err) {
+            console.error("Error processing recommendation from record:", err, rec);
+          }
+        });
+      }
+
+      // Transform areas_of_concern - can be array or object with critical_risks/moderate_risks
+      if (record.areas_of_concern) {
+        if (Array.isArray(record.areas_of_concern)) {
+          // Handle array format (from fresh generation)
+          record.areas_of_concern.forEach((concernItem: any) => {
+            try {
+              const concernText = typeof concernItem === 'string' 
+                ? concernItem 
+                : (concernItem as any)?.concern || '';
+              const reasoning = typeof concernItem === 'string' 
+                ? '' 
+                : (concernItem as any)?.reasoning || '';
+              
+              if (!concernText || typeof concernText !== 'string') {
+                return;
+              }
+              
+              const description = formatWithReasoning(
+                `Area requiring attention: ${concernText}`,
+                reasoning
+              );
+              
+              transformed.push({
+                id: `record-concern-${record.id}-${idCounter++}`,
+                title: concernText,
+                description: description,
+                type: "negative",
+                category: "Concern",
+                timestamp: timestamp,
+                impact: "High",
+                source: "Project-wide",
+              });
+            } catch (err) {
+              console.error("Error processing area of concern from record:", err, concernItem);
+            }
+          });
+        } else if (typeof record.areas_of_concern === 'object') {
+          // Handle object format with critical_risks and moderate_risks (from stored insights)
+          const concerns = record.areas_of_concern as any;
+          
+          // Process critical risks
+          if (concerns.critical_risks && Array.isArray(concerns.critical_risks)) {
+            concerns.critical_risks.forEach((riskItem: any) => {
+              try {
+                const riskText = typeof riskItem === 'string' 
+                  ? riskItem 
+                  : (riskItem as any)?.risk || '';
+                const reasoning = typeof riskItem === 'string' 
+                  ? '' 
+                  : (riskItem as any)?.reasoning || '';
+                
+                if (!riskText || typeof riskText !== 'string') {
+                  return;
+                }
+                
+                const description = formatWithReasoning(
+                  `Critical risk: ${riskText}`,
+                  reasoning
+                );
+                
+                transformed.push({
+                  id: `record-risk-critical-${record.id}-${idCounter++}`,
+                  title: riskText,
+                  description: description,
+                  type: "negative",
+                  category: "Risk",
+                  timestamp: timestamp,
+                  impact: "High",
+                  source: "Project-wide",
+                });
+              } catch (err) {
+                console.error("Error processing critical risk from record:", err, riskItem);
+              }
+            });
+          }
+          
+          // Process moderate risks
+          if (concerns.moderate_risks && Array.isArray(concerns.moderate_risks)) {
+            concerns.moderate_risks.forEach((riskItem: any) => {
+              try {
+                const riskText = typeof riskItem === 'string' 
+                  ? riskItem 
+                  : (riskItem as any)?.risk || '';
+                const reasoning = typeof riskItem === 'string' 
+                  ? '' 
+                  : (riskItem as any)?.reasoning || '';
+                
+                if (!riskText || typeof riskText !== 'string') {
+                  return;
+                }
+                
+                const description = formatWithReasoning(
+                  `Moderate risk: ${riskText}`,
+                  reasoning
+                );
+                
+                transformed.push({
+                  id: `record-risk-moderate-${record.id}-${idCounter++}`,
+                  title: riskText,
+                  description: description,
+                  type: "negative",
+                  category: "Risk",
+                  timestamp: timestamp,
+                  impact: "Medium",
+                  source: "Project-wide",
+                });
+              } catch (err) {
+                console.error("Error processing moderate risk from record:", err, riskItem);
+              }
+            });
+          }
+        }
+      }
+
+      return transformed;
+    } catch (error) {
+      console.error("Error in transformBusinessInsightRecord:", error, record);
+      return [];
+    }
+  };
+
   const transformBusinessInsights = (data: BusinessInsightsResponse): Insight[] => {
     try {
       const transformed: Insight[] = [];
@@ -546,7 +861,10 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     insights.recommendations?.forEach((rec) => {
       try {
         const title = String(rec?.title || 'Untitled Recommendation');
-        const description = String(rec?.description || '');
+        const description = formatWithReasoning(
+          String(rec?.description || ''),
+          (rec as any)?.reasoning
+        );
         transformed.push({
           id: `rec-${idCounter++}`,
           title: title,
@@ -578,9 +896,10 @@ export function InsightsView({ projectId }: InsightsViewProps) {
           return;
         }
         
-        const description = reasoning 
-          ? `Area requiring attention: ${concernText} - ${reasoning}`
-          : `Area requiring attention: ${concernText}`;
+        const description = formatWithReasoning(
+          `Area requiring attention: ${concernText}`,
+          reasoning
+        );
         
         transformed.push({
           id: `concern-${idCounter++}`,
@@ -639,9 +958,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
           return;
         }
         
-        const description = reasoning 
-          ? `${insightText} - ${reasoning}`
-          : insightText;
+        const description = formatWithReasoning(insightText, reasoning);
         
         transformed.push({
           id: `pattern-${idCounter++}`,
@@ -800,7 +1117,10 @@ export function InsightsView({ projectId }: InsightsViewProps) {
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card className="p-6 border border-border">
+          <Card 
+            className="p-6 border border-border cursor-pointer hover:shadow-lg transition-all hover:border-accent"
+            onClick={() => setActiveFilter("all")}
+          >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center">
                 <Lightbulb className="w-6 h-6 text-accent" />
@@ -812,7 +1132,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             </div>
           </Card>
 
-          <Card className="p-6 border border-border">
+          <Card 
+            className="p-6 border border-border cursor-pointer hover:shadow-lg transition-all hover:border-success"
+            onClick={() => {
+              if (insightStats.positive > 0) {
+                setActiveFilter("positive");
+              }
+            }}
+          >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-success/10 flex items-center justify-center">
                 <TrendingUp className="w-6 h-6 text-success" />
@@ -824,7 +1151,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             </div>
           </Card>
 
-          <Card className="p-6 border border-border">
+          <Card 
+            className="p-6 border border-border cursor-pointer hover:shadow-lg transition-all hover:border-destructive"
+            onClick={() => {
+              if (insightStats.negative > 0) {
+                setActiveFilter("negative");
+              }
+            }}
+          >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-destructive/10 flex items-center justify-center">
                 <TrendingDown className="w-6 h-6 text-destructive" />
@@ -836,7 +1170,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             </div>
           </Card>
 
-          <Card className="p-6 border border-border">
+          <Card 
+            className="p-6 border border-border cursor-pointer hover:shadow-lg transition-all hover:border-chart-2"
+            onClick={() => {
+              if (insightStats.anomalies > 0) {
+                setActiveFilter("anomalies");
+              }
+            }}
+          >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-chart-2/10 flex items-center justify-center">
                 <AlertCircle className="w-6 h-6 text-chart-2" />
@@ -900,6 +1241,21 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                   ? TrendingDown
                   : Lightbulb);
 
+              const primaryLabel = "\nReasoning:";
+              let reasoningIndex = insight.description.indexOf(primaryLabel);
+              let reasoningLabel = primaryLabel;
+              if (reasoningIndex === -1) {
+                reasoningLabel = "Reasoning:";
+                reasoningIndex = insight.description.indexOf(reasoningLabel);
+              }
+              const hasReasoning = reasoningIndex !== -1;
+              const mainDescription = hasReasoning
+                ? insight.description.slice(0, reasoningIndex).trimEnd()
+                : insight.description;
+              const reasoningText = hasReasoning
+                ? insight.description.slice(reasoningIndex + reasoningLabel.length).trim()
+                : "";
+
               return (
                 <Card 
                   key={insight.id}
@@ -914,9 +1270,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                       <div className="flex items-start justify-between gap-4 mb-3">
                         <div className="flex-1">
                           <h3 className="text-lg text-foreground mb-2">{insight.title}</h3>
-                          <p className="text-sm text-muted-foreground leading-relaxed">
-                            {insight.description}
+                          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
+                            {mainDescription}
                           </p>
+                          {hasReasoning && (
+                            <p className="text-sm text-muted-foreground leading-relaxed mt-2">
+                              <span className="font-semibold">Reasoning:</span> {reasoningText}
+                            </p>
+                          )}
                         </div>
                         <Button
                           variant="outline"

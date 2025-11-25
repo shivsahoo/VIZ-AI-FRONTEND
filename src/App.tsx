@@ -296,13 +296,13 @@ export default function App() {
     }
   };
 
+  // Auto-close assistant only when navigating away from workspace entirely
+  // Allow assistant to stay open when switching tabs within workspace
   useEffect(() => {
-    const shouldCloseAssistant = !isInWorkspace || workspaceTab !== 'charts';
-
-    if (shouldCloseAssistant && isAIAssistantOpen) {
+    if (!isInWorkspace && isAIAssistantOpen) {
       setIsAIAssistantOpen(false);
     }
-  }, [isInWorkspace, workspaceTab, isAIAssistantOpen]);
+  }, [isInWorkspace, isAIAssistantOpen]);
 
   // Show loading state while checking authentication
   if (isCheckingAuth) {

@@ -670,6 +670,7 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
   created_at: string;
   connection_id: string | null;
   status?: string | null;
+  chart_type?: string | null;
 }>>> => {
   try {
     const response = await apiRequest<{
@@ -681,6 +682,7 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
         created_at: string;
         connection_id: string | null;
         status?: string | null;
+        chart_type?: string | null;
       }>;
     }>(`/api/v1/backend/dashboards/${dashboardId}/charts`);
 
@@ -1794,6 +1796,62 @@ export const generateProjectInsights = async (
       error: {
         code: 'GENERATE_PROJECT_INSIGHTS_FAILED',
         message: error.message || 'Failed to generate project insights',
+      },
+    };
+  }
+};
+
+/**
+ * Business Insight Record from backend
+ * Note: Fields can be in different formats (object vs array) depending on storage
+ */
+export interface BusinessInsightRecord {
+  id: string;
+  project_id: string;
+  user_id: string;
+  executive_summary: string;
+  key_metrics: any; // Can be array of metrics OR object with overall_health_score, total_databases_analyzed, etc.
+  insights_and_patterns: any; // Array of { pattern: string, reasoning?: string } OR { insight: string, reasoning?: string }
+  recommendations: any; // Array of { rank: number, title: string, description: string, impact: string, reasoning?: string }
+  areas_of_concern: any; // Can be array OR object with { critical_risks: [], moderate_risks: [] }
+  created_at: string;
+}
+
+export interface LatestBusinessInsightResponse {
+  message: string;
+  insight: BusinessInsightRecord;
+}
+
+/**
+ * Get the latest business insight for a project
+ */
+export const getLatestBusinessInsight = async (
+  projectId: string,
+  userId?: string
+): Promise<ApiResponse<LatestBusinessInsightResponse>> => {
+  try {
+    const queryParams = new URLSearchParams({
+      project_id: projectId,
+    });
+    
+    if (userId) {
+      queryParams.append('user_id', userId);
+    }
+
+    const response = await apiRequest<LatestBusinessInsightResponse>(
+      `/api/v1/backend/business-insights/latest?${queryParams.toString()}`
+    );
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GET_LATEST_BUSINESS_INSIGHT_FAILED',
+        message: error.message || 'Failed to fetch latest business insight',
       },
     };
   }
