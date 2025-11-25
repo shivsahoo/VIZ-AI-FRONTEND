@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Bot, Send, Sparkles, Loader2 } from "lucide-react";
 import { Card } from "../../ui/card";
 import { Button } from "../../ui/button";
-import { Input } from "../../ui/input";
+import { Textarea } from "../../ui/textarea";
 import { Avatar } from "../../ui/avatar";
 import { VizAIWebSocket, WebSocketResponse } from "../../../services/websocket";
 import { getCurrentUser } from "../../../services/api";
@@ -42,6 +42,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
   const [questionsAsked, setQuestionsAsked] = useState(0);
   const [isCompleted, setIsCompleted] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const addBotMessage = useCallback((content: string) => {
     setMessages((prev) => [
@@ -236,6 +237,33 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
     }
   };
 
+  const handleSkipQuestion = () => {
+    if (
+      !projectId ||
+      !wsClient ||
+      !wsClient.isConnected() ||
+      isTyping ||
+      !currentQuestion ||
+      isCompleted ||
+      !!connectionError
+    ) {
+      return;
+    }
+
+    setIsTyping(true);
+
+    try {
+      wsClient.dashboardCreation({
+        project_id: String(projectId),
+        user_response: "skip",
+      });
+    } catch (error: any) {
+      console.error("[DashboardCreationBot] Failed to skip question:", error);
+      setIsTyping(false);
+      toast.error(error?.message || "Failed to skip. Please try again.");
+    }
+  };
+
   const handleRetryConnection = () => {
     setConnectionError(null);
     setHasStarted(false);
@@ -246,12 +274,20 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
     }
   };
 
-  const handleKeyPress = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleTextareaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       handleSendMessage();
     }
   };
+
+  useEffect(() => {
+    if (!textareaRef.current) return;
+    const textarea = textareaRef.current;
+    textarea.style.height = "auto";
+    const maxHeight = 200;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+  }, [userInput, hasStarted]);
 
   const placeholder = currentQuestion
     ? "Type your answer..."
@@ -315,14 +351,34 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
                     <Bot className="w-4 h-4 text-white" />
                   </Avatar>
                 )}
-                <div
-                  className={`max-w-[75%] rounded-2xl px-4 py-3 ${
-                    message.type === "bot"
-                      ? "bg-card border border-border text-foreground"
-                      : "bg-gradient-to-r from-primary to-accent text-white"
-                  }`}
-                >
-                  <p className="text-sm leading-relaxed">{message.content}</p>
+                <div className="flex flex-col gap-2 max-w-[75%]">
+                  <div
+                    className={`rounded-2xl px-4 py-3 ${
+                      message.type === "bot"
+                        ? "bg-card border border-border text-foreground"
+                        : "bg-gradient-to-r from-primary to-accent text-white"
+                    }`}
+                  >
+                    <p className="text-sm leading-relaxed">{message.content}</p>
+                  </div>
+                  {message.type === "bot" && message.content === currentQuestion && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="self-start"
+                      onClick={handleSkipQuestion}
+                      disabled={
+                        isTyping ||
+                        !currentQuestion ||
+                        !wsClient ||
+                        !wsClient.isConnected() ||
+                        isCompleted ||
+                        !!connectionError
+                      }
+                    >
+                      Skip
+                    </Button>
+                  )}
                 </div>
               </motion.div>
             ))}
@@ -370,13 +426,14 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
               )}
             </Button>
           ) : (
-            <div className="flex gap-3">
-              <Input
+            <div className="flex gap-3 items-end">
+              <Textarea
+                ref={textareaRef}
                 value={userInput}
                 onChange={(e) => setUserInput(e.target.value)}
-                onKeyDown={handleKeyPress}
+                onKeyDown={handleTextareaKeyDown}
                 placeholder={placeholder}
-                className="flex-1 h-12"
+                className="flex-1 min-h-[48px] max-h-[200px] resize-none"
                 disabled={isTyping || isCompleted || !!connectionError}
                 autoFocus
               />

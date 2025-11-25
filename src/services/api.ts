@@ -1046,8 +1046,25 @@ export const addChartToDashboard = async (data: {
 /**
  * Get chart data (execute query)
  */
-export const getChartData = async (chartId: string, datasourceConnectionId: string, query: string): Promise<ApiResponse<ChartData>> => {
+export const getChartData = async (
+  chartId: string, 
+  datasourceConnectionId: string, 
+  query: string,
+  fromDate?: string,
+  toDate?: string
+): Promise<ApiResponse<ChartData>> => {
   try {
+    const requestBody: { query: string; from_date?: string; to_date?: string } = {
+      query: query,
+    };
+    
+    if (fromDate) {
+      requestBody.from_date = fromDate;
+    }
+    if (toDate) {
+      requestBody.to_date = toDate;
+    }
+    
     const response = await apiRequest<{
       data?: any[];
       row_count?: number;
@@ -1058,9 +1075,7 @@ export const getChartData = async (chartId: string, datasourceConnectionId: stri
       cached_at?: string | null;
     }>(`/api/v1/backend/excecute-query/${datasourceConnectionId}/`, {
       method: 'POST',
-      body: JSON.stringify({
-        query: query,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const normalizedData = Array.isArray(response.result)

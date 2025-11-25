@@ -355,6 +355,7 @@ export class VizAIWebSocket {
     project_description?: string;
     project_domain?: string;
     product_description?: string;
+    data_connection_id?: string;
     user_response?: string;
   }): void {
     this.send({

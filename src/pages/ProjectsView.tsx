@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight } from "lucide-react";
+import { useState, useEffect, type MouseEvent } from "react";
+import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { GradientButton } from "../components/shared/GradientButton";
@@ -7,7 +7,17 @@ import { OnboardingFlow } from "./OnboardingFlow";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import { KPIInfoBot } from "../components/features/ai/KPIInfoBot";
 import { toast } from "sonner";
-import { getProjects, createProject, getCurrentUser, type Project as ApiProject } from "../services/api";
+import { getProjects, createProject, getCurrentUser, deleteProject, type Project as ApiProject } from "../services/api";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../components/ui/alert-dialog";
 
 // Helper function to format time ago
 const formatTimeAgo = (dateString: string): string => {
@@ -58,6 +68,8 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<UIProject | null>(null);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [pendingProjectData, setPendingProjectData] = useState<{
     projectId: string;
     projectName: string;
@@ -65,6 +77,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     projectDomain?: string;
     enhancedDescription?: string;
   } | null>(null);
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
 
   // Fetch projects and user ID on mount
   useEffect(() => {
@@ -193,6 +206,34 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
 
   const handleNewProjectCancel = () => {
     setShowNewProjectFlow(false);
+  };
+
+  const handleToggleDescription = (projectId: string, event: MouseEvent) => {
+    event.stopPropagation();
+    setExpandedProjects((prev) => ({
+      ...prev,
+      [projectId]: !prev[projectId],
+    }));
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!projectToDelete) return;
+
+    setIsDeletingProject(true);
+    try {
+      const response = await deleteProject(projectToDelete.id);
+      if (response.success) {
+        setProjects((prev) => prev.filter((p) => p.id !== projectToDelete.id));
+        toast.success(`Project "${projectToDelete.name}" deleted`);
+      } else {
+        toast.error(response.error?.message || "Failed to delete project");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete project");
+    } finally {
+      setIsDeletingProject(false);
+      setProjectToDelete(null);
+    }
   };
 
   // Calculate stats from real data
@@ -352,11 +393,38 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
                     <h3 className="text-lg text-foreground mb-1 group-hover:text-primary transition-colors">
                       {project.name}
                     </h3>
-                    <p className="text-sm text-muted-foreground leading-relaxed">
+                    <p
+                      className={`text-sm text-muted-foreground leading-relaxed transition-all ${
+                        expandedProjects[project.id] ? "" : "line-clamp-1"
+                      }`}
+                    >
                         {project.description || "No description"}
                     </p>
+                    {project.description && project.description.length > 80 && (
+                      <button
+                        className="mt-1 text-xs font-medium text-primary hover:underline"
+                        onClick={(event) => handleToggleDescription(project.id, event)}
+                        type="button"
+                      >
+                        {expandedProjects[project.id] ? "View less" : "View more"}
+                      </button>
+                    )}
                   </div>
-                  <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all flex-shrink-0" />
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setProjectToDelete(project);
+                      }}
+                      title="Delete project"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                  </div>
                 </div>
 
                 {/* Stats */}
@@ -391,6 +459,44 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         )}
 
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog
+        open={!!projectToDelete}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingProject) {
+            setProjectToDelete(null);
+          }
+        }}
+      >
+        <AlertDialogContent className="border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Project</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{projectToDelete?.name}"? This will remove all associated dashboards and data sources from the workspace. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-border" disabled={isDeletingProject}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isDeletingProject}
+            >
+              {isDeletingProject ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Deleting...
+                </div>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

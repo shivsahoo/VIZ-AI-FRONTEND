@@ -53,6 +53,7 @@ wss://nonmyopic-diligently-madden.ngrok-free.dev/ws/vizai
 - `project_description` (optional) - Basic project description
 - `project_domain` (optional) - Project domain
 - `product_description` (optional) - Enhanced description from project_info (has priority)
+- `data_connection_id` (optional) - Database connection ID to associate KPI context
 - `user_response` (for follow-ups) - Answer to the question
 
 **Response**:
@@ -153,7 +154,8 @@ wsClient.on('kpi_info', (response) => {
 });
 wsClient.kpiInfo({ 
   project_name: "My Project",
-  product_description: enhancedDescription 
+  product_description: enhancedDescription,
+  data_connection_id: "connection-uuid-123"
 });
 
 // 3. Dashboard Creation

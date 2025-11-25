@@ -467,7 +467,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
               onClick={handleSaveAsDraft}
               disabled={isSavingDraft}
             >
-              {isSavingDraft ? "Saving..." : "Save as Draft"}
+              {isSavingDraft ? "Saving..." : "Save for later"}
             </Button>
           )}
           
