@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Bot, Send, Sparkles, Loader2 } from "lucide-react";
+import { Bot, Send, Sparkles } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Card } from "../../ui/card";
 import { Avatar } from "../../ui/avatar";
 import { VizAIWebSocket, WebSocketResponse } from "../../../services/websocket";
 import { toast } from "sonner";
+import { GifLoader } from "../../shared/LoadingSpinner";
 
 interface Message {
   id: number;
@@ -310,7 +311,7 @@ export function KPIInfoBot({
               className="h-12 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white disabled:opacity-50"
             >
               {isTyping ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
+                <GifLoader size="sm" decorative />
               ) : (
                 <Send className="w-5 h-5" />
               )}

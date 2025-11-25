@@ -1,4 +1,4 @@
-import { Plus, Shield, Search, Mail, MoreVertical, Trash2, UserCog, Users as UsersIcon, Database, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { Plus, Shield, Search, Mail, MoreVertical, Trash2, UserCog, Users as UsersIcon, Database, ChevronDown, ChevronRight } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -34,6 +34,7 @@ import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { toast } from "sonner";
 import { getTeamMembers, getRoles, getPermissions, createRole, inviteUser, type Permission as ApiPermission } from "../services/api";
 import { Skeleton } from "../components/ui/skeleton";
+import { GifLoader } from "../components/shared/LoadingSpinner";
 
 interface Permission {
   id: string;
@@ -729,7 +730,7 @@ export function UsersView({ projectId }: UsersViewProps) {
               <p className="text-sm text-muted-foreground">
                 {isLoadingUsers ? (
                   <span className="flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                    <GifLoader size="sm" decorative />
                     Loading members...
                   </span>
                 ) : (

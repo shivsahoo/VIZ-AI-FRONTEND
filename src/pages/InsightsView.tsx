@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   Filter, 
   LineChart,
-  Loader2, 
   Sparkles, 
   Target,
   Database 
@@ -46,6 +45,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
+import { GifLoader } from "../components/shared/LoadingSpinner";
 
 interface Insight {
   id: string;
@@ -1102,7 +1102,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             >
               {isGenerating ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <GifLoader size="sm" className="mr-2" decorative />
                   Generating...
                 </>
               ) : (
@@ -1206,7 +1206,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         {/* Insights Grid */}
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+            <GifLoader size="lg" decorative />
           </div>
         ) : filteredInsights.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20">
@@ -1370,7 +1370,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                 >
                   {isGenerating ? (
                     <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      <GifLoader size="sm" className="mr-2" decorative />
                       Generating...
                     </>
                   ) : (

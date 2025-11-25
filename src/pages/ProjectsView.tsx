@@ -1,10 +1,10 @@
 import { useState, useEffect, type MouseEvent } from "react";
-import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2, Loader2 } from "lucide-react";
+import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { GradientButton } from "../components/shared/GradientButton";
 import { OnboardingFlow } from "./OnboardingFlow";
-import { LoadingSpinner } from "../components/shared/LoadingSpinner";
+import { LoadingSpinner, GifLoader } from "../components/shared/LoadingSpinner";
 import { KPIInfoBot } from "../components/features/ai/KPIInfoBot";
 import { toast } from "sonner";
 import { getProjects, createProject, getCurrentUser, deleteProject, type Project as ApiProject } from "../services/api";
@@ -487,7 +487,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
             >
               {isDeletingProject ? (
                 <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <GifLoader size="sm" decorative />
                   Deleting...
                 </div>
               ) : (

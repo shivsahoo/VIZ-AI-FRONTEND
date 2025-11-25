@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Bot, Send, Sparkles, Loader2 } from "lucide-react";
+import { Bot, Send, Sparkles } from "lucide-react";
 import { Card } from "../../ui/card";
 import { Button } from "../../ui/button";
 import { Textarea } from "../../ui/textarea";
@@ -8,6 +8,7 @@ import { Avatar } from "../../ui/avatar";
 import { VizAIWebSocket, WebSocketResponse } from "../../../services/websocket";
 import { getCurrentUser } from "../../../services/api";
 import { toast } from "sonner";
+import { GifLoader } from "../../shared/LoadingSpinner";
 
 interface Message {
   id: number;
@@ -415,7 +416,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
             >
               {isConnecting ? (
                 <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  <GifLoader size="sm" className="mr-2" decorative />
                   Connecting...
                 </>
               ) : (

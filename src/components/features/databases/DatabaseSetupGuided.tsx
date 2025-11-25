@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Database, ArrowRight, Check, Sparkles, Loader2 } from "lucide-react";
+import { Database, ArrowRight, Check, Sparkles } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { Input } from "../../ui/input";
@@ -10,6 +10,7 @@ import { Textarea } from "../../ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
 import { toast } from "sonner";
 import { createDatabase } from "../../../services/api";
+import { GifLoader } from "../../shared/LoadingSpinner";
 
 interface DatabaseSetupGuidedProps {
   projectName: string;
@@ -284,7 +285,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
               >
                 {isConnecting ? (
                   <>
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    <GifLoader size="sm" className="mr-2" decorative />
                     Connecting to database...
                   </>
                 ) : (
@@ -336,7 +337,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
               >
                 {isConnecting ? (
                   <>
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    <GifLoader size="sm" className="mr-2" decorative />
                     Connecting to database...
                   </>
                 ) : (

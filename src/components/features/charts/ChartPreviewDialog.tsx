@@ -1,4 +1,4 @@
-import { Plus, ChevronDown, LayoutDashboard, Clock, Loader2 } from "lucide-react";
+import { Plus, ChevronDown, LayoutDashboard, Clock } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,6 +9,7 @@ import {
 import { Button } from "../../ui/button";
 import { GradientButton } from "../../shared/GradientButton";
 import { Badge } from "../../ui/badge";
+import { GifLoader } from "../../shared/LoadingSpinner";
 
 import {
   DropdownMenu,
@@ -55,11 +56,6 @@ interface ChartPreviewDialogProps {
   onSaveAsDraft?: (savedChart?: SavedChart) => void;
   isExistingChart?: boolean;
   chartStatus?: 'draft' | 'published';
-}
-
-interface Dashboard {
-  id: number | string;
-  name: string;
 }
 
 export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], projectId, onAddToDashboard, onSaveAsDraft, isExistingChart = false, chartStatus }: ChartPreviewDialogProps) {
@@ -228,8 +224,8 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     return databaseId;
   };
 
-  const validateDatabaseId = (databaseId?: string) => {
-    return !!databaseId && databaseId.trim().length > 0;
+  const validateDatabaseId = (databaseId?: string): databaseId is string => {
+    return typeof databaseId === "string" && databaseId.trim().length > 0;
   };
 
   if (!chart) return null;
@@ -479,7 +475,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
               >
                 {isAddingToDashboard ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <GifLoader size="sm" className="mr-1" decorative />
                     Adding...
                   </>
                 ) : (
@@ -513,7 +509,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
                       disabled={isAddingToDashboard}
                       className="flex items-center gap-2"
                 >
-                      {isAddingToThis && <Loader2 className="w-3 h-3 animate-spin" />}
+                      {isAddingToThis && <GifLoader size="sm" decorative />}
                   {dashboard.name}
                   </DropdownMenuItem>
                   );

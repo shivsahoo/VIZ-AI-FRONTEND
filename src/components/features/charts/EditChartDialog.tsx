@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Wand2, Loader2 } from "lucide-react";
+import { Wand2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,7 @@ import { Button } from "../../ui/button";
 import { Textarea } from "../../ui/textarea";
 import { Badge } from "../../ui/badge";
 import { toast } from "sonner";
+import { GifLoader } from "../../shared/LoadingSpinner";
 
 interface EditChartDialogProps {
   isOpen: boolean;
@@ -141,7 +142,7 @@ export function EditChartDialog({ isOpen, onClose, chartName, chartType, onSave 
           >
             {isProcessing ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <GifLoader size="sm" decorative />
                 Processing...
               </>
             ) : (

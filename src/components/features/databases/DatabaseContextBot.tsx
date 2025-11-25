@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Bot, Send, Sparkles, CheckCircle2, LayoutDashboard, Loader2 } from "lucide-react";
+import { Bot, Send, Sparkles, CheckCircle2, LayoutDashboard } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Card } from "../../ui/card";
@@ -10,6 +10,7 @@ import { Badge } from "../../ui/badge";
 import { VizAIWebSocket, WebSocketResponse } from "../../../services/websocket";
 import { getCurrentUser } from "../../../services/api";
 import { toast } from "sonner";
+import { GifLoader } from "../../shared/LoadingSpinner";
 
 interface Message {
   id: number;
@@ -460,7 +461,7 @@ export function DatabaseContextBot({
             >
               {isConnecting ? (
                 <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  <GifLoader size="sm" className="mr-2" decorative />
                   Connecting to AI assistant...
                 </>
               ) : (
@@ -487,7 +488,7 @@ export function DatabaseContextBot({
                 className="h-12 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white disabled:opacity-50"
               >
                 {isTyping ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <GifLoader size="sm" decorative />
                 ) : (
                   <Send className="w-5 h-5" />
                 )}

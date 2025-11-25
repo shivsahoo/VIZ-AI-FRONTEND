@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2, Calendar as CalendarIcon } from "lucide-react";
+import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Calendar as CalendarIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -18,6 +18,7 @@ import {
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
 import { getDashboardCharts, getChartData, deleteChart, type ChartData } from "../services/api";
+import { GifLoader } from "../components/shared/LoadingSpinner";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 
@@ -538,8 +539,8 @@ export function DashboardDetailView({
         {/* Charts Grid */}
         {isLoadingCharts ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-            <span className="ml-3 text-muted-foreground">Loading dashboard charts...</span>
+            <GifLoader size="lg" className="mr-3" decorative />
+            <span className="text-muted-foreground">Loading dashboard charts...</span>
           </div>
         ) : charts.length === 0 ? (
           <Card className="p-12 border-2 border-dashed border-border">
@@ -600,7 +601,7 @@ export function DashboardDetailView({
                       disabled={chart.isExporting}
                     >
                       {chart.isExporting ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <GifLoader size="sm" decorative />
                       ) : (
                         <Download className="w-4 h-4" />
                       )}
@@ -630,8 +631,8 @@ export function DashboardDetailView({
                   </div>
                   {chart.isLoadingData ? (
                     <div className="h-[300px] flex items-center justify-center">
-                      <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                      <span className="ml-2 text-sm text-muted-foreground">Loading chart data...</span>
+                      <GifLoader size="md" className="mr-2" decorative />
+                      <span className="text-sm text-muted-foreground">Loading chart data...</span>
                     </div>
                   ) : chartData.length > 0 ? (
                     <ChartCard
