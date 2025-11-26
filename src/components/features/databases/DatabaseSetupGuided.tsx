@@ -19,6 +19,7 @@ interface DatabaseSetupGuidedProps {
 }
 
 export function DatabaseSetupGuided({ projectName, projectId, onComplete }: DatabaseSetupGuidedProps) {
+  const PROGRESS_OVERLAY_ENABLED = false;
   const [connectionMethod, setConnectionMethod] = useState("form");
   const [isConnecting, setIsConnecting] = useState(false);
   
@@ -132,6 +133,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
   const waitForSchemaExtraction = (taskId: string, tablesCount: number): Promise<void> => {
     return new Promise((resolve, reject) => {
       const url = buildProgressSocketUrl(taskId);
+      console.log("[DatabaseSetupGuided] Connecting to progress websocket:", url);
       try {
         const ws = new WebSocket(url);
         webSocketRef.current = ws;
@@ -285,8 +287,10 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
     }
 
     setIsConnecting(true);
-    clearOverlayTimeout();
-    startInitialProgress();
+    if (PROGRESS_OVERLAY_ENABLED) {
+      clearOverlayTimeout();
+      startInitialProgress();
+    }
 
     try {
       let requestData: any;
@@ -318,15 +322,26 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
         throw new Error(response.error?.message || "Failed to create database connection");
       }
 
-      setProgressTables({
-        total: response.data.tablesCount || 0,
-        completed: 0,
-        currentTable: "",
-      });
-      setProgressMessage("Preparing schema extraction...");
+      if (PROGRESS_OVERLAY_ENABLED) {
+        setProgressTables({
+          total: response.data.tablesCount || 0,
+          completed: 0,
+          currentTable: "",
+        });
+        setProgressMessage("Preparing schema extraction...");
 
-      await waitForSchemaExtraction(response.data.taskId, response.data.tablesCount || 0);
-      setProgressMessage("Finalizing connection details...");
+        if (response.data.taskId) {
+          console.log(
+            "[DatabaseSetupGuided] Starting schema extraction task",
+            response.data.taskId
+          );
+        } else {
+          console.warn("[DatabaseSetupGuided] Missing taskId in createDatabase response");
+        }
+
+        await waitForSchemaExtraction(response.data.taskId, response.data.tablesCount || 0);
+        setProgressMessage("Finalizing connection details...");
+      }
 
       const createdConnection = await fetchConnectionByName(normalizedConnectionName);
 
@@ -341,31 +356,38 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
       toast.success("Database connected successfully!");
       onComplete(dbConfig);
 
-      clearOverlayTimeout();
-      overlayDismissTimeoutRef.current = window.setTimeout(() => {
-        setShowProgressOverlay(false);
-        resetProgressState();
-        overlayDismissTimeoutRef.current = null;
-      }, 600);
+      if (PROGRESS_OVERLAY_ENABLED) {
+        clearOverlayTimeout();
+        overlayDismissTimeoutRef.current = window.setTimeout(() => {
+          setShowProgressOverlay(false);
+          resetProgressState();
+          overlayDismissTimeoutRef.current = null;
+        }, 600);
+      }
     } catch (error: any) {
       console.error("Error creating database connection:", error);
       toast.error(
         error.message ||
           "Failed to create database connection. Please check your credentials and try again."
       );
-      cleanupWebSocket();
-      clearOverlayTimeout();
-      setShowProgressOverlay(false);
-      resetProgressState();
+      if (PROGRESS_OVERLAY_ENABLED) {
+        cleanupWebSocket();
+        clearOverlayTimeout();
+        setShowProgressOverlay(false);
+        resetProgressState();
+      }
     } finally {
-      stopInitialProgress();
+      if (PROGRESS_OVERLAY_ENABLED) {
+        stopInitialProgress();
+      }
       setIsConnecting(false);
     }
   };
 
   return (
     <>
-      {showProgressOverlay && (
+      {/* Progress overlay temporarily disabled */}
+      {PROGRESS_OVERLAY_ENABLED && showProgressOverlay && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
           <Card className="w-full max-w-md border border-border shadow-2xl space-y-6 p-8 mx-4">
             <div className="flex flex-col items-center gap-3 text-center">

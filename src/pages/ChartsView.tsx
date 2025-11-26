@@ -404,14 +404,27 @@ const formatTimeAgo = (dateString: string): string => {
   return date.toLocaleDateString();
 };
 
-// Helper function to convert chart ID to number for PinnedChartData
-const chartIdToNumber = (id: string | number): number => {
-  if (typeof id === 'number') return id;
-  // Try to parse as integer first
-  const parsed = parseInt(id, 10);
-  if (!isNaN(parsed)) return parsed;
-  // If parsing fails (e.g., UUID), create a numeric hash
-  return id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+// Helper to convert arbitrary chart identifiers (number/UUID/undefined) into a stable numeric hash.
+const chartIdToNumber = (id: string | number | null | undefined): number => {
+  if (typeof id === 'number' && !Number.isNaN(id)) {
+    return id;
+  }
+
+  if (typeof id === 'string') {
+    const trimmed = id.trim();
+    if (!trimmed) {
+      return 0;
+    }
+
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+
+    return Array.from(trimmed).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  }
+
+  return 0;
 };
 
 export function ChartsView({ currentUser, projectId, onChartCreated, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart }: ChartsViewProps) {
