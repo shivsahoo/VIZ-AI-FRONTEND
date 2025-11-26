@@ -19,7 +19,7 @@ const getApiBaseUrl = (): string => {
   return 'http://localhost:8000';
 };
 
-const API_BASE_URL = getApiBaseUrl();
+export const API_BASE_URL = getApiBaseUrl();
 
 // Token storage keys
 const ACCESS_TOKEN_KEY = 'vizai_access_token';
@@ -1047,14 +1047,34 @@ export const addChartToDashboard = async (data: {
 
 /**
  * Get chart data (execute query)
+ * Uses cache to reduce API calls for the same queries
+ * @param bypassCache - If true, bypasses cache and always fetches fresh data
  */
 export const getChartData = async (
   chartId: string, 
   datasourceConnectionId: string, 
   query: string,
   fromDate?: string,
-  toDate?: string
+  toDate?: string,
+  bypassCache: boolean = false
 ): Promise<ApiResponse<ChartData>> => {
+  // Import cache utilities
+  const { getCachedChartData, setCachedChartData, clearChartCache } = await import('../utils/chartDataCache');
+  
+  // Check cache first (unless bypassing)
+  if (!bypassCache) {
+    const cachedData = getCachedChartData(chartId, datasourceConnectionId, query, fromDate, toDate);
+    if (cachedData) {
+      return {
+        success: true,
+        data: cachedData,
+      };
+    }
+  } else {
+    // Clear cache if bypassing to ensure fresh data
+    clearChartCache(chartId, datasourceConnectionId, query, fromDate, toDate);
+  }
+  
   try {
     const requestBody: { query: string; from_date?: string; to_date?: string } = {
       query: query,
@@ -1086,18 +1106,23 @@ export const getChartData = async (
         ? response.data
         : [];
 
+    const chartData: ChartData = {
+      data: normalizedData,
+      metadata: {
+        rowCount: response.row_count ?? normalizedData.length ?? 0,
+        executionTime: response.execution_time_ms ?? 0,
+        cachedAt: response.cached_at ?? null,
+        xAxis: response.x_axis ?? null,
+        yAxis: response.y_axis ?? null,
+      },
+    };
+
+    // Store in cache for future use (5 minute TTL)
+    setCachedChartData(chartId, datasourceConnectionId, query, chartData, 5 * 60 * 1000, fromDate, toDate);
+
     return {
       success: true,
-      data: {
-        data: normalizedData,
-        metadata: {
-          rowCount: response.row_count ?? normalizedData.length ?? 0,
-          executionTime: response.execution_time_ms ?? 0,
-          cachedAt: response.cached_at ?? null,
-          xAxis: response.x_axis ?? null,
-          yAxis: response.y_axis ?? null,
-        },
-      },
+      data: chartData,
     };
   } catch (error: any) {
     return {
@@ -1345,6 +1370,11 @@ export interface DatabaseSchema {
   }[];
 }
 
+export interface DatabaseCreationTask {
+  taskId: string;
+  tablesCount: number;
+}
+
 /**
  * Get database connections for project
  */
@@ -1433,7 +1463,7 @@ export const createDatabase = async (
     password?: string;
     consentGiven?: boolean;
   }
-): Promise<ApiResponse<Database>> => {
+): Promise<ApiResponse<DatabaseCreationTask>> => {
   try {
     // Prepare request body based on whether connection string or form fields are provided
     const requestBody: any = {
@@ -1484,7 +1514,8 @@ export const createDatabase = async (
     }
 
     const response = await apiRequest<{
-      db_entry_id: string;
+      taskId: string;
+      tablesCount: number;
     }>(`/api/v1/backend/database/${projectId}`, {
       method: 'POST',
       body: JSON.stringify(requestBody),
@@ -1493,15 +1524,8 @@ export const createDatabase = async (
     return {
       success: true,
       data: {
-        id: response.db_entry_id,
-        name: data.connectionName || 'New Database',
-        type: data.dbType || 'postgresql',
-        host: data.host || '',
-        port: typeof data.port === 'number' ? data.port : (data.port ? parseInt(data.port) : 5432),
-        database: data.database || '',
-        username: data.username || '',
-        status: 'connected' as const,
-        lastChecked: new Date().toISOString(),
+        taskId: response.taskId,
+        tablesCount: response.tablesCount,
       },
     };
   } catch (error: any) {

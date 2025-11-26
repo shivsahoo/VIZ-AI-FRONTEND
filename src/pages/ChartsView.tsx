@@ -1216,9 +1216,22 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     return (
       <div className="relative h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden p-4 flex items-center justify-center">
         {isLoading && hasQueryAndConnection && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/60 backdrop-blur-sm text-muted-foreground">
-            <Clock className="w-5 h-5 animate-spin" />
-            <span className="text-xs">Loading data…</span>
+          <div className="absolute inset-0 flex items-center justify-center bg-background/90 backdrop-blur-md rounded-lg z-10">
+            {/* Three dot loader */}
+            <div className="flex items-center gap-1.5">
+              <span 
+                className="w-2 h-2 bg-primary rounded-full animate-bounce" 
+                style={{ animationDelay: '0ms', animationDuration: '1.4s' }}
+              ></span>
+              <span 
+                className="w-2 h-2 bg-primary rounded-full animate-bounce" 
+                style={{ animationDelay: '200ms', animationDuration: '1.4s' }}
+              ></span>
+              <span 
+                className="w-2 h-2 bg-primary rounded-full animate-bounce" 
+                style={{ animationDelay: '400ms', animationDuration: '1.4s' }}
+              ></span>
+            </div>
           </div>
         )}
 

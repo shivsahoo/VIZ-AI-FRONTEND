@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { TopBar } from "./components/layout/TopBar";
 import { WorkspaceSidebar } from "./components/layout/WorkspaceSidebar";
 import { ProjectsView } from "./pages/ProjectsView";
@@ -45,6 +45,7 @@ export default function App() {
     type: 'line' | 'bar' | 'pie' | 'area';
     description?: string;
   } | null>(null);
+  const prevWorkspaceTabRef = useRef<string>(workspaceTab);
 
   const isInWorkspace = currentView === 'workspace' && Boolean(selectedProject);
 
@@ -275,7 +276,7 @@ export default function App() {
           chartCreatedTrigger={chartCreatedTrigger}
           pendingChartFromAI={pendingChartFromAI}
           onChartFromAIProcessed={() => setPendingChartFromAI(null)}
-          onOpenAIAssistant={() => setIsAIAssistantOpen(true)}
+          onOpenAIAssistant={() => setIsAIAssistantOpen(prev => !prev)}
           onEditChart={(chart) => {
             setEditingChart(chart);
             setIsAIAssistantOpen(true);
@@ -296,13 +297,23 @@ export default function App() {
     }
   };
 
-  // Auto-close assistant only when navigating away from workspace entirely
-  // Allow assistant to stay open when switching tabs within workspace
+  // Auto-close assistant when navigating away from workspace entirely
   useEffect(() => {
     if (!isInWorkspace && isAIAssistantOpen) {
       setIsAIAssistantOpen(false);
     }
   }, [isInWorkspace, isAIAssistantOpen]);
+
+  // Auto-close assistant when navigating to a different tab/page within workspace
+  useEffect(() => {
+    // Only close if tab actually changed (not on initial mount)
+    if (prevWorkspaceTabRef.current !== workspaceTab && isInWorkspace && isAIAssistantOpen) {
+      setIsAIAssistantOpen(false);
+      setEditingChart(null); // Clear editing chart when navigating away
+    }
+    // Update ref for next comparison
+    prevWorkspaceTabRef.current = workspaceTab;
+  }, [workspaceTab, isInWorkspace, isAIAssistantOpen]);
 
   // Show loading state while checking authentication
   if (isCheckingAuth) {
@@ -364,7 +375,7 @@ export default function App() {
             <WorkspaceSidebar
               activeTab={workspaceTab}
               onTabChange={setWorkspaceTab}
-              onOpenAIAssistant={() => setIsAIAssistantOpen(true)}
+              onOpenAIAssistant={() => setIsAIAssistantOpen(prev => !prev)}
             />
           )}
           

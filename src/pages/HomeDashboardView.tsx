@@ -88,7 +88,6 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
   const [favoriteDashboards, setFavoriteDashboards] = useState<FavoriteDashboard[]>([]);
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
   const [isLoadingDashboards, setIsLoadingDashboards] = useState(true);
-  const [isLoadingInsights, setIsLoadingInsights] = useState(true);
   const [selectedChart, setSelectedChart] = useState<FavoriteChartData | null>(null);
   const [pinnedInsightIds, setPinnedInsightIds] = useState<number[]>(recentInsights.map(i => i.id));
   const [favoriteChartDataStatus, setFavoriteChartDataStatus] = useState<Record<string, FavoriteChartDataStatus>>({});
@@ -290,14 +289,6 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     fetchFavoriteDashboards();
   }, [fetchFavoriteCharts, fetchFavoriteDashboards]);
 
-  // Simulate loading insights
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoadingInsights(false);
-    }, 2500);
-    return () => clearTimeout(timer);
-  }, []);
-
   const handleUnpinChart = async (chartId: number, chartName: string, e: React.MouseEvent) => {
     e.stopPropagation();
     
@@ -341,9 +332,22 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     return (
       <div className="relative h-full bg-gradient-to-br from-muted/20 to-muted/5 rounded-xl border border-border/60 flex items-center justify-center p-6">
         {isLoading && hasQueryAndConnection && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/70 backdrop-blur-sm text-muted-foreground">
-            <Clock className="w-5 h-5 animate-spin" />
-            <span className="text-xs">Loading data…</span>
+          <div className="absolute inset-0 flex items-center justify-center bg-background/90 backdrop-blur-md rounded-xl z-10">
+            {/* Three dot loader */}
+            <div className="flex items-center gap-1.5">
+              <span 
+                className="w-2 h-2 bg-primary rounded-full animate-bounce" 
+                style={{ animationDelay: '0ms', animationDuration: '1.4s' }}
+              ></span>
+              <span 
+                className="w-2 h-2 bg-primary rounded-full animate-bounce" 
+                style={{ animationDelay: '200ms', animationDuration: '1.4s' }}
+              ></span>
+              <span 
+                className="w-2 h-2 bg-primary rounded-full animate-bounce" 
+                style={{ animationDelay: '400ms', animationDuration: '1.4s' }}
+              ></span>
+            </div>
           </div>
         )}
 
@@ -413,18 +417,18 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
               variant="outline"
               size="sm"
               onClick={() => onNavigate?.('charts')}
-              className="gap-2 hover:bg-muted/50 transition-smooth"
+              className="group gap-2 hover:bg-muted/50 hover:text-foreground hover:border-primary/30 transition-all duration-200 ease-in-out"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 transition-transform duration-200 ease-in-out group-hover:rotate-90" />
               New Chart
             </Button>
             <Button 
               variant="outline"
               size="sm"
               onClick={() => onNavigate?.('dashboards')}
-              className="gap-2 hover:bg-muted/50 transition-smooth"
+              className="group gap-2 hover:bg-muted/50 hover:text-foreground hover:border-primary/30 transition-all duration-200 ease-in-out"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 transition-transform duration-200 ease-in-out group-hover:rotate-90" />
               New Dashboard
             </Button>
             {/* <Button 
@@ -673,32 +677,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
             </Button>
           </div>
 
-          {isLoadingInsights ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {[1, 2].map((i) => (
-                <Card key={i} className="p-5 border-2 border-border card-shadow">
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-muted/50 animate-pulse" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 bg-muted/50 rounded animate-pulse w-2/3" />
-                        <div className="h-3 bg-muted/30 rounded animate-pulse w-1/3" />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="h-3 bg-muted/30 rounded animate-pulse w-full" />
-                      <div className="h-3 bg-muted/30 rounded animate-pulse w-5/6" />
-                      <div className="h-3 bg-muted/30 rounded animate-pulse w-4/6" />
-                    </div>
-                    <div className="flex items-center gap-2 pt-3 border-t border-border">
-                      <div className="h-6 bg-muted/30 rounded-full animate-pulse w-20" />
-                      <div className="h-6 bg-muted/30 rounded-full animate-pulse w-16" />
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          ) : displayedInsights.length === 0 ? (
+          {displayedInsights.length === 0 ? (
             <Card className="p-12 border-2 border-dashed border-border card-shadow">
               <div className="flex flex-col items-center justify-center text-center">
                 <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center mb-5">
