@@ -285,9 +285,85 @@ export function ChartCard({
       );
 
     case 'bar':
+      // Calculate max value across all numeric keys to set proper Y-axis domain
+      // This ensures bars are visible even with zero or small values
+      const calculateMaxValue = () => {
+        const allKeys = Object.keys(sampleData);
+        const numericKeys = allKeys.filter(key => {
+          if (key === finalXAxisKey) return false;
+          const val = sampleData[key];
+          return typeof val === 'number' || (!isNaN(Number(val)) && val !== null && val !== undefined);
+        });
+        
+        let maxValue = 0;
+        data.forEach(row => {
+          numericKeys.forEach(key => {
+            const val = typeof row[key] === 'number' ? row[key] : Number(row[key]);
+            if (!isNaN(val) && val !== null && val !== undefined && val > maxValue) {
+              maxValue = val;
+            }
+          });
+        });
+        
+        // Ensure domain always starts at 0 for proper bar rendering
+        // If all values are zero or empty, show a small range so bars are visible
+        if (maxValue === 0 || maxValue === null || maxValue === undefined || isNaN(maxValue)) {
+          return [0, 10];
+        }
+        // Add 10% padding at the top
+        return [0, Math.ceil(maxValue * 1.1)];
+      };
+      
+      const yAxisDomain = calculateMaxValue();
+      
+      // Check if we have any valid numeric values to render as bars
+      const hasValidNumericData = () => {
+        const allKeys = Object.keys(sampleData);
+        const numericKeys = allKeys.filter(key => {
+          if (key === finalXAxisKey) return false;
+          const val = sampleData[key];
+          return typeof val === 'number' || (!isNaN(Number(val)) && val !== null && val !== undefined);
+        });
+        
+        if (numericKeys.length === 0) return false;
+        
+        // Check if any row has a valid numeric value
+        return data.some(row => {
+          return numericKeys.some(key => {
+            const val = typeof row[key] === 'number' ? row[key] : Number(row[key]);
+            return !isNaN(val) && val !== null && val !== undefined && val > 0;
+          });
+        });
+      };
+      
+      const hasNumericData = hasValidNumericData();
+      
+      // Normalize data to handle null/undefined values - convert them to 0
+      // If no valid numeric data exists, set a minimal value to show thin bars at bottom
+      const normalizedBarData = data.map(row => {
+        const normalizedRow = { ...row };
+        Object.keys(normalizedRow).forEach(key => {
+          if (key !== finalXAxisKey) {
+            if (normalizedRow[key] === null || normalizedRow[key] === undefined) {
+              normalizedRow[key] = hasNumericData ? 0 : 1;
+            } else if (!hasNumericData) {
+              // If no valid numeric data, convert string values to minimal numeric value
+              const val = normalizedRow[key];
+              if (typeof val !== 'number' || isNaN(val)) {
+                normalizedRow[key] = 1;
+              }
+            }
+          }
+        });
+        return normalizedRow;
+      });
+      
+      // Adjust domain for non-numeric case - show minimal range for thin bars
+      const finalDomain = hasNumericData ? yAxisDomain : [0, 2];
+      
       return (
         <ResponsiveContainer width="100%" height={height}>
-          <BarChart data={data} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+          <BarChart data={normalizedBarData} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
             {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />}
             <XAxis 
               dataKey={finalXAxisKey} 
@@ -297,16 +373,31 @@ export function ChartCard({
             />
             <YAxis 
               {...commonAxisStyle}
+              domain={finalDomain}
               tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
               axisLine={{ stroke: "hsl(var(--border))" }}
+              allowDecimals={false}
+              hide={!hasNumericData}
             />
             <Tooltip content={<CustomChartTooltip />} />
             {showLegend && <Legend wrapperStyle={{ paddingTop: '10px' }} />}
             {/* Primary series */}
-            <Bar dataKey={finalDataKeys.primary} fill={colors[0] || "#8B5CF6"} radius={[8, 8, 0, 0]} name={finalDataKeys.primary} />
+            <Bar 
+              dataKey={finalDataKeys.primary} 
+              fill={colors[0] || "#8B5CF6"} 
+              radius={hasNumericData ? [8, 8, 0, 0] : [0, 0, 0, 0]}
+              name={finalDataKeys.primary}
+              opacity={hasNumericData ? 1 : 0.4}
+              barSize={hasNumericData ? undefined : 2}
+            />
             {/* Secondary if present */}
             {finalDataKeys.secondary && finalDataKeys.secondary in sampleData && (
-              <Bar dataKey={finalDataKeys.secondary} fill={colors[1] || "#6366F1"} radius={[8, 8, 0, 0]} name={finalDataKeys.secondary} />
+              <Bar 
+                dataKey={finalDataKeys.secondary} 
+                fill={colors[1] || "#6366F1"} 
+                radius={[8, 8, 0, 0]} 
+                name={finalDataKeys.secondary}
+              />
             )}
             {/* Additional numeric series */}
             {(() => {
@@ -340,6 +431,32 @@ export function ChartCard({
       const outerRadius = Math.min(height * 0.3, 100);
       const innerRadius = outerRadius * 0.6; // Donut chart with 60% inner radius
       
+      // For pie charts, determine the label key (nameKey) for Recharts
+      // Check if "label" field exists in the data, otherwise use finalXAxisKey or first non-numeric key
+      const pieLabelKey = (() => {
+        if (sampleData && 'label' in sampleData) {
+          return 'label';
+        }
+        // Try to find a key that looks like a label/name field
+        const labelCandidates = ['label', 'name', 'category', 'status', 'type'];
+        for (const candidate of labelCandidates) {
+          if (candidate in sampleData && sampleData[candidate] !== null && sampleData[candidate] !== undefined) {
+            return candidate;
+          }
+        }
+        // Fall back to xAxisKey if it exists and is not the value key
+        if (finalXAxisKey && finalXAxisKey !== finalDataKeys.primary) {
+          return finalXAxisKey;
+        }
+        // Last resort: find first non-numeric key that's not the value key
+        const nonNumericKeys = Object.keys(sampleData).filter(key => {
+          if (key === finalDataKeys.primary) return false;
+          const val = sampleData[key];
+          return typeof val !== 'number' && isNaN(Number(val));
+        });
+        return nonNumericKeys[0] || 'name';
+      })();
+      
       return (
         <ResponsiveContainer width="100%" height={height}>
           <PieChart>
@@ -348,8 +465,9 @@ export function ChartCard({
               cx="50%"
               cy="50%"
               labelLine={false}
-              label={({ name, percent }) => {
-                const percentage = (percent * 100).toFixed(0);
+              label={(entry) => {
+                const labelText = entry[pieLabelKey] || entry.name || 'Unknown';
+                const percentage = ((entry.percent || 0) * 100).toFixed(0);
                 return (
                   <text 
                     x={0} 
@@ -359,7 +477,7 @@ export function ChartCard({
                     fontSize="11px"
                     fontWeight="500"
                   >
-                    {`${name} ${percentage}%`}
+                    {`${labelText} ${percentage}%`}
                   </text>
                 );
               }}
@@ -367,6 +485,7 @@ export function ChartCard({
               innerRadius={innerRadius}
               fill="#8884d8"
               dataKey={finalDataKeys.primary}
+              nameKey={pieLabelKey}
               paddingAngle={2}
             >
               {data.map((_, index) => (

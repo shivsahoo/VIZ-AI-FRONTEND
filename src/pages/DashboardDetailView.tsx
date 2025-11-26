@@ -154,11 +154,22 @@ export function DashboardDetailView({
     try {
       const response = await getDashboardCharts(dashboardId);
       if (response.success && response.data) {
+        // Helper function to normalize chart type
+        const normalizeChartType = (chartType: string | null | undefined): 'line' | 'bar' | 'pie' | 'area' => {
+          if (!chartType) return 'line'; // Default to line if not provided
+          const normalized = chartType.toLowerCase();
+          if (normalized === 'bar' || normalized === 'column') return 'bar';
+          if (normalized === 'pie' || normalized === 'donut') return 'pie';
+          if (normalized === 'area') return 'area';
+          if (normalized === 'line') return 'line';
+          return 'line'; // Default fallback
+        };
+
         const mappedCharts: ChartCardData[] = response.data.map((chart) => ({
           id: chart.id,
           title: chart.title,
           description: 'No description available',
-          type: 'line' as const, // Default type since backend doesn't return chart_type
+          type: normalizeChartType(chart.chart_type),
           query: chart.query || '', // Extract query from API response
           databaseConnectionId: chart.connection_id || '',
           created_at: chart.created_at,
@@ -460,7 +471,13 @@ export function DashboardDetailView({
             />
             
             <GradientButton 
-              onClick={onOpenAIAssistant}
+              onClick={() => {
+                if (onOpenAIAssistant) {
+                  onOpenAIAssistant();
+                } else {
+                  toast.error("AI Assistant is not available");
+                }
+              }}
             >
               <Sparkles className="w-4 h-4 mr-2" />
               Create Chart
@@ -469,39 +486,54 @@ export function DashboardDetailView({
         </div>
 
         {/* Quick Stats - Show chart count */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card className="p-6 border border-border">
-            <p className="text-sm text-muted-foreground mb-2">Total Charts</p>
-            <p className="text-3xl text-foreground mb-1">{charts.length}</p>
-            <div className="flex items-center gap-1 text-xs">
-              <span className="text-muted-foreground">in this dashboard</span>
+        {(() => {
+          // Chart type configuration
+          const chartTypeConfig: Record<'line' | 'bar' | 'pie' | 'area', { label: string; description: string }> = {
+            line: { label: 'Line Charts', description: 'time-series data' },
+            bar: { label: 'Bar Charts', description: 'comparison data' },
+            pie: { label: 'Pie Charts', description: 'proportion data' },
+            area: { label: 'Area Charts', description: 'cumulative data' }
+          };
+
+          // Count charts by type
+          const chartCounts = charts.reduce((acc, chart) => {
+            acc[chart.type] = (acc[chart.type] || 0) + 1;
+            return acc;
+          }, {} as Record<string, number>);
+
+          // Get chart types that have at least one chart
+          const availableChartTypes = (Object.keys(chartCounts) as Array<'line' | 'bar' | 'pie' | 'area'>)
+            .filter(type => chartCounts[type] > 0)
+            .sort(); // Sort for consistent ordering
+
+          return (
+            <div className="flex flex-wrap gap-6 mb-8">
+              {/* Total Charts Card - Always shown */}
+              <Card className="p-6 border border-border flex-1 min-w-[200px]">
+                <p className="text-sm text-muted-foreground mb-2">Total Charts</p>
+                <p className="text-3xl text-foreground mb-1">{charts.length}</p>
+                <div className="flex items-center gap-1 text-xs">
+                  <span className="text-muted-foreground">in this dashboard</span>
+                </div>
+              </Card>
+              
+              {/* Dynamic Chart Type Cards - Only show types that have charts */}
+              {availableChartTypes.map((chartType) => {
+                const config = chartTypeConfig[chartType];
+                const count = chartCounts[chartType];
+                return (
+                  <Card key={chartType} className="p-6 border border-border flex-1 min-w-[200px]">
+                    <p className="text-sm text-muted-foreground mb-2">{config.label}</p>
+                    <p className="text-3xl text-foreground mb-1">{count}</p>
+                    <div className="flex items-center gap-1 text-xs">
+                      <span className="text-muted-foreground">{config.description}</span>
+                    </div>
+                  </Card>
+                );
+              })}
             </div>
-          </Card>
-          
-          <Card className="p-6 border border-border">
-            <p className="text-sm text-muted-foreground mb-2">Line Charts</p>
-            <p className="text-3xl text-foreground mb-1">{charts.filter(c => c.type === 'line').length}</p>
-            <div className="flex items-center gap-1 text-xs">
-              <span className="text-muted-foreground">time-series data</span>
-            </div>
-          </Card>
-          
-          <Card className="p-6 border border-border">
-            <p className="text-sm text-muted-foreground mb-2">Bar Charts</p>
-            <p className="text-3xl text-foreground mb-1">{charts.filter(c => c.type === 'bar').length}</p>
-            <div className="flex items-center gap-1 text-xs">
-              <span className="text-muted-foreground">comparison data</span>
-            </div>
-          </Card>
-          
-          <Card className="p-6 border border-border">
-            <p className="text-sm text-muted-foreground mb-2">Other Charts</p>
-            <p className="text-3xl text-foreground mb-1">{charts.filter(c => c.type !== 'line' && c.type !== 'bar').length}</p>
-            <div className="flex items-center gap-1 text-xs">
-              <span className="text-muted-foreground">pie, area, etc.</span>
-            </div>
-          </Card>
-        </div>
+          );
+        })()}
 
         {/* Charts Grid */}
         {isLoadingCharts ? (
@@ -520,7 +552,13 @@ export function DashboardDetailView({
                 Add charts to this dashboard to visualize your data
               </p>
               <GradientButton 
-                onClick={onOpenAIAssistant}
+                onClick={() => {
+                  if (onOpenAIAssistant) {
+                    onOpenAIAssistant();
+                  } else {
+                    toast.error("AI Assistant is not available");
+                  }
+                }}
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Create Chart
