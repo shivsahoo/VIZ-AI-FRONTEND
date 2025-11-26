@@ -257,6 +257,11 @@ export default function App() {
     setChartCreatedTrigger(prev => prev + 1);
     // Switch to charts tab to show the newly created chart
     setWorkspaceTab('charts');
+    // Ensure AI assistant (and any modal it spawns) closes so the charts page stays interactive
+    if (isAIAssistantOpen) {
+      setIsAIAssistantOpen(false);
+      setEditingChart(null);
+    }
   };
 
   const renderView = () => {

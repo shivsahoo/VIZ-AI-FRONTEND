@@ -143,6 +143,14 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
   const [isAwaitingClarification, setIsAwaitingClarification] = useState(false);
   const [chartWorkflowState, setChartWorkflowState] = useState<Record<string, any> | null>(null);
 
+  // Ensure any open preview dialog is dismissed when the assistant closes
+  useEffect(() => {
+    if (!isOpen && previewChart) {
+      setPreviewChart(null);
+      setExpandedSuggestion(null);
+    }
+  }, [isOpen, previewChart]);
+
   const replaceAnalyzingMessage = (content: string) => {
     setMessages((prev) => {
       if (prev.length === 0) {
@@ -1056,11 +1064,11 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
 
       {/* Chart Preview Dialog */}
       <ChartPreviewDialog
-        isOpen={!!previewChart}
+        isOpen={isOpen && !!previewChart}
         onClose={() => setPreviewChart(null)}
-        chart={previewChart}
-          projectId={projectId}
-          dashboards={dashboards}
+        chart={isOpen ? previewChart : null}
+        projectId={projectId}
+        dashboards={dashboards}
         onAddToDashboard={handleAddChartToDashboard}
         onSaveAsDraft={handleSaveAsDraft}
       />

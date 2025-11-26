@@ -86,6 +86,11 @@ export function ChartCard({
     );
   }
 
+  // Track the x-axis key we're actually going to use so we can reference it while
+  // we figure out the best data keys to plot. Needs to be declared up front because
+  // some of the fallback logic below references it.
+  let finalXAxisKey = xAxisKey;
+
   // Validate dataKeys exist in data
   const sampleData = data[0];
   if (!sampleData || typeof sampleData !== 'object') {
@@ -128,7 +133,6 @@ export function ChartCard({
   }
 
   // Check if xAxisKey exists
-  let finalXAxisKey = xAxisKey;
   if (xAxisKey && !(xAxisKey in sampleData)) {
     console.warn(`ChartCard: X-axis key "${xAxisKey}" not found in data. Available keys:`, Object.keys(sampleData));
     // Try to find a non-numeric key as fallback
@@ -223,7 +227,7 @@ export function ChartCard({
               type="monotone"
               dataKey={finalDataKeys.primary}
               stroke={colors[0] || "#8B5CF6"}
-              strokeWidth={3}
+              strokeWidth={strokeWidth}
               dot={false}
               activeDot={{ r: 6, fill: colors[0] || "#8B5CF6", strokeWidth: 2, stroke: '#fff' }}
               connectNulls={true}
@@ -236,7 +240,7 @@ export function ChartCard({
                 type="monotone"
                 dataKey={finalDataKeys.secondary}
                 stroke={colors[1] || "#6366F1"}
-                strokeWidth={3}
+                strokeWidth={strokeWidth}
                 strokeDasharray="8 4"
                 dot={false}
                 activeDot={{ r: 6, fill: colors[1] || "#6366F1", strokeWidth: 2, stroke: '#fff' }}
@@ -269,7 +273,7 @@ export function ChartCard({
                     type="monotone"
                     dataKey={key}
                     stroke={colors[colorIndex] || DEFAULT_COLORS[colorIndex % DEFAULT_COLORS.length]}
-                    strokeWidth={3}
+                    strokeWidth={strokeWidth}
                     strokeDasharray={isEven ? undefined : "8 4"}
                     dot={false}
                     activeDot={{ r: 6, fill: colors[colorIndex] || DEFAULT_COLORS[colorIndex % DEFAULT_COLORS.length], strokeWidth: 2, stroke: '#fff' }}
@@ -542,7 +546,7 @@ export function ChartCard({
               dataKey={finalDataKeys.primary}
               stroke={colors[0] || "#8B5CF6"}
               fill={`url(#gradient-${finalDataKeys.primary})`}
-              strokeWidth={3}
+              strokeWidth={strokeWidth}
               dot={false}
               activeDot={{ r: 6, fill: colors[0] || "#8B5CF6", strokeWidth: 2, stroke: '#fff' }}
               connectNulls={true}
@@ -555,7 +559,7 @@ export function ChartCard({
                 dataKey={finalDataKeys.secondary}
                 stroke={colors[1] || "#8B5CF6"}
                 fill={`url(#gradient-${finalDataKeys.secondary})`}
-                strokeWidth={3}
+                strokeWidth={strokeWidth}
                 dot={false}
                 activeDot={{ r: 6, fill: colors[1] || "#8B5CF6", strokeWidth: 2, stroke: '#fff' }}
                 connectNulls={true}
