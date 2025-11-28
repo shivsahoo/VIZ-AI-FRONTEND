@@ -56,5 +56,9 @@
     server: {
       port: 3000,
       open: true,
+      allowedHosts: [
+        "vizai-be.webknot-dev.in",
+        "vizai-llm.webknot-dev.in"
+      ]
     },
   });
