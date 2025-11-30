@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, Pin, Trash2, Plus, Clock, Filter } from "lucide-react";
+import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, Pin, Trash2, Plus, Clock, Filter, Calendar as CalendarIcon, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -38,7 +38,34 @@ import {
 import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
 import { ChartCard } from "../components/features/charts/ChartCard";
 import { toast } from "sonner";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, deleteChart, getUserDashboardCharts, getChartData, type Chart as ApiChart, type ChartData as ApiChartData } from "../services/api";
+
+// Custom styles for date picker clear button to prevent text overlap
+if (typeof document !== 'undefined') {
+  const styleId = 'datepicker-custom-styles-charts';
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      .react-datepicker-wrapper {
+        width: 100%;
+      }
+      .react-datepicker__input-container {
+        width: 100%;
+        position: relative;
+      }
+      .react-datepicker__input-container .react-datepicker__close-icon {
+        display: none !important;
+      }
+      .react-datepicker__input-container .react-datepicker__close-icon::after {
+        display: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
 import type { ChartDataConfig } from "../utils/chartData";
 import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 import {
@@ -73,6 +100,10 @@ interface Chart {
   projectId?: number | string;
   isGenerated?: boolean;
   isFavorite?: boolean;
+  dateRange?: {
+    startDate: Date | null;
+    endDate: Date | null;
+  };
 }
 
 interface ChartSuggestion {
@@ -447,13 +478,37 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   const [selectedDatabaseForGenerate, setSelectedDatabaseForGenerate] = useState("");
   const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
   const [chartDataStatus, setChartDataStatus] = useState<Record<string, ChartDataStatus>>({});
+  const [chartDateRanges, setChartDateRanges] = useState<Record<string, { startDate: Date | null; endDate: Date | null }>>({});
+  const [openDatePicker, setOpenDatePicker] = useState<string | null>(null);
 
-  const fetchChartDataForChart = useCallback(async (chart: Chart) => {
+  // Helper to format date as YYYY-MM-DD for API calls
+  const formatDateForAPI = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Helper to format date for display (e.g., "Nov 2, 2025")
+  const formatDateForDisplay = (date: Date): string => {
+    const monthNames = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ];
+    const month = monthNames[date.getMonth()];
+    const day = date.getDate();
+    const year = date.getFullYear();
+    return `${month} ${day}, ${year}`;
+  };
+
+  const fetchChartDataForChart = useCallback(async (chart: Chart, dateRangeOverride?: { startDate: Date | null; endDate: Date | null }) => {
     if (!chart.query || !chart.databaseId) {
       return;
     }
 
     const chartKey = String(chart.id);
+    // Use override if provided, otherwise check state, then chart object
+    const dateRange = dateRangeOverride || chartDateRanges[chartKey] || chart.dateRange;
 
     setChartDataStatus((prev) => ({
       ...prev,
@@ -465,7 +520,16 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     }));
 
     try {
-      const response = await getChartData(chartKey, chart.databaseId, chart.query);
+      // Only send dates if both start and end dates are selected
+      const hasBothDates = !!(dateRange?.startDate && dateRange?.endDate);
+      const fromDate = hasBothDates && dateRange?.startDate
+        ? formatDateForAPI(dateRange.startDate)
+        : undefined;
+      const toDate = hasBothDates && dateRange?.endDate
+        ? formatDateForAPI(dateRange.endDate)
+        : undefined;
+
+      const response = await getChartData(chartKey, chart.databaseId, chart.query, fromDate, toDate);
 
       if (response.success && response.data) {
         setChartDataStatus((prev) => ({
@@ -499,7 +563,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         },
       }));
     }
-  }, [getChartData]);
+  }, [chartDateRanges]);
 
   // Use only real dashboards from API, no mock data fallback
   const resolvedDashboards = dashboards;
@@ -1287,6 +1351,139 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     );
   };
 
+  const renderDateRangeButton = (chart: Chart) => {
+    const chartKey = String(chart.id);
+    const isOpen = openDatePicker === chartKey;
+
+    return (
+      <div 
+        data-date-picker="true"
+        onClick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+        onMouseUp={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+        className="relative"
+      >
+        <DatePicker
+          selectsRange
+          open={isOpen}
+          onClickOutside={() => setOpenDatePicker(null)}
+          onInputClick={() => {
+            setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
+          }}
+          startDate={chartDateRanges[String(chart.id)]?.startDate || chart.dateRange?.startDate || null}
+          endDate={chartDateRanges[String(chart.id)]?.endDate || chart.dateRange?.endDate || null}
+          onChange={(dates) => {
+            const [start, end] = dates as [Date | null, Date | null];
+            const chartKey = String(chart.id);
+            setChartDateRanges(prev => ({
+              ...prev,
+              [chartKey]: { startDate: start, endDate: end }
+            }));
+            
+            // Update chart object
+            setCharts(prev => prev.map(c => 
+              c.id === chart.id 
+                ? { ...c, dateRange: { startDate: start, endDate: end } }
+                : c
+            ));
+            
+            // Fetch data if both dates are set or both are cleared
+            // Use the updated date range directly to avoid state timing issues
+            if ((start && end) || (!start && !end)) {
+              const updatedChart = { ...chart, dateRange: { startDate: start, endDate: end } };
+              // Pass the date range directly to ensure we use the latest values
+              const dateRangeToUse = { startDate: start, endDate: end };
+              fetchChartDataForChart(updatedChart, dateRangeToUse);
+            }
+          }}
+          placeholderText="Date range"
+          dateFormat="MMM d, yyyy"
+          showPopperArrow={false}
+          popperPlacement="top-end"
+          customInput={
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              className="h-8 pl-3 pr-3 text-xs bg-white shadow-md hover:bg-gray-50 text-foreground hover:text-foreground border-border relative inline-flex items-center gap-2"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                // Toggle date picker
+                setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+              onMouseUp={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+            >
+              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-foreground" />
+              <span className="text-xs whitespace-nowrap">
+                {(() => {
+                  const range = chartDateRanges[String(chart.id)] || chart.dateRange;
+                  const start = range?.startDate;
+                  const end = range?.endDate;
+                  if (start && end) {
+                    return `${formatDateForDisplay(start)} - ${formatDateForDisplay(end)}`;
+                  }
+                  if (start) {
+                    return `${formatDateForDisplay(start)} - End date`;
+                  }
+                  return "Date range";
+                })()}
+              </span>
+              {(chartDateRanges[String(chart.id)]?.startDate || chart.dateRange?.startDate) && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const chartKey = String(chart.id);
+                    setChartDateRanges(prev => ({
+                      ...prev,
+                      [chartKey]: { startDate: null, endDate: null }
+                    }));
+                    setCharts(prev => prev.map(c => 
+                      c.id === chart.id 
+                        ? { ...c, dateRange: { startDate: null, endDate: null } }
+                        : c
+                    ));
+                    const updatedChart = { ...chart, dateRange: { startDate: null, endDate: null } };
+                    fetchChartDataForChart(updatedChart, { startDate: null, endDate: null });
+                  }}
+                  className="w-5 h-5 flex items-center justify-center hover:bg-red-100 rounded transition-colors shrink-0"
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                  }}
+                  onMouseUp={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                  }}
+                >
+                  <X className="h-3.5 w-3.5 text-red-600" strokeWidth={2.5} />
+                </button>
+              )}
+            </Button>
+          }
+        />
+      </div>
+    );
+  };
+
   const renderChartCard = (chart: Chart, isGenerated: boolean = false) => {
     const Icon = chartTypeIcons[chart.type];
     const dashboard = resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId));
@@ -1303,7 +1500,23 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       <Card
         key={chart.id}
         className="overflow-hidden border-2 border-border hover:border-primary/30 hover:shadow-xl transition-smooth cursor-pointer group hover-lift card-shadow relative"
-        onClick={() => !isGenerated && handleOpenChartPreview(chart)}
+        onClick={(e) => {
+          // Don't open preview if clicking on date picker or its container
+          const target = e.target as HTMLElement;
+          if (
+            target.closest('[data-date-picker="true"]') ||
+            target.closest('.react-datepicker-wrapper') || 
+            target.closest('.react-datepicker__input-container') ||
+            target.closest('.react-datepicker') ||
+            target.closest('.react-datepicker__portal')
+          ) {
+            e.stopPropagation();
+            return;
+          }
+          if (!isGenerated) {
+            handleOpenChartPreview(chart);
+          }
+        }}
       >
         {/* Compact Header - Overlaid on chart */}
         <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-card via-card/95 to-transparent pb-8">
@@ -1399,21 +1612,27 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         </div>
 
         {/* Chart Visualization */}
-        <div className="pt-24 px-2 pb-2">
+        <div className="pt-24 px-2 pb-12 relative">
           {renderChartPreview(chart)}
         </div>
 
-        {/* Status Badge at Bottom */}
-        {chart.status === 'published' && dashboard && (
-          <div className="px-4 pb-3">
-            <StatusBadge status="published" label={dashboard.name} />
+        {/* Bottom Section - Status Badge and Date Range */}
+        <div className="px-4 pb-3 flex items-center justify-between gap-4" data-date-picker="true">
+          {/* Status Badge */}
+          <div>
+            {chart.status === 'published' && dashboard && (
+              <StatusBadge status="published" label={dashboard.name} />
+            )}
+            {chart.status === 'draft' && (
+              <StatusBadge status="draft" />
+            )}
           </div>
-        )}
-        {chart.status === 'draft' && (
-          <div className="px-4 pb-3">
-            <StatusBadge status="draft" />
+          
+          {/* Date Range Picker */}
+          <div>
+            {renderDateRangeButton(chart)}
           </div>
-        )}
+        </div>
       </Card>
     );
   };

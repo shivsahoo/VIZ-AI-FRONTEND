@@ -104,6 +104,10 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
     if (projectDomain) {
       contextPayload.domain = projectDomain;
     }
+    // Include projectId from Step 1 if available
+    if (projectId) {
+      contextPayload.projectId = projectId;
+    }
 
     // Complete onboarding
     onComplete({

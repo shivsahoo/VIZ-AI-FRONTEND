@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { addChartToDashboard, createChart, getChartData, type Chart as SavedChart, type ChartData as ApiChartData } from "../../../services/api";
 import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../../../utils/chartData";
 import * as React from "react";
+import type { ChartSpec } from "../../../services/websocket";
 
 interface PreviewChart {
   id?: string;
@@ -43,6 +44,10 @@ interface PreviewChart {
   xAxisKey?: string;
   isLoadingData?: boolean;
   dataError?: string;
+  spec?: ChartSpec;
+  xAxisField?: string | null;
+  yAxisField?: string | null;
+  minMaxDates?: [string, string] | null;
 }
 
 interface ChartPreviewDialogProps {
@@ -249,6 +254,27 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       ? new Date(chartDataMetadata.cachedAt).toLocaleString()
       : chartDataMetadata?.cachedAt ?? null;
 
+  const resolveAxisFields = () => {
+    const resolvedXAxis =
+      chart?.xAxisKey ||
+      chart?.xAxisField ||
+      chart?.spec?.x_axis ||
+      chartDataMetadata?.xAxis ||
+      chartDataConfig.xAxisKey;
+
+    const resolvedYAxis =
+      chart?.dataKeys?.primary ||
+      chart?.yAxisField ||
+      chart?.spec?.y_axis ||
+      chartDataMetadata?.yAxis ||
+      chartDataConfig.dataKeys.primary;
+
+    return {
+      xAxis: resolvedXAxis ?? null,
+      yAxis: resolvedYAxis ?? null,
+    };
+  };
+
   const handleAddToDashboard = async (dashboardId: number | string) => {
     if (!chart || !projectId) {
       toast.error("Chart or project information is missing");
@@ -272,16 +298,20 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     setIsDropdownOpen(false); // Close dropdown to show loading state in button
 
     try {
-      const response = await addChartToDashboard({
+    const axisFields = resolveAxisFields();
+
+    const response = await addChartToDashboard({
         title: chart.name,
         query: chart.query || "",
         report: chart.reasoning || chart.description || "",
         type: chart.type,
         relevance: "",
-        is_time_based: false,
+      is_time_based: chart.spec?.is_time_based ?? false,
         chart_type: chart.type,
         dashboard_id: String(dashboardId),
         data_connection_id: databaseId,
+      x_axis: axisFields.xAxis || undefined,
+      y_axis: axisFields.yAxis || undefined,
       });
 
       if (response.success) {
@@ -323,6 +353,8 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       return;
     }
 
+    const axisFields = resolveAxisFields();
+
     isSavingDraftRef.current = true;
     setIsSavingDraft(true);
     try {
@@ -331,7 +363,10 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
         type: chart.type,
         query: chart.query,
         databaseId,
-        config: {},
+        config: {
+          xAxis: axisFields.xAxis || undefined,
+          yAxis: axisFields.yAxis || undefined,
+        },
       });
 
       if (response.success && response.data) {

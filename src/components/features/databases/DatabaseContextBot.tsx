@@ -66,6 +66,7 @@ export function DatabaseContextBot({
   const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
   const [questionsAsked, setQuestionsAsked] = useState(0);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [probableAnswers, setProbableAnswers] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -103,6 +104,7 @@ export function DatabaseContextBot({
           const question = response.message;
           setCurrentQuestion(question);
           setQuestionsAsked(response.state?.questions_asked_count || 0);
+          setProbableAnswers(response.probable_answers || []);
           
           // Add bot message with question
           addBotMessage(question);
@@ -111,6 +113,7 @@ export function DatabaseContextBot({
           const state = response.state || {};
           const kpis = state.kpis || [];
           const kpisSummary = state.kpis_summary || "";
+          setProbableAnswers([]);
           
           addBotMessage("Perfect! I've collected your KPIs and understand your data requirements. Thank you!");
           
@@ -131,6 +134,7 @@ export function DatabaseContextBot({
           console.error('[DatabaseContextBot] Error:', response.error);
           toast.error(response.error || response.message || "An error occurred");
           setIsTyping(false);
+          setProbableAnswers([]);
           addBotMessage("I'm sorry, something went wrong. Please try again.");
         }
       });
@@ -285,8 +289,9 @@ export function DatabaseContextBot({
     return suggestions;
   };
 
-  const handleSendMessage = () => {
-    if (!userInput.trim()) {
+  const sendResponse = (rawInput: string) => {
+    const trimmed = rawInput.trim();
+    if (!trimmed) {
       return;
     }
 
@@ -295,29 +300,23 @@ export function DatabaseContextBot({
       return;
     }
 
-    // Add user message
     const userMessage: Message = {
       id: messages.length + 1,
       type: "user",
-      content: userInput,
+      content: trimmed,
       timestamp: new Date()
     };
     setMessages((prev) => [...prev, userMessage]);
-
-    // Store response for reference
-    const inputValue = userInput;
     setUserInput("");
     setIsTyping(true);
-
-    // Update responses state
     setResponses((prev) => ({
       ...prev,
-      [`response_${Date.now()}`]: inputValue
+      [`response_${Date.now()}`]: trimmed
     }));
+    setProbableAnswers([]);
 
-    // Send user response via WebSocket
     const payload: Record<string, string> = {
-      user_response: inputValue
+      user_response: trimmed
     };
 
     if (databaseConnectionId) {
@@ -327,11 +326,19 @@ export function DatabaseContextBot({
     wsClient.kpiInfo(payload);
   };
 
+  const handleSendMessage = () => {
+    sendResponse(userInput);
+  };
+
   const handleKeyPress = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
+  };
+
+  const handleSuggestedAnswer = (answer: string) => {
+    sendResponse(answer);
   };
 
   const currentPlaceholder = currentQuestion 
@@ -471,28 +478,47 @@ export function DatabaseContextBot({
               )}
             </Button>
           ) : (
-            <div className="flex gap-3">
-              <Input
-                value={userInput}
-                onChange={(e) => setUserInput(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder={currentPlaceholder}
-                className="flex-1 h-12"
-                disabled={isTyping || !currentQuestion || !wsClient || !wsClient.isConnected() || !!connectionError}
-                autoFocus
-              />
-              <Button
-                onClick={handleSendMessage}
-                disabled={!userInput.trim() || isTyping || !currentQuestion || !wsClient || !wsClient.isConnected() || !!connectionError}
-                className="h-12 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white disabled:opacity-50"
-              >
-                {isTyping ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Send className="w-5 h-5" />
-                )}
-              </Button>
-            </div>
+            <>
+              {probableAnswers.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {probableAnswers.map((answer, index) => (
+                    <Button
+                      key={`${answer}-${index}`}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => handleSuggestedAnswer(answer)}
+                      disabled={!wsClient || !wsClient.isConnected() || isTyping || !!connectionError}
+                    >
+                      {answer}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-3">
+                <Input
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder={currentPlaceholder}
+                  className="flex-1 h-12"
+                  disabled={isTyping || !currentQuestion || !wsClient || !wsClient.isConnected() || !!connectionError}
+                  autoFocus
+                />
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={!userInput.trim() || isTyping || !currentQuestion || !wsClient || !wsClient.isConnected() || !!connectionError}
+                  className="h-12 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white disabled:opacity-50"
+                >
+                  {isTyping ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Send className="w-5 h-5" />
+                  )}
+                </Button>
+              </div>
+            </>
           )}
         </div>
       </div>

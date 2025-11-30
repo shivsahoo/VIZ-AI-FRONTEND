@@ -17,9 +17,27 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
-import { getDashboardCharts, getChartData, deleteChart, type ChartData } from "../services/api";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
+import { getDashboardCharts, getChartData, deleteChart, type ChartData } from "../services/api";
+
+// Custom styles for date picker to hide default clear button
+if (typeof document !== 'undefined') {
+  const styleId = 'datepicker-custom-styles-dashboard';
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      .react-datepicker__input-container .react-datepicker__close-icon {
+        display: none !important;
+      }
+      .react-datepicker__input-container .react-datepicker__close-icon::after {
+        display: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
 
 interface DashboardDetailViewProps {
   dashboardId: string;
@@ -42,6 +60,8 @@ interface ChartCardData {
   chartData?: ChartData;
   isLoadingData?: boolean;
   isExporting?: boolean;
+  xAxis?: string | null;
+  yAxis?: string | null;
 }
 
 // Helper to format time ago
@@ -74,8 +94,8 @@ export function DashboardDetailView({
   const [charts, setCharts] = useState<ChartCardData[]>([]);
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>("");
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
+  const [chartDateRanges, setChartDateRanges] = useState<Record<string, { startDate: Date | null; endDate: Date | null }>>({});
+  const [openDatePicker, setOpenDatePicker] = useState<string | null>(null);
 
   // Helper to format date as YYYY-MM-DD for API calls
   const formatDateForAPI = (date: Date): string => {
@@ -98,7 +118,7 @@ export function DashboardDetailView({
   };
 
   // Fetch chart data for a specific chart
-  const fetchChartData = async (chart: ChartCardData): Promise<ChartData | null> => {
+  const fetchChartData = async (chart: ChartCardData, dateRangeOverride?: { startDate: Date | null; endDate: Date | null }): Promise<ChartData | null> => {
     if (!chart.databaseConnectionId) {
       toast.error("Database connection not available for this chart");
       return null;
@@ -108,6 +128,9 @@ export function DashboardDetailView({
       return null;
     }
 
+    const chartKey = String(chart.id);
+    const dateRange = dateRangeOverride || chartDateRanges[chartKey];
+
     // Update chart loading state
     setCharts(prev => prev.map(c => 
       c.id === chart.id ? { ...c, isLoadingData: true } : c
@@ -115,9 +138,14 @@ export function DashboardDetailView({
 
     try {
       // Only send dates if both start and end dates are selected
-      const fromDate = startDate && endDate ? formatDateForAPI(startDate) : undefined;
-      const toDate = startDate && endDate ? formatDateForAPI(endDate) : undefined;
-      
+      const hasBothDates = !!(dateRange?.startDate && dateRange?.endDate);
+      const fromDate = hasBothDates && dateRange?.startDate
+        ? formatDateForAPI(dateRange.startDate)
+        : undefined;
+      const toDate = hasBothDates && dateRange?.endDate
+        ? formatDateForAPI(dateRange.endDate)
+        : undefined;
+
       const response = await getChartData(
         chart.id, 
         chart.databaseConnectionId, 
@@ -173,6 +201,8 @@ export function DashboardDetailView({
           query: chart.query || '', // Extract query from API response
           databaseConnectionId: chart.connection_id || '',
           created_at: chart.created_at,
+          xAxis: (chart as any).x_axis ?? null,
+          yAxis: (chart as any).y_axis ?? null,
         }));
         setCharts(mappedCharts);
         
@@ -206,18 +236,6 @@ export function DashboardDetailView({
   useEffect(() => {
     fetchDashboardCharts();
   }, [fetchDashboardCharts]);
-
-  // Refetch chart data when date range changes (only when both dates are selected)
-  useEffect(() => {
-    if (charts.length > 0 && startDate && endDate) {
-      charts.forEach((chart) => {
-        if (chart.query && chart.databaseConnectionId) {
-          fetchChartData(chart);
-        }
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startDate, endDate]);
 
   const handleEditChart = (chart: ChartCardData) => {
     // Pass chart info to parent
@@ -278,6 +296,7 @@ export function DashboardDetailView({
       toast.success(`"${chartData.title}" pinned to Home Dashboard`);
     }
   };
+
 
   const convertDataToCSV = (rows: any[]): string => {
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -379,7 +398,15 @@ export function DashboardDetailView({
   };
 
   // Determine data keys based on chart type
-  const getDataKeys = (_chart: ChartCardData, data: any[]) => {
+  const getDataKeys = (chart: ChartCardData, data: any[]) => {
+    const metadataYAxis = chart.chartData?.metadata?.yAxis;
+    if (metadataYAxis) {
+      return { primary: metadataYAxis };
+    }
+    if (chart.yAxis) {
+      return { primary: chart.yAxis };
+    }
+
     if (data.length === 0) return { primary: 'value' };
     
     const keys = Object.keys(data[0]);
@@ -389,10 +416,133 @@ export function DashboardDetailView({
     return { primary: keys[0] };
   };
 
-  const getXAxisKey = (data: any[]) => {
+  const getXAxisKey = (chart: ChartCardData, data: any[]) => {
+    const metadataXAxis = chart.chartData?.metadata?.xAxis;
+    if (metadataXAxis) {
+      return metadataXAxis;
+    }
+    if (chart.xAxis) {
+      return chart.xAxis;
+    }
+
     if (data.length === 0) return 'name';
     const keys = Object.keys(data[0]);
     return keys[0] || 'name';
+  };
+
+  const renderDateRangeButton = (chart: ChartCardData) => {
+    const chartKey = String(chart.id);
+    const isOpen = openDatePicker === chartKey;
+
+    return (
+      <div 
+        data-date-picker="true"
+        onClick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+        onMouseUp={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+        className="relative"
+      >
+        <DatePicker
+          selectsRange
+          open={isOpen}
+          onClickOutside={() => setOpenDatePicker(null)}
+          onInputClick={() => {
+            setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
+          }}
+          startDate={chartDateRanges[chartKey]?.startDate || null}
+          endDate={chartDateRanges[chartKey]?.endDate || null}
+          onChange={(dates) => {
+            const [start, end] = dates as [Date | null, Date | null];
+            setChartDateRanges(prev => ({
+              ...prev,
+              [chartKey]: { startDate: start, endDate: end }
+            }));
+            
+            // Fetch data if both dates are set or both are cleared
+            if ((start && end) || (!start && !end)) {
+              const dateRangeToUse = { startDate: start, endDate: end };
+              fetchChartData(chart, dateRangeToUse);
+            }
+          }}
+          placeholderText="Date range"
+          dateFormat="MMM d, yyyy"
+          showPopperArrow={false}
+          popperPlacement="top-end"
+          customInput={
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              className="h-8 pl-3 pr-3 text-xs bg-white shadow-md hover:bg-gray-50 text-foreground hover:text-foreground border-border relative inline-flex items-center gap-2"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                // Toggle date picker
+                setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+              onMouseUp={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+            >
+              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-foreground" />
+              <span className="text-xs whitespace-nowrap">
+                {(() => {
+                  const range = chartDateRanges[chartKey];
+                  const start = range?.startDate;
+                  const end = range?.endDate;
+                  if (start && end) {
+                    return `${formatDateForDisplay(start)} - ${formatDateForDisplay(end)}`;
+                  }
+                  if (start) {
+                    return `${formatDateForDisplay(start)} - End date`;
+                  }
+                  return "Date range";
+                })()}
+              </span>
+              {chartDateRanges[chartKey]?.startDate && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setChartDateRanges(prev => ({
+                      ...prev,
+                      [chartKey]: { startDate: null, endDate: null }
+                    }));
+                    fetchChartData(chart, { startDate: null, endDate: null });
+                  }}
+                  className="w-5 h-5 flex items-center justify-center hover:bg-red-100 rounded transition-colors shrink-0"
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                  }}
+                  onMouseUp={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                  }}
+                >
+                  <X className="h-3.5 w-3.5 text-red-600" strokeWidth={2.5} />
+                </button>
+              )}
+            </Button>
+          }
+        />
+      </div>
+    );
   };
 
   return (
@@ -429,47 +579,6 @@ export function DashboardDetailView({
           </div>
           
           <div className="flex items-center gap-3">
-            {/* Date Range Picker */}
-            <DatePicker
-              selectsRange
-              startDate={startDate}
-              endDate={endDate}
-              onChange={(dates) => {
-                const [start, end] = dates as [Date | null, Date | null];
-                setStartDate(start);
-                setEndDate(end);
-              }}
-              isClearable
-              clearButtonTitle="Clear"
-              placeholderText="Pick a date range"
-              dateFormat="MMM d, yyyy"
-              showPopperArrow={false}
-              popperPlacement="bottom-end"
-              wrapperClassName="w-full"
-              customInput={
-                <Button
-                  variant="outline"
-                  type="button"
-                  className="w-[260px] sm:w-[280px] justify-start text-left font-normal border-border h-10"
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
-                  <span className="truncate">
-                    {startDate && endDate ? (
-                      <>
-                        {formatDateForDisplay(startDate)} - {formatDateForDisplay(endDate)}
-                      </>
-                    ) : startDate ? (
-                      <>
-                        {formatDateForDisplay(startDate)} - <span className="text-muted-foreground">End date</span>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">Pick a date range</span>
-                    )}
-                  </span>
-                </Button>
-              }
-            />
-            
             <GradientButton 
               onClick={() => {
                 if (onOpenAIAssistant) {
@@ -570,7 +679,7 @@ export function DashboardDetailView({
             {charts.map((chart) => {
               const chartData = getChartDisplayData(chart);
               const dataKeys = getDataKeys(chart, chartData);
-              const xAxisKey = getXAxisKey(chartData);
+              const xAxisKey = getXAxisKey(chart, chartData);
               const numericId = parseInt(chart.id.replace(/-/g, '').substring(0, 8), 16) || 0;
               const isChartPinned = isPinned(numericId);
 
@@ -655,6 +764,11 @@ export function DashboardDetailView({
                       </div>
                     </div>
                   )}
+
+                  {/* Date Range Picker - Bottom Right */}
+                  <div className="mt-4 flex justify-end">
+                    {renderDateRangeButton(chart)}
+                  </div>
                 </Card>
               );
             })}

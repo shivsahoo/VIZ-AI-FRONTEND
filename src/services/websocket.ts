@@ -47,6 +47,7 @@ export interface WebSocketResponse {
   state?: Record<string, any>;
   error?: string;
   session_id?: string;
+  probable_answers?: string[];
 }
 
 // Chart Spec Type
@@ -59,6 +60,9 @@ export interface ChartSpec {
   relevance: number;
   is_time_based: boolean;
   data_connection_id: string;
+  x_axis?: string | null;
+  y_axis?: string | null;
+  min_max_dates?: [string, string] | null;
 }
 
 // Event Handlers
@@ -217,7 +221,7 @@ export class VizAIWebSocket {
     }
 
     // Prepare payload with auth token inside payload
-    const payload: Record<string, any> = { ...message.payload, domain: 'admin' };
+    const payload: Record<string, any> = { domain: 'admin', ...message.payload };
     
     // Include auth token in payload (default behavior)
     if (includeAuthToken) {
@@ -413,6 +417,30 @@ export class VizAIWebSocket {
 
     this.send({
       event_type: 'chart_creation',
+      user_id: this.userId,
+      payload: formattedPayload,
+    });
+  }
+
+  /**
+   * 5. Chart Regeneration - Append 3 new chart suggestions based on prior context
+   */
+  regenerate(payload: {
+    data_connection_id: string;
+    role?: string;
+    domain?: string;
+    product_info?: string;
+    kpi_info?: string;
+    dashboard_kpi_info?: string;
+    min_max_dates?: [string, string];
+  }): void {
+    const formattedPayload: Record<string, any> = { ...payload };
+    if (payload.min_max_dates) {
+      formattedPayload.min_max_dates = payload.min_max_dates;
+    }
+
+    this.send({
+      event_type: 'regenerate',
       user_id: this.userId,
       payload: formattedPayload,
     });

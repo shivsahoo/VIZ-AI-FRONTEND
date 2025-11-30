@@ -529,6 +529,29 @@ export const updateProject = async (projectId: string, data: Partial<Project>): 
 };
 
 /**
+ * Update project KPI information
+ */
+export const updateProjectKpiInfo = async (projectId: string, kpiInfo: string): Promise<ApiResponse<void>> => {
+  try {
+    await apiRequest(`/api/v1/backend/projects/${projectId}/kpi-info`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        kpi_info: kpiInfo,
+      }),
+    });
+    return { success: true };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'UPDATE_PROJECT_KPI_FAILED',
+        message: error.message || 'Failed to update project KPI information',
+      },
+    };
+  }
+};
+
+/**
  * Delete project
  */
 export const deleteProject = async (projectId: string): Promise<ApiResponse<void>> => {
@@ -671,6 +694,8 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
   connection_id: string | null;
   status?: string | null;
   chart_type?: string | null;
+  x_axis?: string | null;
+  y_axis?: string | null;
 }>>> => {
   try {
     const response = await apiRequest<{
@@ -683,6 +708,8 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
         connection_id: string | null;
         status?: string | null;
         chart_type?: string | null;
+        x_axis?: string | null;
+        y_axis?: string | null;
       }>;
     }>(`/api/v1/backend/dashboards/${dashboardId}/charts`);
 
@@ -825,6 +852,8 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
         datasourceConnectionId: string | null; // Backend uses camelCase
         created_at: string;
         isFavorite?: boolean;
+        x_axis?: string | null;
+        y_axis?: string | null;
       }>;
     }>('/api/v1/backend/charts');
 
@@ -842,7 +871,10 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
           projectId, // Will need to get from backend or context
           databaseId: chart.datasourceConnectionId || undefined,
           query: chart.query,
-          config: {},
+          config: {
+            xAxis: chart.x_axis ?? undefined,
+            yAxis: chart.y_axis ?? undefined,
+          },
           createdAt: chart.created_at,
           updatedAt: chart.created_at,
         })),
@@ -873,6 +905,8 @@ export const getUserDashboardCharts = async (): Promise<ApiResponse<Array<{
     type?: string | null;
     status?: string | null;
     database_connection_id?: string | null;
+    x_axis?: string | null;
+    y_axis?: string | null;
   }>;
 }>>> => {
   try {
@@ -890,6 +924,8 @@ export const getUserDashboardCharts = async (): Promise<ApiResponse<Array<{
           type?: string | null;
           status?: string | null;
           database_connection_id?: string | null;
+          x_axis?: string | null;
+          y_axis?: string | null;
         }>;
       }>;
     }>('/api/v1/backend/dashboards/user/charts');
@@ -938,6 +974,21 @@ function mapChartType(backendType?: string | null): 'line' | 'bar' | 'pie' | 'ar
  */
 export const createChart = async (projectId: string, data: Partial<Chart>): Promise<ApiResponse<Chart>> => {
   try {
+    const requestBody: Record<string, any> = {
+      title: data.name || 'New Chart',
+      query: data.query || '',
+      chart_type: data.type || 'line',
+      type: data.type || 'line',
+      data_connection_id: data.databaseId,
+    };
+
+    if (data.config?.xAxis) {
+      requestBody.x_axis = data.config.xAxis;
+    }
+    if (data.config?.yAxis) {
+      requestBody.y_axis = data.config.yAxis;
+    }
+
     const response = await apiRequest<{
       id: string;
       title: string;
@@ -945,13 +996,7 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
       chart_type: string;
     }>(`/api/v1/backend/projects/${projectId}/save-chart`, {
       method: 'POST',
-      body: JSON.stringify({
-        title: data.name || 'New Chart',
-        query: data.query || '',
-        chart_type: data.type || 'line',
-        type: data.type || 'line',
-        data_connection_id: data.databaseId,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     return {
@@ -963,7 +1008,11 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
         projectId,
         databaseId: data.databaseId,
         query: response.query,
-        config: data.config || {},
+        config: {
+          xAxis: data.config?.xAxis,
+          yAxis: data.config?.yAxis,
+          color: data.config?.color,
+        },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
@@ -993,6 +1042,8 @@ export const addChartToDashboard = async (data: {
   type?: string;
   relevance?: string;
   is_time_based?: boolean;
+  x_axis?: string | null;
+  y_axis?: string | null;
 }): Promise<ApiResponse<{ chart_id: string }>> => {
   try {
     // Prepare request body - only include fields that have values
@@ -1018,6 +1069,13 @@ export const addChartToDashboard = async (data: {
       if (!isNaN(relevanceValue)) {
         requestBody.relevance = relevanceValue;
       }
+    }
+
+    if (data.x_axis) {
+      requestBody.x_axis = data.x_axis;
+    }
+    if (data.y_axis) {
+      requestBody.y_axis = data.y_axis;
     }
 
     const response = await apiRequest<{

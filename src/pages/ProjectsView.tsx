@@ -7,7 +7,7 @@ import { OnboardingFlow } from "./OnboardingFlow";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import { KPIInfoBot } from "../components/features/ai/KPIInfoBot";
 import { toast } from "sonner";
-import { getProjects, createProject, getCurrentUser, deleteProject, type Project as ApiProject } from "../services/api";
+import { getProjects, createProject, getCurrentUser, deleteProject, updateProjectKpiInfo, type Project as ApiProject } from "../services/api";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -136,63 +136,121 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     database: any;
   }) => {
     try {
-      // Create project via API with enhanced description if available
-      const description = projectData.context?.enhanced_description || projectData.description;
-      const response = await createProject({
-        name: projectData.name,
-        description: description,
-      });
-
-      if (response.success && response.data) {
-        toast.success(`Project "${projectData.name}" created successfully!`);
+      // Check if project was already created in Step 1 (via WebSocket project_info workflow)
+      const existingProjectId = projectData.context?.projectId;
+      
+      let projectId: string;
+      let createdAt: string;
+      
+      if (existingProjectId) {
+        // Project was already created in Step 1, just use that ID
+        console.log('[ProjectsView] Using existing project ID from Step 1:', existingProjectId);
+        projectId = existingProjectId;
+        createdAt = new Date().toISOString();
         
-        // Add new project to list with UI formatting
-        const colors = getProjectGradient(projects.length);
-        const newProject: UIProject = {
-          ...response.data,
-          dashboards: 0,
-          databases: 0,
-          team: 1,
-          lastActive: "just now",
-          gradient: colors.gradient,
-          iconBg: colors.iconBg,
-        };
-        setProjects([newProject, ...projects]);
-        
-        // Store project data for KPI collection
-        setPendingProjectData({
-          projectId: response.data.id,
-          projectName: projectData.name,
-          projectDescription: projectData.description,
-          projectDomain: projectData.context?.domain,
-          enhancedDescription: projectData.context?.enhanced_description,
+        toast.success(`Project "${projectData.name}" setup completed!`);
+      } else {
+        // Fallback: Create project via API (shouldn't normally happen in the new flow)
+        console.log('[ProjectsView] No existing project ID, creating new project');
+        const description = projectData.context?.enhanced_description || projectData.description;
+        const response = await createProject({
+          name: projectData.name,
+          description: description,
         });
 
-        // Show KPI collection flow
-        setShowNewProjectFlow(false);
-        setShowKPICollection(true);
-      } else {
-        toast.error(response.error?.message || "Failed to create project");
+        if (!response.success || !response.data) {
+          toast.error(response.error?.message || "Failed to create project");
+          return;
+        }
+        
+        projectId = response.data.id;
+        createdAt = response.data.createdAt;
+        toast.success(`Project "${projectData.name}" created successfully!`);
       }
+      
+      // Add new project to list with UI formatting
+      const colors = getProjectGradient(projects.length);
+      const newProject: UIProject = {
+        id: projectId,
+        name: projectData.name,
+        description: projectData.context?.enhanced_description || projectData.description || '',
+        createdAt: createdAt,
+        updatedAt: createdAt,
+        owner: '', // Will be populated by backend
+        memberCount: 1,
+        databaseCount: 1, // Database was connected in the flow
+        dashboardCount: 0,
+        dashboards: 0,
+        databases: 1,
+        team: 1,
+        lastActive: "just now",
+        gradient: colors.gradient,
+        iconBg: colors.iconBg,
+      };
+      setProjects([newProject, ...projects]);
+      
+      // Store project data for KPI collection
+      setPendingProjectData({
+        projectId: projectId,
+        projectName: projectData.name,
+        projectDescription: projectData.description,
+        projectDomain: projectData.context?.domain,
+        enhancedDescription: projectData.context?.enhanced_description,
+      });
+
+      // Show KPI collection flow
+      setShowNewProjectFlow(false);
+      setShowKPICollection(true);
     } catch (err: any) {
-      toast.error(err.message || "An error occurred while creating project");
+      toast.error(err.message || "An error occurred while setting up project");
     }
   };
 
-  const handleKPICollectionComplete = (data: {
+  const handleKPICollectionComplete = async (data: {
     kpis: string[];
     kpisSummary: string;
   }) => {
-    // KPI collection complete - you can save KPIs to project if needed
+    // KPI collection complete - save KPIs to project
     console.log("KPIs collected:", data);
-    toast.success("KPIs collected successfully!");
     
-    // Close KPI collection and select the project
-    setShowKPICollection(false);
     if (pendingProjectData) {
-      onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId);
+      // Save KPI information to the project
+      if (data.kpisSummary) {
+        try {
+          const response = await updateProjectKpiInfo(
+            pendingProjectData.projectId, 
+            data.kpisSummary
+          );
+          
+          if (!response.success) {
+            console.error("Failed to save KPI info:", response.error?.message);
+            // Don't block navigation if KPI save fails, just log it
+          }
+        } catch (error) {
+          console.error("Error saving KPI info:", error);
+          // Don't block navigation if KPI save fails
+        }
+      }
+      
+      // Show success toast with project details
+      toast.success(
+        `🎉 Project "${pendingProjectData.projectName}" created successfully! Redirecting to your workspace...`,
+        {
+          duration: 3000,
+        }
+      );
+      
+      // Navigate to the created project after a brief delay
+      setTimeout(() => {
+        setShowKPICollection(false);
+        onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId);
+        setPendingProjectData(null);
+      }, 500);
+    } else {
+      toast.success("KPIs collected successfully!");
+      setShowKPICollection(false);
+      setPendingProjectData(null);
     }
-    setPendingProjectData(null);
   };
 
   const handleKPICollectionCancel = () => {
