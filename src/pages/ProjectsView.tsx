@@ -189,18 +189,31 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
       };
       setProjects([newProject, ...projects]);
       
-      // Store project data for KPI collection
-      setPendingProjectData({
-        projectId: projectId,
-        projectName: projectData.name,
-        projectDescription: projectData.description,
-        projectDomain: projectData.context?.domain,
-        enhancedDescription: projectData.context?.enhanced_description,
-      });
+      // KPIs were already collected during onboarding Step 3 (DatabaseContextBot)
+      // Save KPI information if available from onboarding
+      const kpisSummary = projectData.context?.kpisSummary;
+      if (kpisSummary) {
+        try {
+          const response = await updateProjectKpiInfo(projectId, kpisSummary);
+          if (!response.success) {
+            console.error("Failed to save KPI info:", response.error?.message);
+          }
+        } catch (error) {
+          console.error("Error saving KPI info:", error);
+        }
+      }
 
-      // Show KPI collection flow
+      // Navigate directly to the created project (skip second KPI collection)
       setShowNewProjectFlow(false);
-      setShowKPICollection(true);
+      
+      toast.success(
+        `🎉 Project "${projectData.name}" created successfully! Redirecting to your workspace...`,
+        { duration: 3000 }
+      );
+      
+      setTimeout(() => {
+        onProjectSelect(projectData.name, projectId);
+      }, 500);
     } catch (err: any) {
       toast.error(err.message || "An error occurred while setting up project");
     }

@@ -92,6 +92,8 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
       description: string;
       charts: string[];
     }>;
+    kpis?: string[];
+    kpisSummary?: string;
   }) => {
     const contextPayload: Record<string, string> = {
       ...projectContext,
@@ -107,6 +109,10 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
     // Include projectId from Step 1 if available
     if (projectId) {
       contextPayload.projectId = projectId;
+    }
+    // Include KPI data collected from Step 3
+    if (contextData.kpisSummary) {
+      contextPayload.kpisSummary = contextData.kpisSummary;
     }
 
     // Complete onboarding

@@ -67,6 +67,7 @@ export function DatabaseContextBot({
   const [questionsAsked, setQuestionsAsked] = useState(0);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [probableAnswers, setProbableAnswers] = useState<string[]>([]);
+  const isCompletedRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -98,6 +99,14 @@ export function DatabaseContextBot({
       // Handle kpi_info responses
       client.on('kpi_info', (response: WebSocketResponse) => {
         console.log('[DatabaseContextBot] Received response:', response);
+        console.log('[DatabaseContextBot] Questions asked:', response.state?.questions_asked_count);
+        console.log('[DatabaseContextBot] Is completed flag:', isCompletedRef.current);
+
+        // Prevent processing if already completed
+        if (isCompletedRef.current) {
+          console.log('[DatabaseContextBot] Already completed, ignoring response');
+          return;
+        }
 
         if (response.status === 'collecting') {
           // Show question to user
@@ -110,6 +119,9 @@ export function DatabaseContextBot({
           addBotMessage(question);
         } else if (response.status === 'completed') {
           // KPI collection complete
+          console.log('[DatabaseContextBot] KPI collection completed, setting completion flag');
+          isCompletedRef.current = true;
+          
           const state = response.state || {};
           const kpis = state.kpis || [];
           const kpisSummary = state.kpis_summary || "";
@@ -118,6 +130,12 @@ export function DatabaseContextBot({
           addBotMessage("Perfect! I've collected your KPIs and understand your data requirements. Thank you!");
           
           setTimeout(() => {
+            // Disconnect WebSocket before calling onComplete to prevent any further messages
+            if (client && client.isConnected()) {
+              console.log('[DatabaseContextBot] Disconnecting WebSocket after completion');
+              client.disconnect();
+            }
+            
             // Generate dashboard suggestions based on collected KPIs
             const suggestedDashboards = generateDashboardSuggestions(responses);
             
@@ -441,6 +459,7 @@ export function DatabaseContextBot({
                 onClick={() => {
                   setConnectionError(null);
                   setHasStarted(false);
+                  isCompletedRef.current = false;
                   setMessages([{
                     id: 1,
                     type: "bot",
