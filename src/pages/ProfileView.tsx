@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { User, Mail, Lock, Shield, Trash2, Upload } from "lucide-react";
+import { User, Mail, Lock, Shield, Trash2, Upload, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
@@ -8,6 +8,7 @@ import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { Separator } from "../components/ui/separator";
 import { Switch } from "../components/ui/switch";
 import { toast } from "sonner";
+import { updateProfile, changePassword, deleteAccount } from "../services/api";
 
 interface ProfileViewProps {
   user: {
@@ -16,16 +17,22 @@ interface ProfileViewProps {
     role?: string;
   };
   onUpdateProfile: (user: { name: string; email: string }) => void;
+  onLogout?: () => void;
 }
 
-export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
+export function ProfileView({ user, onUpdateProfile, onLogout }: ProfileViewProps) {
   const [name, setName] = useState(user.name);
   const [email, setEmail] = useState(user.email);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const handleUpdateProfile = (e: React.FormEvent) => {
+  const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!name || !email) {
@@ -33,11 +40,33 @@ export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
       return;
     }
 
-    onUpdateProfile({ name, email });
-    toast.success("Profile updated successfully");
+    // Check if anything changed
+    if (name === user.name && email === user.email) {
+      toast.info("No changes to save");
+      return;
+    }
+
+    setIsUpdatingProfile(true);
+    try {
+      const result = await updateProfile({
+        username: name,
+        email: email,
+      });
+
+      if (result.success && result.data) {
+        onUpdateProfile({ name: result.data.user.username, email: result.data.user.email });
+        toast.success("Profile updated successfully");
+      } else {
+        toast.error(result.error?.message || "Failed to update profile");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while updating profile");
+    } finally {
+      setIsUpdatingProfile(false);
+    }
   };
 
-  const handleChangePassword = (e: React.FormEvent) => {
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!currentPassword || !newPassword || !confirmPassword) {
@@ -55,15 +84,66 @@ export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
       return;
     }
 
-    toast.success("Password updated successfully");
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
+    if (newPassword === currentPassword) {
+      toast.error("New password must be different from current password");
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const result = await changePassword({
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
+
+      if (result.success) {
+        toast.success("Password changed successfully");
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+      } else {
+        toast.error(result.error?.message || "Failed to change password");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while changing password");
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
   const handleDeleteAccount = () => {
-    if (window.confirm("Are you sure you want to delete your account? This action cannot be undone.")) {
-      toast.error("Account deletion is not available in demo mode");
+    setShowDeleteConfirm(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletePassword) {
+      toast.error("Please enter your password to confirm deletion");
+      return;
+    }
+
+    setIsDeletingAccount(true);
+    try {
+      const result = await deleteAccount({
+        password: deletePassword,
+      });
+
+      if (result.success) {
+        toast.success("Account deleted successfully");
+        // Clear local storage and logout
+        localStorage.clear();
+        if (onLogout) {
+          onLogout();
+        }
+      } else {
+        toast.error(result.error?.message || "Failed to delete account");
+        setDeletePassword("");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while deleting account");
+      setDeletePassword("");
+    } finally {
+      setIsDeletingAccount(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -120,6 +200,7 @@ export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="John Doe"
+                      className="border-2 border-border/60 focus:border-primary hover:border-border"
                     />
                   </div>
                   <div className="space-y-2">
@@ -130,6 +211,7 @@ export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@company.com"
+                      className="border-2 border-border/60 focus:border-primary hover:border-border"
                     />
                   </div>
                 </div>
@@ -137,9 +219,17 @@ export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
                 <div className="flex justify-end">
                   <Button
                     type="submit"
+                    disabled={isUpdatingProfile}
                     className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
                   >
-                    Save Changes
+                    {isUpdatingProfile ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      "Save Changes"
+                    )}
                   </Button>
                 </div>
               </form>
@@ -164,6 +254,7 @@ export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete="current-password"
+                    className="border-2 border-border/60 focus:border-primary hover:border-border"
                   />
                 </div>
 
@@ -177,6 +268,7 @@ export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="••••••••"
                       autoComplete="new-password"
+                      className="border-2 border-border/60 focus:border-primary hover:border-border"
                     />
                   </div>
                   <div className="space-y-2">
@@ -188,6 +280,7 @@ export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="••••••••"
                       autoComplete="new-password"
+                      className="border-2 border-border/60 focus:border-primary hover:border-border"
                     />
                   </div>
                 </div>
@@ -196,8 +289,16 @@ export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
                   <Button
                     type="submit"
                     variant="outline"
+                    disabled={isChangingPassword}
                   >
-                    Update Password
+                    {isChangingPassword ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Updating...
+                      </>
+                    ) : (
+                      "Update Password"
+                    )}
                   </Button>
                 </div>
               </form>
@@ -212,24 +313,82 @@ export function ProfileView({ user, onUpdateProfile }: ProfileViewProps) {
                 <h3 className="text-lg text-foreground">Danger Zone</h3>
               </div>
 
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 rounded-lg bg-destructive/5 border border-destructive/20">
-                  <div>
-                    <p className="text-sm text-foreground">Delete Account</p>
-                    <p className="text-xs text-muted-foreground">
-                      Permanently delete your account and all associated data
-                    </p>
+              {!showDeleteConfirm ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-destructive/5 border border-destructive/20">
+                    <div>
+                      <p className="text-sm text-foreground">Delete Account</p>
+                      <p className="text-xs text-muted-foreground">
+                        Permanently delete your account and all associated data
+                      </p>
+                    </div>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleDeleteAccount}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete Account
+                    </Button>
                   </div>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={handleDeleteAccount}
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete Account
-                  </Button>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-4 p-4 rounded-lg bg-destructive/5 border border-destructive/20">
+                  <div>
+                    <p className="text-sm text-foreground font-medium mb-2">
+                      Are you absolutely sure?
+                    </p>
+                    <p className="text-xs text-muted-foreground mb-4">
+                      This action cannot be undone. This will permanently delete your account and remove all your data from our servers.
+                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="delete-password" className="text-sm">
+                        Enter your password to confirm
+                      </Label>
+                      <Input
+                        id="delete-password"
+                        type="password"
+                        value={deletePassword}
+                        onChange={(e) => setDeletePassword(e.target.value)}
+                        placeholder="Enter your password"
+                        disabled={isDeletingAccount}
+                        className="border-2 border-border/60 focus:border-primary hover:border-border"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setShowDeleteConfirm(false);
+                        setDeletePassword("");
+                      }}
+                      disabled={isDeletingAccount}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleConfirmDelete}
+                      disabled={isDeletingAccount || !deletePassword}
+                    >
+                      {isDeletingAccount ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Deleting...
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Delete My Account
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
         </div>

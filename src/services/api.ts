@@ -86,12 +86,17 @@ async function apiRequest<T>(
   const token = getAccessToken();
   const url = `${API_BASE_URL}${endpoint}`;
 
+  // Determine if endpoint is public (doesn't need authentication)
+  const publicEndpoints = ['/auth/login', '/auth/register-super-admin', '/auth/refresh-token'];
+  const isPublicEndpoint = publicEndpoints.some(ep => endpoint.includes(ep));
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
   };
 
-  if (token && !endpoint.includes('/auth/')) {
+  // Add token to all endpoints except public ones
+  if (token && !isPublicEndpoint) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
@@ -102,7 +107,7 @@ async function apiRequest<T>(
   });
 
   // Handle token refresh on 401
-  if (response.status === 401 && token && !endpoint.includes('/auth/')) {
+  if (response.status === 401 && token && !isPublicEndpoint) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       // Retry with new token
@@ -346,6 +351,111 @@ export const register = async (data: RegisterData): Promise<ApiResponse<AuthResp
 export const logout = async (): Promise<ApiResponse<void>> => {
   clearTokens();
   return { success: true };
+};
+
+// ============================================================================
+// PROFILE SETTINGS
+// ============================================================================
+
+export interface UpdateProfileData {
+  username?: string;
+  email?: string;
+}
+
+export interface UpdateProfileResponse {
+  message: string;
+  user: {
+    id: string;
+    username: string;
+    email: string;
+  };
+}
+
+export interface ChangePasswordData {
+  current_password: string;
+  new_password: string;
+}
+
+export interface DeleteAccountData {
+  password: string;
+}
+
+/**
+ * Update user profile (username and/or email)
+ */
+export const updateProfile = async (data: UpdateProfileData): Promise<ApiResponse<UpdateProfileResponse>> => {
+  try {
+    const response = await apiRequest<UpdateProfileResponse>('/api/v1/auth/profile/update', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'UPDATE_PROFILE_FAILED',
+        message: error.message || 'Failed to update profile',
+      },
+    };
+  }
+};
+
+/**
+ * Change user password
+ */
+export const changePassword = async (data: ChangePasswordData): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{ message: string }>('/api/v1/auth/profile/change-password', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'CHANGE_PASSWORD_FAILED',
+        message: error.message || 'Failed to change password',
+      },
+    };
+  }
+};
+
+/**
+ * Delete user account
+ */
+export const deleteAccount = async (data: DeleteAccountData): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{ message: string }>('/api/v1/auth/profile/delete-account', {
+      method: 'DELETE',
+      body: JSON.stringify(data),
+    });
+
+    // Clear tokens after successful deletion
+    clearTokens();
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'DELETE_ACCOUNT_FAILED',
+        message: error.message || 'Failed to delete account',
+      },
+    };
+  }
 };
 
 // ============================================================================

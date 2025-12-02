@@ -158,7 +158,7 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
         <div className="mb-8 md:mb-12">
           <div className="flex items-center justify-center gap-2 md:gap-3">
             {[
-              { number: 1, label: "Project Setup", icon: Sparkles },
+              { number: 1, label: "Product Setup", icon: Sparkles },
               { number: 2, label: "Connect Database", icon: Database },
               { number: 3, label: "Understand Data", icon: Sparkles }
             ].map((step, index) => {

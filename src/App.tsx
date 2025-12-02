@@ -235,7 +235,25 @@ export default function App() {
   };
 
   const handleUpdateProfile = (user: { name: string; email: string }) => {
-    setCurrentUser({ ...user, role: currentUser!.role });
+    if (currentUser) {
+      setCurrentUser({ ...user, role: currentUser.role });
+    }
+  };
+
+  const handleLogout = () => {
+    // Clear authentication state
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    setSelectedProject(null);
+    setSelectedProjectId(null);
+    setCurrentView('home');
+    setWorkspaceTab('home');
+    
+    // Clear local storage
+    localStorage.removeItem('vizai_access_token');
+    localStorage.removeItem('vizai_refresh_token');
+    localStorage.removeItem('vizai_last_project');
+    localStorage.removeItem('vizai_last_project_id');
   };
 
   const handleThemeToggle = () => {
@@ -295,7 +313,11 @@ export default function App() {
         return <ProjectsView onProjectSelect={handleProjectSelect} />;
       case 'profile':
         return currentUser ? (
-          <ProfileView user={currentUser} onUpdateProfile={handleUpdateProfile} />
+          <ProfileView 
+            user={currentUser} 
+            onUpdateProfile={handleUpdateProfile}
+            onLogout={handleLogout}
+          />
         ) : null;
       default:
         return <ProjectsView onProjectSelect={handleProjectSelect} />;
