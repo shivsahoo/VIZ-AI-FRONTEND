@@ -368,6 +368,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
 
     const handleRegenerate = (response: WebSocketResponse) => {
       if (response.status === 'collecting' || response.status === 'completed') {
+        setIsGenerating(false);
         const chartSpecs = (response.state?.chart_specs as ChartSpec[]) || [];
         if (chartSpecs.length > 0) {
           const processChartSpecs = (chartSpecs: ChartSpec[], message?: string) => {
@@ -395,19 +396,24 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
 
             const contentMessage = message || `I've generated ${suggestions.length} new chart suggestion${suggestions.length > 1 ? 's' : ''}.`;
             
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: prev.length + 1,
-                type: 'chart-suggestions',
-                content: contentMessage,
-                chartSuggestions: suggestions,
-              },
-            ]);
+            // Remove the "Generating more charts..." message
+            setMessages((prev) => {
+              const filtered = prev.filter(m => m.content !== 'Generating more chart suggestions...');
+              return [
+                ...filtered,
+                {
+                  id: filtered.length + 1,
+                  type: 'chart-suggestions',
+                  content: contentMessage,
+                  chartSuggestions: suggestions,
+                },
+              ];
+            });
           };
           processChartSpecs(chartSpecs, response.message);
         }
       } else if (response.status === 'error') {
+        setIsGenerating(false);
         toast.error(response.error || response.message || "Failed to regenerate charts");
       }
     };
@@ -435,6 +441,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
 
     return () => {
       client.off('chart_creation', handleChartCreation);
+      client.off('regenerate', handleRegenerate);
       client.disconnect();
       setWsClient(null);
     };
@@ -709,6 +716,49 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       console.error('[AIAssistant] Failed to send chart creation request:', error);
       setIsGenerating(false);
       toast.error(error?.message || 'Failed to submit your request. Please try again.');
+    }
+  };
+
+  const handleRegenerateCharts = () => {
+    if (!wsClient || !wsClient.isConnected()) {
+      toast.error(isConnecting ? "Still connecting to AI assistant..." : "AI assistant is not connected. Please try again.");
+      return;
+    }
+
+    if (!selectedDatabase) {
+      toast.error("Please select a database first.");
+      return;
+    }
+
+    const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
+    if (!selectedDb) {
+      toast.error("Please select a valid database connection first.");
+      return;
+    }
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isRealDatabase = uuidRegex.test(String(selectedDb.id));
+    if (!isRealDatabase && databases.length > 0) {
+      toast.error("Please select a valid database connection from the list.");
+      return;
+    }
+
+    setIsGenerating(true);
+    setMessages(prev => [
+      ...prev,
+      { id: prev.length + 1, type: 'ai', content: 'Generating more chart suggestions...' }
+    ]);
+
+    try {
+      wsClient.regenerate({
+        data_connection_id: String(selectedDb.id),
+        role: 'Analyst',
+        domain: 'admin',
+      });
+    } catch (error: any) {
+      console.error('[AIAssistant] Failed to regenerate charts:', error);
+      setIsGenerating(false);
+      toast.error(error?.message || 'Failed to regenerate charts. Please try again.');
     }
   };
 
@@ -1024,6 +1074,19 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
                           </Card>
                         );
                       })}
+                      
+                      {/* Generate More Charts Button */}
+                      <div className="flex justify-center pt-2">
+                        <Button
+                          onClick={handleRegenerateCharts}
+                          disabled={isGenerating || !wsClient || !wsClient.isConnected()}
+                          size="sm"
+                          className="gap-2 bg-gradient-to-r from-accent to-primary hover:opacity-90 text-white shadow-md transition-all disabled:opacity-50"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          Generate More Charts
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>
