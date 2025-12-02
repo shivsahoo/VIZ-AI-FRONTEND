@@ -53,6 +53,7 @@ export function KPIInfoBot({
   const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
   const [questionsAsked, setQuestionsAsked] = useState(0);
   const [hasStarted, setHasStarted] = useState(false);
+  const [probableAnswers, setProbableAnswers] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -79,6 +80,7 @@ export function KPIInfoBot({
             const question = response.message;
             setCurrentQuestion(question);
             setQuestionsAsked(response.state?.questions_asked_count || 0);
+            setProbableAnswers(response.probable_answers || []);
             
             // Add bot message with question
             addBotMessage(question);
@@ -87,6 +89,7 @@ export function KPIInfoBot({
             const state = response.state || {};
             const kpis = state.kpis || [];
             const kpisSummary = state.kpis_summary || "";
+            setProbableAnswers([]);
             
             addBotMessage("Perfect! I've collected your KPIs. Thank you!");
             
@@ -102,6 +105,7 @@ export function KPIInfoBot({
             console.error('[KPIInfoBot] Error:', response.error);
             toast.error(response.error || response.message || "An error occurred");
             setIsTyping(false);
+            setProbableAnswers([]);
             addBotMessage("I'm sorry, something went wrong. Please try again.");
           }
         });
@@ -172,32 +176,35 @@ export function KPIInfoBot({
     }, 800);
   };
 
-  const handleSendMessage = () => {
-    if (!userInput.trim() || !wsClient || !wsClient.isConnected()) {
-      if (!wsClient || !wsClient.isConnected()) {
-        toast.error("Please wait for connection...");
-      }
+  const sendResponse = (rawInput: string) => {
+    const trimmed = rawInput.trim();
+    if (!trimmed) {
       return;
     }
 
-    // Add user message
+    if (!wsClient || !wsClient.isConnected()) {
+      toast.error("Please wait for connection...");
+      return;
+    }
+
     const userMessage: Message = {
       id: messages.length + 1,
       type: "user",
-      content: userInput,
+      content: trimmed,
       timestamp: new Date()
     };
     setMessages((prev) => [...prev, userMessage]);
-
-    // Store response for reference
-    const inputValue = userInput;
     setUserInput("");
     setIsTyping(true);
+    setProbableAnswers([]);
 
-    // Send user response via WebSocket
     wsClient.kpiInfo({
-      user_response: inputValue
+      user_response: trimmed
     });
+  };
+
+  const handleSendMessage = () => {
+    sendResponse(userInput);
   };
 
   const handleKeyPress = (e: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -205,6 +212,10 @@ export function KPIInfoBot({
       e.preventDefault();
       handleSendMessage();
     }
+  };
+
+  const handleSuggestedAnswer = (answer: string) => {
+    sendResponse(answer);
   };
 
   return (
@@ -294,6 +305,23 @@ export function KPIInfoBot({
 
         {/* Input Area */}
         <div className="px-6 py-4 border-t border-border bg-card">
+          {probableAnswers.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {probableAnswers.map((answer, index) => (
+                <Button
+                  key={`${answer}-${index}`}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => handleSuggestedAnswer(answer)}
+                  disabled={!wsClient || !wsClient.isConnected() || isTyping || isConnecting}
+                >
+                  {answer}
+                </Button>
+              ))}
+            </div>
+          )}
           <div className="flex gap-3">
             <Input
               value={userInput}

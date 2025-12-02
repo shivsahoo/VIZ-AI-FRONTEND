@@ -365,15 +365,23 @@ export function ChartCard({
       // Adjust domain for non-numeric case - show minimal range for thin bars
       const finalDomain = hasNumericData ? yAxisDomain : [0, 2];
       
+      // Smart label display based on number of bars
+      const barCount = normalizedBarData.length;
+      const shouldRotateLabels = barCount > 5;
+      const bottomMargin = shouldRotateLabels ? 60 : 20;
+      
       return (
         <ResponsiveContainer width="100%" height={height}>
-          <BarChart data={normalizedBarData} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+          <BarChart data={normalizedBarData} margin={{ top: 10, right: 10, left: 10, bottom: bottomMargin }}>
             {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />}
             <XAxis 
               dataKey={finalXAxisKey} 
               {...commonAxisStyle}
               tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
               axisLine={{ stroke: "hsl(var(--border))" }}
+              angle={shouldRotateLabels ? -45 : 0}
+              textAnchor={shouldRotateLabels ? "end" : "middle"}
+              height={shouldRotateLabels ? 60 : undefined}
             />
             <YAxis 
               {...commonAxisStyle}

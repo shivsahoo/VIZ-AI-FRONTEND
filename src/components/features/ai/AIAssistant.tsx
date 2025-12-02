@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, Plus, ChevronDown, ChevronUp, Code, Database, Check } from "lucide-react";
+import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, Plus, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { Badge } from "../../ui/badge";
@@ -30,6 +30,17 @@ interface ChartSuggestion {
   databaseId?: string;
   relevance?: number;
   spec?: ChartSpec;
+  data?: any[];
+  dataKeys?: {
+    primary: string;
+    secondary?: string;
+  };
+  xAxisKey?: string;
+  isLoadingData?: boolean;
+  dataError?: string;
+  xAxisField?: string | null;
+  yAxisField?: string | null;
+  minMaxDates?: [string, string] | null;
 }
 
 type ChartCreationRequestPayload = {
@@ -142,6 +153,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
   const chartRequestRef = useRef<ChartCreationRequestPayload | null>(null);
   const [isAwaitingClarification, setIsAwaitingClarification] = useState(false);
   const [chartWorkflowState, setChartWorkflowState] = useState<Record<string, any> | null>(null);
+  const chartWorkflowStateRef = useRef<Record<string, any> | null>(null);
 
   // Ensure any open preview dialog is dismissed when the assistant closes
   useEffect(() => {
@@ -150,6 +162,10 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       setExpandedSuggestion(null);
     }
   }, [isOpen, previewChart]);
+
+  useEffect(() => {
+    chartWorkflowStateRef.current = chartWorkflowState;
+  }, [chartWorkflowState]);
 
   const replaceAnalyzingMessage = (content: string) => {
     setMessages((prev) => {
@@ -219,16 +235,82 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
     setIsConnecting(true);
     setConnectionError(null);
 
-    const handleChartCreation = (response: WebSocketResponse) => {
-      // Helper function to remove analyzing message
-      const removeAnalyzingMessage = () => {
-        setMessages((prev) => {
-          return prev.filter(
-            (msg) => !(msg.type === 'ai' && msg.content === 'Analyzing your request and generating chart suggestions...')
-          );
-        });
-      };
+    const removeAnalyzingMessage = () => {
+      setMessages((prev) => {
+        return prev.filter(
+          (msg) => !(msg.type === 'ai' && msg.content === 'Analyzing your request and generating chart suggestions...')
+        );
+      });
+    };
 
+    const showChartSuggestions = (
+      chartSpecs: ChartSpec[],
+      {
+        message,
+        clarityQs = [],
+      }: { message?: string; clarityQs?: string[] } = {}
+    ) => {
+      if (!chartSpecs.length) {
+        const errorMessage = message || "I couldn't find any relevant charts based on that request. Try rephrasing or providing more detail.";
+        removeAnalyzingMessage();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: prev.length + 1,
+            type: 'ai',
+            content: errorMessage,
+          },
+        ]);
+        return;
+      }
+
+      const suggestions: ChartSuggestion[] = chartSpecs.map((spec, index) => {
+        const chartType = normalizeChartType(spec.chart_type);
+        return {
+          id: `${spec.data_connection_id || 'chart'}-${index}-${Date.now()}`,
+          name: spec.title || `Generated Chart ${index + 1}`,
+          type: chartType,
+          description: spec.report || spec.title || "AI-generated chart suggestion",
+          query: spec.query,
+          reasoning: spec.report || "Generated based on your request.",
+          dataSource: spec.data_connection_id ? `Database ${spec.data_connection_id}` : undefined,
+          dataConnectionId: spec.data_connection_id,
+          databaseId: spec.data_connection_id,
+          relevance: typeof spec.relevance === 'number' ? spec.relevance : undefined,
+          spec,
+          xAxisField: spec.x_axis ?? null,
+          yAxisField: spec.y_axis ?? null,
+          minMaxDates: spec.min_max_dates ?? null,
+          xAxisKey: spec.x_axis || undefined,
+          dataKeys: spec.y_axis ? { primary: spec.y_axis } : undefined,
+        };
+      });
+
+      if (clarityQs.length === 0 && suggestions.length > 0) {
+        const qs = suggestions
+          .map(s => s.name || s.description || '')
+          .filter(Boolean)
+          .slice(0, 3);
+        if (qs.length > 0) setDynamicSuggestions(qs);
+      }
+
+      const contentMessage =
+        message ||
+        `I've analyzed your request and generated ${suggestions.length} chart suggestion${suggestions.length > 1 ? 's' : ''}.`;
+
+      removeAnalyzingMessage();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: prev.length + 1,
+          type: 'chart-suggestions',
+          content: contentMessage,
+          chartSuggestions: suggestions,
+        },
+      ]);
+    };
+
+    const handleChartCreation = (response: WebSocketResponse) => {
       // Update quick suggestions from clarity questions if present
       const clarityQs = Array.isArray(response.state?.clarity_questions)
         ? (response.state?.clarity_questions as string[])
@@ -236,63 +318,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       if (clarityQs.length > 0) {
         setDynamicSuggestions(clarityQs.slice(0, 3));
       }
-
-      // Helper function to process and display chart specs
-      const processChartSpecs = (chartSpecs: ChartSpec[], message?: string) => {
-        if (!chartSpecs.length) {
-          const errorMessage = message || "I couldn't find any relevant charts based on that request. Try rephrasing or providing more detail.";
-          removeAnalyzingMessage();
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: prev.length + 1,
-              type: 'ai',
-              content: errorMessage
-            }
-          ]);
-          return;
-        }
-
-        const suggestions: ChartSuggestion[] = chartSpecs.map((spec, index) => {
-          const chartType = normalizeChartType(spec.chart_type);
-          return {
-            id: `${spec.data_connection_id || 'chart'}-${index}-${Date.now()}`,
-            name: spec.title || `Generated Chart ${index + 1}`,
-            type: chartType,
-            description: spec.report || spec.title || "AI-generated chart suggestion",
-            query: spec.query,
-            reasoning: spec.report || "Generated based on your request.",
-            dataSource: spec.data_connection_id ? `Database ${spec.data_connection_id}` : undefined,
-            dataConnectionId: spec.data_connection_id,
-            databaseId: spec.data_connection_id,
-            relevance: typeof spec.relevance === 'number' ? spec.relevance : undefined,
-            spec,
-          };
-        });
-
-        // If no clarity questions, derive suggestions from chart titles/reports
-        if (clarityQs.length === 0 && suggestions.length > 0) {
-          const qs = suggestions
-            .map(s => s.name || s.description || '')
-            .filter(Boolean)
-            .slice(0, 3);
-          if (qs.length > 0) setDynamicSuggestions(qs);
-        }
-
-        const contentMessage = message || `I've analyzed your request and generated ${suggestions.length} chart suggestion${suggestions.length > 1 ? 's' : ''}.`;
-        
-        // Remove analyzing message and add chart suggestions
-        removeAnalyzingMessage();
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: prev.length + 1,
-            type: 'chart-suggestions',
-            content: contentMessage,
-            chartSuggestions: suggestions,
-          },
-        ]);
-      };
 
       if (response.status === 'collecting') {
         setIsGenerating(false);
@@ -303,9 +328,8 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
         const chartSpecs = (response.state?.chart_specs as ChartSpec[]) || [];
         
         if (chartSpecs.length > 0) {
-          // If we have chart specs, display them
           const message = response.message || "Here are a few starter charts for this data source.";
-          processChartSpecs(chartSpecs, message);
+          showChartSuggestions(chartSpecs, { message, clarityQs });
         } else {
           // No chart specs, just show clarification message
           replaceAnalyzingMessage(buildClarificationMessage(response));
@@ -321,7 +345,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
         chartRequestRef.current = null;
         setChartWorkflowState(response.state ?? null);
         
-        processChartSpecs(chartSpecs, response.message);
+        showChartSuggestions(chartSpecs, { message: response.message, clarityQs });
       } else if (response.status === 'error') {
         setIsGenerating(false);
         setIsAwaitingClarification(false);
@@ -342,7 +366,54 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       }
     };
 
+    const handleRegenerate = (response: WebSocketResponse) => {
+      if (response.status === 'collecting' || response.status === 'completed') {
+        const chartSpecs = (response.state?.chart_specs as ChartSpec[]) || [];
+        if (chartSpecs.length > 0) {
+          const processChartSpecs = (chartSpecs: ChartSpec[], message?: string) => {
+            const suggestions: ChartSuggestion[] = chartSpecs.map((spec, index) => {
+              const chartType = normalizeChartType(spec.chart_type);
+              return {
+                id: `${spec.data_connection_id || 'chart'}-${index}-${Date.now()}`,
+                name: spec.title || `Generated Chart ${index + 1}`,
+                type: chartType,
+                description: spec.report || spec.title || "AI-generated chart suggestion",
+                query: spec.query,
+                reasoning: spec.report || "Generated based on your request.",
+                dataSource: spec.data_connection_id ? `Database ${spec.data_connection_id}` : undefined,
+                dataConnectionId: spec.data_connection_id,
+                databaseId: spec.data_connection_id,
+                relevance: typeof spec.relevance === 'number' ? spec.relevance : undefined,
+                spec,
+                xAxisField: spec.x_axis ?? null,
+                yAxisField: spec.y_axis ?? null,
+                minMaxDates: spec.min_max_dates ?? null,
+                xAxisKey: spec.x_axis || undefined,
+                dataKeys: spec.y_axis ? { primary: spec.y_axis } : undefined,
+              };
+            });
+
+            const contentMessage = message || `I've generated ${suggestions.length} new chart suggestion${suggestions.length > 1 ? 's' : ''}.`;
+            
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: prev.length + 1,
+                type: 'chart-suggestions',
+                content: contentMessage,
+                chartSuggestions: suggestions,
+              },
+            ]);
+          };
+          processChartSpecs(chartSpecs, response.message);
+        }
+      } else if (response.status === 'error') {
+        toast.error(response.error || response.message || "Failed to regenerate charts");
+      }
+    };
+
     client.on('chart_creation', handleChartCreation);
+    client.on('regenerate', handleRegenerate);
     client.onError((error) => {
       console.error('[AIAssistant] WebSocket error:', error);
       setIsGenerating(false);
@@ -661,11 +732,18 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
     }
     
     // Format dataSource as "Database {id}" so ChartPreviewDialog can extract it
+    const fallbackXAxis = suggestion.xAxisField || suggestion.xAxisKey;
+    const fallbackDataKeys =
+      suggestion.dataKeys ||
+      (suggestion.yAxisField ? { primary: suggestion.yAxisField } : undefined);
+
     const chartWithDataSource: ChartSuggestion = {
       ...suggestion,
       dataSource: `Database ${selectedDb.id}`,
       dataConnectionId: suggestion.dataConnectionId || selectedDb.id,
       databaseId: suggestion.dataConnectionId || selectedDb.id,
+      xAxisKey: fallbackXAxis,
+      dataKeys: fallbackDataKeys,
     };
     
     // Open preview dialog instead of creating immediately
