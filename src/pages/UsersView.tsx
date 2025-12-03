@@ -1,5 +1,5 @@
 import { Plus, Shield, Search, Mail, MoreVertical, Trash2, UserCog, Users as UsersIcon, Database, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -215,28 +215,35 @@ export function UsersView({ projectId }: UsersViewProps) {
 
   // Store API role IDs mapping
   const [roleIdMap, setRoleIdMap] = useState<Map<string, string>>(new Map()); // UI ID -> API ID
-  const [rolesLoaded, setRolesLoaded] = useState(false);
+  
+  // Track the last projectId for which we've fetched users (using ref to avoid re-renders)
+  const lastFetchedProjectIdRef = useRef<string | null>(null);
 
-  // Fetch permissions and roles when projectId is available
+  // Fetch permissions, roles, and users when projectId is available
   useEffect(() => {
     if (projectId) {
-      setRolesLoaded(false); // Reset when projectId changes
-      fetchPermissions();
-      fetchRoles();
+      const currentProjectId = String(projectId);
+      // Reset users and roles when projectId changes
+      if (currentProjectId !== lastFetchedProjectIdRef.current) {
+        setUsers([]);
+        setRoles([]);
+        setIsLoadingUsers(true); // Set loading state when project changes
+        setIsLoadingRoles(true);
+        lastFetchedProjectIdRef.current = currentProjectId;
+        
+        // Fetch all data in parallel
+        fetchPermissions();
+        fetchRoles();
+        fetchUsers(); // Fetch users immediately, don't wait for roles
+      }
     } else {
       setIsLoadingUsers(false);
       setIsLoadingRoles(false);
-      setRolesLoaded(false);
+      setUsers([]);
+      setRoles([]);
+      lastFetchedProjectIdRef.current = null;
     }
   }, [projectId]);
-
-  // Fetch users after roles are loaded (only once when roles are first loaded)
-  useEffect(() => {
-    if (projectId && roles.length > 0 && !isLoadingRoles && !rolesLoaded) {
-      setRolesLoaded(true);
-      fetchUsers();
-    }
-  }, [projectId, roles.length, isLoadingRoles]);
 
   // Update role counts when users change
   useEffect(() => {
@@ -254,35 +261,48 @@ export function UsersView({ projectId }: UsersViewProps) {
   }, [users]);
 
   const fetchUsers = async () => {
-    if (!projectId || roles.length === 0) return;
+    if (!projectId) {
+      setIsLoadingUsers(false);
+      return;
+    }
     
+    console.log(`[UsersView] Fetching users for project: ${projectId}`);
     setIsLoadingUsers(true);
     try {
       const response = await getTeamMembers(String(projectId));
+      console.log(`[UsersView] Users API response:`, response);
+      
       if (response.success && response.data) {
         // Map API users to UI format
         const uiUsers: User[] = response.data.map((user, index) => {
-          // Find role by name to get roleId
+          // Find role by name to get roleId (roles might be empty, so handle that)
           const role = roles.find(r => r.name === user.role);
           return {
             id: index + 1, // Temporary ID for UI
             name: user.name,
             email: user.email,
-            roleId: role?.id || (roles.length > 0 ? roles[0].id : 1), // Default to first role if not found
+            roleId: role?.id || (roles.length > 0 ? roles[0].id : 1), // Default to first role if not found, or 1 if no roles
             status: "active" as const,
             avatar: user.name.split(" ").map(n => n[0]).join("").toUpperCase(),
           };
         });
+        console.log(`[UsersView] Mapped ${uiUsers.length} users`);
         setUsers(uiUsers);
       } else {
-        toast.error(response.error?.message || "Failed to load users");
+        console.warn(`[UsersView] Failed to fetch users:`, response.error);
+        // Don't show error toast if it's just an empty response (no users yet)
+        if (response.error?.message && !response.error.message.includes("No users")) {
+          toast.error(response.error.message || "Failed to load users");
+        }
         setUsers([]);
       }
     } catch (err: any) {
+      console.error("[UsersView] Error fetching users:", err);
       toast.error(err.message || "An error occurred while fetching users");
       setUsers([]);
     } finally {
       setIsLoadingUsers(false);
+      console.log(`[UsersView] Finished fetching users, loading state cleared`);
     }
   };
 
@@ -803,7 +823,6 @@ export function UsersView({ projectId }: UsersViewProps) {
                     <TableRow>
                       <TableCell colSpan={5} className="text-center py-8">
                         <div className="flex flex-col items-center gap-3">
-                          <UsersIcon className="w-12 h-12 text-muted-foreground/30" />
                           <div>
                             <p className="text-sm text-foreground font-medium">No members found</p>
                             <p className="text-xs text-muted-foreground mt-1">
