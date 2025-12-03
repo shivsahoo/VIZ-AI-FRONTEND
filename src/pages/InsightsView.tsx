@@ -13,7 +13,10 @@ import {
   Loader2, 
   Sparkles, 
   Target,
-  Database 
+  Database,
+  Download,
+  Copy,
+  Check
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -86,6 +89,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
   const [activeFilter, setActiveFilter] = useState("all");
   const [filteredInsights, setFilteredInsights] = useState<Insight[]>([]);
+  const [copiedInsightId, setCopiedInsightId] = useState<string | null>(null);
 
   const insightStats = useMemo(() => {
     const stats = {
@@ -1042,6 +1046,70 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     }
   };
 
+  const handleExportCSV = () => {
+    if (filteredInsights.length === 0) {
+      toast.error("No insights to export");
+      return;
+    }
+
+    // Convert insights to CSV format
+    const headers = ["Title", "Description", "Type", "Category", "Impact", "Source", "Timestamp"];
+    const csvRows = [
+      headers.join(","),
+      ...filteredInsights.map((insight) => {
+        const escapeCell = (cell: any) => {
+          if (cell === null || cell === undefined) return "";
+          const cellString = String(cell);
+          const needsEscaping = /[",\n\r]/.test(cellString);
+          const escapedValue = cellString.replace(/"/g, '""');
+          return needsEscaping ? `"${escapedValue}"` : escapedValue;
+        };
+
+        return [
+          escapeCell(insight.title),
+          escapeCell(insight.description),
+          escapeCell(insight.type),
+          escapeCell(insight.category),
+          escapeCell(insight.impact),
+          escapeCell(insight.source || ""),
+          escapeCell(insight.timestamp),
+        ].join(",");
+      }),
+    ];
+
+    const csvContent = csvRows.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute("href", url);
+    link.setAttribute("download", `insights-export-${new Date().toISOString().split("T")[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    toast.success(`Exported ${filteredInsights.length} insights to CSV`);
+  };
+
+  const handleCopyToClipboard = async (insight: Insight) => {
+    const insightText = `${insight.title}\n\n${insight.description}\n\nType: ${insight.type}\nCategory: ${insight.category}\nImpact: ${insight.impact}\nSource: ${insight.source || "N/A"}\nTimestamp: ${insight.timestamp}`;
+    
+    try {
+      await navigator.clipboard.writeText(insightText);
+      setCopiedInsightId(insight.id);
+      toast.success("Insight copied to clipboard");
+      
+      // Reset the copied state after 2 seconds
+      setTimeout(() => {
+        setCopiedInsightId(null);
+      }, 2000);
+    } catch (error) {
+      console.error("Failed to copy to clipboard:", error);
+      toast.error("Failed to copy to clipboard");
+    }
+  };
+
   // Calculate stats
   const totalInsights = insightStats.total;
   const positiveTrends = insightStats.positive;
@@ -1095,6 +1163,14 @@ export function InsightsView({ projectId }: InsightsViewProps) {
               <Filter className="w-4 h-4 mr-2" />
               Filter
             </Button> */}
+            <Button 
+              variant="outline"
+              onClick={handleExportCSV}
+              disabled={filteredInsights.length === 0}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export Insights
+            </Button>
             <Button 
               className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all"
               onClick={() => setShowGenerateDialog(true)}
@@ -1279,14 +1355,32 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                             </p>
                           )}
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="shrink-0 whitespace-nowrap"
-                          onClick={() => toast.info("Adding insights to dashboards coming soon.")}
-                        >
-                          + Add to Dashboard
-                        </Button>
+                        <div className="flex gap-2 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopyToClipboard(insight);
+                            }}
+                            title="Copy to clipboard"
+                          >
+                            {copiedInsightId === insight.id ? (
+                              <Check className="w-4 h-4 text-success" />
+                            ) : (
+                              <Copy className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="whitespace-nowrap"
+                            onClick={() => toast.info("Adding insights to dashboards coming soon.")}
+                          >
+                            + Add to Dashboard
+                          </Button>
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-3 text-sm">
