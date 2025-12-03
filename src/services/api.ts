@@ -1649,9 +1649,15 @@ export const createDatabase = async (
       }
     } else {
       // Use form fields method
-      // Backend expects "postgres" not "postgresql", but it lowercases and checks for "postgres"
-      const dbType = data.dbType?.toLowerCase() === 'postgresql' ? 'postgres' : (data.dbType?.toLowerCase() || 'postgres');
+      // Backend expects "postgres" not "postgresql", and "oracledb" not "oracle"
+      let dbType = data.dbType?.toLowerCase() || 'postgres';
+      if (dbType === 'postgresql') {
+        dbType = 'postgres';
+      } else if (dbType === 'oracle') {
+        dbType = 'oracledb';
+      }
       
+      requestBody.connection_name = data.connectionName || '';
       requestBody.db_type = dbType;
       
       // Construct host with port if port is provided and different from default
@@ -1661,7 +1667,7 @@ export const createDatabase = async (
         if (portStr) {
           const portNum = parseInt(portStr);
           if (!isNaN(portNum)) {
-            const defaultPort = dbType === 'postgres' ? 5432 : 3306;
+            const defaultPort = dbType === 'postgres' ? 5432 : dbType === 'mysql' ? 3306 : 1521;
             
             // Only append port if it's different from default and not already in host
             if (portNum !== defaultPort && !hostWithPort.includes(':')) {
@@ -1673,7 +1679,8 @@ export const createDatabase = async (
       
       requestBody.host = hostWithPort;
       requestBody.db_name = data.database || '';
-      requestBody.name = data.username || ''; // Backend uses 'name' field for username
+      // Backend accepts both 'username' and 'name', send 'username' to match expected payload format
+      requestBody.username = data.username || '';
       requestBody.password = data.password || '';
     }
 
@@ -2281,6 +2288,62 @@ export const inviteUser = async (
   }
 };
 
+/**
+ * Add users to dashboard
+ */
+export interface UserDashboardAssignment {
+  id: string;
+  user_id: string;
+  dashboard_id: string;
+  can_read: boolean;
+  can_write: boolean;
+  can_delete: boolean;
+}
+
+export const addUserToDashboard = async (
+  projectId: string,
+  data: {
+    user_ids: string[]; // Array of user UUIDs
+    dashboard_id: string; // Dashboard UUID
+  }
+): Promise<ApiResponse<{ message: string; user_dashboard: UserDashboardAssignment[] }>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      user_dashboard: Array<{
+        id: string;
+        user_id: string;
+        dashboard_id: string;
+        can_read: boolean;
+        can_write: boolean;
+        can_delete: boolean;
+      }>;
+    }>(`/api/v1/backend/projects/${projectId}/dashboard/user`, {
+      method: 'POST',
+      body: JSON.stringify({
+        user_ids: data.user_ids,
+        dashboard_id: data.dashboard_id,
+      }),
+    });
+
+    return {
+      success: true,
+      data: {
+        message: response.message,
+        user_dashboard: response.user_dashboard,
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'ADD_USER_DASHBOARD_FAILED',
+        message: error.message || 'Failed to add users to dashboard',
+      },
+    };
+  }
+};
+
 // ============================================================================
 // ROLES & PERMISSIONS
 // ============================================================================
@@ -2549,6 +2612,7 @@ const api = {
   // Users/Teams
   getTeamMembers,
   inviteUser,
+  addUserToDashboard,
   
   // Roles
   getRoles,

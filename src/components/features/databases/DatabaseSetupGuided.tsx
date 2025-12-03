@@ -472,6 +472,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                   <SelectContent>
                     <SelectItem value="postgresql">PostgreSQL</SelectItem>
                     <SelectItem value="mysql">MySQL</SelectItem>
+                    <SelectItem value="oracle">Oracle</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -493,7 +494,15 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                 <Label htmlFor="port">Port</Label>
                 <Input
                   id="port"
-                  placeholder={dbType === "postgresql" ? "5432" : "3306"}
+                  placeholder={
+                    dbType === "postgresql" 
+                      ? "5432" 
+                      : dbType === "mysql" 
+                      ? "3306" 
+                      : dbType === "oracle"
+                      ? "1521"
+                      : ""
+                  }
                   value={port}
                   onChange={(e) => setPort(e.target.value)}
                   className="h-12"
@@ -502,7 +511,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
 
               <div className="space-y-2">
                 <Label htmlFor="database">
-                  Database Name <span className="text-destructive">*</span>
+                  Database Name {dbType === "oracle" && <span className="text-muted-foreground">(service name)</span>} <span className="text-destructive">*</span>
                 </Label>
                 <Input
                   id="database"
@@ -594,7 +603,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                 </Label>
                 <Textarea
                   id="connectionString"
-                  placeholder="postgresql://username:password@localhost:5432/database&#10;or&#10;mysql://username:password@localhost:3306/database"
+                  placeholder="postgresql://username:password@localhost:5432/database&#10;or&#10;mysql://username:password@localhost:3306/database&#10;or&#10;oracle+oracledb://username:password@host/?service_name=service_name"
                   value={connectionString}
                   onChange={(e) => setConnectionString(e.target.value)}
                   className="min-h-[160px] font-mono text-sm"
@@ -611,6 +620,9 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                 </code>
                 <code className="block text-xs bg-card p-3 rounded-lg border border-border">
                   mysql://user:pass@host:3306/dbname
+                </code>
+                <code className="block text-xs bg-card p-3 rounded-lg border border-border">
+                  oracle+oracledb://username:password@host/?service_name=service_name
                 </code>
               </div>
             </div>
