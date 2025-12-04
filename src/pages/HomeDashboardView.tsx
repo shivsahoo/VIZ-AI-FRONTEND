@@ -9,7 +9,7 @@ import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDi
 import { toast } from "sonner";
 import { PinnedChartData } from "../context/PinnedChartsContext";
 import { ChartCard } from "../components/features/charts/ChartCard";
-import { getFavoriteCharts, updateFavoriteChart, getFavorites, getChartData, getCharts, type ChartData as ApiChartData } from "../services/api";
+import { getFavoriteCharts, updateFavoriteChart, getFavorites, getChartData, type ChartData as ApiChartData } from "../services/api";
 import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../utils/chartData";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 
@@ -108,7 +108,20 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     return date.toLocaleDateString();
   }, []);
 
-  // Helper to infer chart type from query
+  // Helper to normalize chart type from API response
+  const normalizeChartType = useCallback((chartType?: string | null): 'line' | 'bar' | 'pie' | 'area' => {
+    if (!chartType) {
+      return 'line';
+    }
+    const normalized = chartType.toString().toLowerCase();
+    if (normalized === 'bar' || normalized === 'column') return 'bar';
+    if (normalized === 'pie' || normalized === 'donut') return 'pie';
+    if (normalized === 'area') return 'area';
+    if (normalized === 'line') return 'line';
+    return 'line'; // Default fallback
+  }, []);
+
+  // Helper to infer chart type from query (fallback)
   const inferChartType = useCallback((query: string): 'line' | 'bar' | 'pie' | 'area' => {
     const q = query.toLowerCase();
     if (q.includes('group by') && (q.includes('count') || q.includes('sum'))) {
@@ -200,24 +213,15 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
   const fetchFavoriteCharts = useCallback(async () => {
     setIsLoadingCharts(true);
     try {
-      const [favoriteResponse, chartsResponse] = await Promise.all([
-        getFavoriteCharts(),
-        getCharts() // Fetch all charts to get actual chart types
-      ]);
+      const favoriteResponse = await getFavoriteCharts();
       
       if (favoriteResponse.success && favoriteResponse.data) {
-        // Create a map of chart ID to chart type from all charts
-        const chartTypeMap = new Map<string, 'line' | 'bar' | 'pie' | 'area'>();
-        if (chartsResponse.success && chartsResponse.data) {
-          chartsResponse.data.forEach((chart) => {
-            chartTypeMap.set(chart.id, chart.type);
-          });
-        }
-        
         // Map API response to FavoriteChartData format (includes originalId)
         const mappedCharts: FavoriteChartData[] = favoriteResponse.data.map((chart, index) => {
-          // Use actual chart type from charts API, fallback to inference
-          const actualChartType = chartTypeMap.get(chart.id) || inferChartType(chart.query);
+          // Use chart_type from API response directly, fallback to inference if missing
+          const actualChartType = chart.chart_type 
+            ? normalizeChartType(chart.chart_type) 
+            : inferChartType(chart.query);
           
           return {
           id: parseInt(chart.id.replace(/-/g, '').substring(0, 8), 16) || index + 1, // Convert UUID to number for compatibility
@@ -225,7 +229,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
           name: chart.title,
           description: chart.query.length > 50 ? `Chart query: ${chart.query.substring(0, 50)}...` : `Chart query: ${chart.query}` || 'No description available',
           lastUpdated: formatTimeAgo(chart.created_at),
-            chartType: actualChartType, // Use actual chart type instead of inference
+            chartType: actualChartType, // Use chart_type from API response
           category: 'Analytics', // Default category
           dashboardName: 'My Dashboard', // Default dashboard name
           dataSource: chart.connection_id ? `Database ${chart.connection_id}` : 'Unknown Data Source',
@@ -262,7 +266,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     } finally {
       setIsLoadingCharts(false);
     }
-  }, [fetchChartDataForFavoriteChart, formatTimeAgo, inferChartType]);
+  }, [fetchChartDataForFavoriteChart, formatTimeAgo, normalizeChartType, inferChartType]);
 
   // Fetch favorite dashboards from API
   const fetchFavoriteDashboards = useCallback(async () => {
