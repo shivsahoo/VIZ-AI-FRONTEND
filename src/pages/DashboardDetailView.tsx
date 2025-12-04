@@ -72,6 +72,7 @@ interface ChartCardData {
   isExporting?: boolean;
   xAxis?: string | null;
   yAxis?: string | null;
+  is_time_based?: boolean;
 }
 
 // Helper to format time ago
@@ -293,6 +294,7 @@ export function DashboardDetailView({
           created_at: chart.created_at,
           xAxis: (chart as any).x_axis ?? null,
           yAxis: (chart as any).y_axis ?? null,
+          is_time_based: chart.is_time_based ?? false,
         }));
         setCharts(mappedCharts);
         
@@ -864,9 +866,11 @@ export function DashboardDetailView({
                   )}
 
                   {/* Date Range Picker - Bottom Right */}
-                  <div className="mt-4 flex justify-end">
-                    {renderDateRangeButton(chart)}
-                  </div>
+                  {chart.is_time_based === true && (
+                    <div className="mt-4 flex justify-end">
+                      {renderDateRangeButton(chart)}
+                    </div>
+                  )}
                 </Card>
               );
             })}

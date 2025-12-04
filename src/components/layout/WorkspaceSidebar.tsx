@@ -66,7 +66,7 @@ export function WorkspaceSidebar({ activeTab, onTabChange, onOpenAIAssistant }: 
           <Separator className="w-10 mb-1" />
           
           {/* Ask VizAI Button */}
-          {onOpenAIAssistant && (
+          {/* {onOpenAIAssistant && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -82,7 +82,7 @@ export function WorkspaceSidebar({ activeTab, onTabChange, onOpenAIAssistant }: 
                 <p>Ask VizAI</p>
               </TooltipContent>
             </Tooltip>
-          )}
+          )} */}
 
           <Separator className="w-10 my-1" />
 

@@ -100,6 +100,7 @@ interface Chart {
   projectId?: number | string;
   isGenerated?: boolean;
   isFavorite?: boolean;
+  is_time_based?: boolean;
   dateRange?: {
     startDate: Date | null;
     endDate: Date | null;
@@ -778,6 +779,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           projectId: chart.projectId || projectId,
           isGenerated: false,
           isFavorite: (chart as any).isFavorite || false,
+          is_time_based: chart.is_time_based ?? false,
         }));
       } else {
         toast.error(chartsResponse.error?.message || "Failed to load charts");
@@ -808,6 +810,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                 projectId: dashboard.projectId || projectId,
                 isGenerated: false,
                 isFavorite: false,
+                is_time_based: (chart as any).is_time_based ?? false,
               };
             })
           );
@@ -830,6 +833,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             query: chart.query ?? existing.query,
             isGenerated: chart.isGenerated ?? existing.isGenerated,
             isFavorite: chart.isFavorite ?? existing.isFavorite,
+            is_time_based: chart.is_time_based ?? existing.is_time_based ?? false,
           });
         } else {
           combinedChartsMap.set(key, chart);
@@ -1155,6 +1159,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           createdById: currentUser?.id,
           projectId: projectId,
           isGenerated: true,
+          is_time_based: chart.is_time_based ?? false,
         }));
 
         setGeneratedCharts(prev => [...newCharts, ...prev]);
@@ -1629,9 +1634,11 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           </div>
           
           {/* Date Range Picker */}
-          <div>
-            {renderDateRangeButton(chart)}
-          </div>
+          {chart.is_time_based === true && (
+            <div>
+              {renderDateRangeButton(chart)}
+            </div>
+          )}
         </div>
       </Card>
     );

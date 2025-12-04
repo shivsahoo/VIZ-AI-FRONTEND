@@ -806,6 +806,7 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
   chart_type?: string | null;
   x_axis?: string | null;
   y_axis?: string | null;
+  is_time_based?: boolean;
 }>>> => {
   try {
     const response = await apiRequest<{
@@ -820,6 +821,7 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
         chart_type?: string | null;
         x_axis?: string | null;
         y_axis?: string | null;
+        is_time_based?: boolean;
       }>;
     }>(`/api/v1/backend/dashboards/${dashboardId}/charts`);
 
@@ -934,6 +936,7 @@ export interface Chart {
   };
   createdAt: string;
   updatedAt: string;
+  is_time_based?: boolean;
 }
 
 export interface ChartData {
@@ -964,8 +967,9 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
         isFavorite?: boolean;
         x_axis?: string | null;
         y_axis?: string | null;
+        is_time_based?: boolean;
       }>;
-    }>('/api/v1/backend/charts');
+    }>(`/api/v1/backend/charts?project_id=${projectId}`);
 
     // Handle both response formats: object with charts array or direct array
     const chartsArray = response.charts || (Array.isArray(response) ? response : []);
@@ -987,6 +991,7 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
           },
           createdAt: chart.created_at,
           updatedAt: chart.created_at,
+          is_time_based: chart.is_time_based ?? false,
         })),
     };
   } catch (error: any) {
@@ -1017,6 +1022,7 @@ export const getUserDashboardCharts = async (): Promise<ApiResponse<Array<{
     database_connection_id?: string | null;
     x_axis?: string | null;
     y_axis?: string | null;
+    is_time_based?: boolean;
   }>;
 }>>> => {
   try {
@@ -1036,6 +1042,7 @@ export const getUserDashboardCharts = async (): Promise<ApiResponse<Array<{
           database_connection_id?: string | null;
           x_axis?: string | null;
           y_axis?: string | null;
+          is_time_based?: boolean;
         }>;
       }>;
     }>('/api/v1/backend/dashboards/user/charts');
@@ -1090,6 +1097,7 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
       chart_type: data.type || 'line',
       type: data.type || 'line',
       data_connection_id: data.databaseId,
+      is_time_based: data.is_time_based ?? false,
     };
 
     if (data.config?.xAxis) {
@@ -1380,6 +1388,9 @@ export const getFavoriteCharts = async (): Promise<ApiResponse<Array<{
   created_at: string;
   connection_id: string;
   query: string;
+  chart_type: string;
+  status?: string;
+  is_favorite?: boolean;
 }>>> => {
   try {
     const response = await apiRequest<{
@@ -1390,6 +1401,9 @@ export const getFavoriteCharts = async (): Promise<ApiResponse<Array<{
         created_at: string;
         connection_id: string;
         query: string;
+        chart_type: string;
+        status?: string;
+        is_favorite?: boolean;
       }>;
     }>('/api/v1/backend/users/charts/favorite');
 

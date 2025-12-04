@@ -300,13 +300,18 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     try {
     const axisFields = resolveAxisFields();
 
+    // Determine is_time_based from chart spec type: 'time_series' = true, 'aggregate' = false
+    const isTimeBased = chart.spec?.type === 'time_series' ? true : 
+                       chart.spec?.type === 'aggregate' ? false :
+                       chart.spec?.is_time_based ?? false;
+
     const response = await addChartToDashboard({
         title: chart.name,
         query: chart.query || "",
         report: chart.reasoning || chart.description || "",
         type: chart.type,
         relevance: "",
-      is_time_based: chart.spec?.is_time_based ?? false,
+        is_time_based: isTimeBased,
         chart_type: chart.type,
         dashboard_id: String(dashboardId),
         data_connection_id: databaseId,
@@ -355,6 +360,11 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
 
     const axisFields = resolveAxisFields();
 
+    // Determine is_time_based from chart spec type: 'time_series' = true, 'aggregate' = false
+    const isTimeBased = chart.spec?.type === 'time_series' ? true : 
+                       chart.spec?.type === 'aggregate' ? false :
+                       chart.spec?.is_time_based ?? false;
+
     isSavingDraftRef.current = true;
     setIsSavingDraft(true);
     try {
@@ -363,6 +373,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
         type: chart.type,
         query: chart.query,
         databaseId,
+        is_time_based: isTimeBased,
         config: {
           xAxis: axisFields.xAxis || undefined,
           yAxis: axisFields.yAxis || undefined,
