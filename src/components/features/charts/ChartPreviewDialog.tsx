@@ -77,6 +77,29 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
   const [chartDataMetadata, setChartDataMetadata] = React.useState<ApiChartData['metadata'] | undefined>(undefined);
   const [chartDataError, setChartDataError] = React.useState<string | undefined>(undefined);
   const [isExecutingQuery, setIsExecutingQuery] = React.useState(false);
+  const [windowWidth, setWindowWidth] = React.useState<number>(typeof window !== 'undefined' ? window.innerWidth : 1024);
+
+  // Track window width for responsive chart height
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const handleResize = () => {
+      setWindowWidth(window.innerWidth);
+    };
+    
+    window.addEventListener('resize', handleResize);
+    handleResize(); // Set initial value
+    
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Calculate responsive chart height
+  const getChartHeight = () => {
+    if (windowWidth < 640) return 200; // Mobile
+    if (windowWidth < 768) return 250;  // Small tablet
+    if (windowWidth < 1024) return 280; // Tablet
+    return 320; // Desktop
+  };
   // Debug logging
   React.useEffect(() => {
     if (isOpen && chart) {
@@ -88,6 +111,15 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       });
     }
   }, [isOpen, chart, dashboards, projectId]);
+  
+  // Reset dropdown state when dialog closes
+  React.useEffect(() => {
+    if (!isOpen) {
+      setIsDropdownOpen(false);
+      setIsAddingToDashboard(false);
+      setAddingToDashboardId(null);
+    }
+  }, [isOpen]);
   
   React.useEffect(() => {
     if (!chart) {
@@ -322,8 +354,12 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       if (response.success) {
         const dashboard = dashboards.find((d) => String(d.id) === String(dashboardId));
         toast.success(`Chart added to "${dashboard?.name || "dashboard"}"!`);
-        onAddToDashboard?.(dashboardId);
+        // Close dialog first to ensure overlay is removed
         onClose();
+        // Call callback after a brief delay to ensure dialog cleanup completes
+        setTimeout(() => {
+          onAddToDashboard?.(dashboardId);
+        }, 100);
       } else {
         toast.error(response.error?.message || "Failed to add chart to dashboard");
       }
@@ -395,28 +431,40 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     }
   };
 
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      // Reset all state when dialog closes
+      setIsDropdownOpen(false);
+      setIsAddingToDashboard(false);
+      setAddingToDashboardId(null);
+      onClose();
+    }
+  };
+
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2">
-                <DialogTitle>{chart.name}</DialogTitle>
-                <Badge variant="outline" className="capitalize">
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+      <DialogContent className="!w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] sm:!w-[85vw] sm:!max-w-[85vw] md:!max-w-xl lg:!max-w-2xl xl:!max-w-3xl max-h-[90vh] sm:max-h-[85vh] overflow-hidden flex flex-col p-3 sm:p-4 md:p-5">
+        <DialogHeader className="pb-2 sm:pb-3">
+          <div className="flex items-start justify-between gap-2 sm:gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 mb-1.5">
+                <DialogTitle className="text-sm sm:text-base break-words">{chart.name}</DialogTitle>
+                <Badge variant="outline" className="capitalize w-fit text-xs">
                   {chart.type} Chart
                 </Badge>
               </div>
-              <DialogDescription>
+              <DialogDescription className="text-xs break-words line-clamp-2">
                 {chart.description || chart.reasoning || "Review the chart details before saving or adding it to a dashboard."}
               </DialogDescription>
               
               {/* Show dashboards this chart belongs to */}
               {chart.dashboards && chart.dashboards.length > 0 && (
-                <div className="flex items-center gap-2 mt-3">
-                  <LayoutDashboard className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">Part of:</span>
-                  <div className="flex flex-wrap gap-2">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 mt-2">
+                  <div className="flex items-center gap-1.5">
+                    <LayoutDashboard className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                    <span className="text-xs text-muted-foreground">Part of:</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
                     {chart.dashboards.map((dashboard, index) => (
                       <Badge key={index} variant="secondary" className="text-xs">
                         {dashboard}
@@ -430,8 +478,8 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
         </DialogHeader>
 
         {/* Chart Visualization */}
-        <div className="flex-1 min-h-0 bg-muted/30 rounded-lg border border-border p-6">
-          <div className="relative w-full h-[400px] flex items-center justify-center text-center">
+        <div className="flex-1 min-h-0 bg-muted/30 rounded-lg border border-border p-2 sm:p-3 md:p-4">
+          <div className="relative w-full h-[200px] sm:h-[250px] md:h-[280px] lg:h-[320px] flex items-center justify-center text-center">
             {missingConfigMessage ? (
               <div className="max-w-xs text-sm text-muted-foreground leading-relaxed">
                 {missingConfigMessage}
@@ -463,7 +511,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
                     dataKeys={chartDataConfig.dataKeys}
                     xAxisKey={chartDataConfig.xAxisKey}
                     showLegend={!!chartDataConfig.dataKeys.secondary && chart.type !== 'pie'}
-                    height={400}
+                    height={getChartHeight()}
                   />
                 )}
               </>
@@ -471,14 +519,14 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
           </div>
 
           {!missingConfigMessage && chartDataMetadata && (
-            <div className="mt-4 flex flex-wrap gap-3 text-xs text-muted-foreground">
+            <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
               {typeof chartDataMetadata.executionTime === 'number' && chartDataMetadata.executionTime > 0 && (
-                <span className="px-2 py-1 rounded-md border border-border bg-background/50">
+                <span className="px-1.5 py-0.5 rounded-md border border-border bg-background/50 text-xs">
                   {chartDataMetadata.executionTime} ms
                 </span>
               )}
               {cachedAtDisplay && (
-                <span className="px-2 py-1 rounded-md border border-border bg-background/50">
+                <span className="px-1.5 py-0.5 rounded-md border border-border bg-background/50 text-xs">
                   Cached at {cachedAtDisplay}
                 </span>
               )}
@@ -487,17 +535,17 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
         </div>
 
         {/* SQL Query Section */}
-        <div className="space-y-3 max-h-48 overflow-y-auto">
+        <div className="space-y-2 max-h-24 sm:max-h-32 md:max-h-40 overflow-y-auto mt-2">
           <div>
-            <p className="text-sm text-muted-foreground mb-2">AI Reasoning:</p>
-            <p className="text-sm text-foreground bg-muted/50 p-3 rounded-lg">
+            <p className="text-xs text-muted-foreground mb-1">AI Reasoning:</p>
+            <p className="text-xs text-foreground bg-muted/50 p-2 rounded-lg break-words line-clamp-2">
               {chart.reasoning || "No reasoning summary provided."}
             </p>
           </div>
           <div>
-            <p className="text-sm text-muted-foreground mb-2">SQL Query:</p>
-            <pre className="text-xs bg-muted/50 p-3 rounded-lg overflow-x-auto">
-              <code className="text-foreground">
+            <p className="text-xs text-muted-foreground mb-1">SQL Query:</p>
+            <pre className="text-xs bg-muted/50 p-2 rounded-lg overflow-x-auto max-h-32">
+              <code className="text-foreground break-words whitespace-pre-wrap">
                 {chart.query || "-- No query provided --"}
               </code>
             </pre>
@@ -505,13 +553,14 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
         </div>
 
         {/* Actions */}
-        <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2 border-t border-border mt-2">
           {/* Only show Save as Draft button if it's not an existing published chart */}
           {(!isExistingChart || chartStatus !== 'published') && (
             <Button
               variant="outline"
               onClick={handleSaveAsDraft}
               disabled={isSavingDraft}
+              className="w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9"
             >
               {isSavingDraft ? "Saving..." : "Save for later"}
             </Button>
@@ -520,26 +569,26 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
           <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
             <DropdownMenuTrigger asChild>
               <GradientButton 
-                className="gap-2" 
+                className="gap-1.5 w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9" 
                 disabled={isAddingToDashboard}
               >
                 {isAddingToDashboard ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     Adding...
                   </>
                 ) : (
                   <>
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5" />
                 Add to Dashboard
-                <ChevronDown className="w-4 h-4" />
+                <ChevronDown className="w-3.5 h-3.5" />
                   </>
                 )}
               </GradientButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent 
               align="end" 
-              className="w-[250px] !z-[99999]" 
+              className="w-[calc(100vw-2rem)] sm:w-[250px] max-w-[250px] !z-[99999]" 
               onCloseAutoFocus={(e) => e.preventDefault()}
             >
               <DropdownMenuLabel>Select a dashboard</DropdownMenuLabel>

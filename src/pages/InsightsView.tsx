@@ -1039,7 +1039,16 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         }
       }
     } catch (error: any) {
-      toast.error(error.message || "An error occurred while generating insights");
+      // Check for timeout errors
+      const errorMessage = error.message || "An error occurred while generating insights";
+      if (errorMessage.includes("timeout") || errorMessage.includes("504") || errorMessage.includes("Gateway")) {
+        toast.error(
+          "Request timed out. Insight generation can take 30-120 seconds. The server may still be processing. Please wait a moment and check if insights appear, or try generating insights for a single database instead.",
+          { duration: 8000 }
+        );
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       setIsGenerating(false);
       setSelectedDatabase("all");
