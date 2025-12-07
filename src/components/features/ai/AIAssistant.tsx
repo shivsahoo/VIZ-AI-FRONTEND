@@ -839,21 +839,18 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
   const handleAddChartToDashboard = (dashboardId: number | string) => {
     if (!previewChart) return;
 
-    const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
-    
-    if (!selectedDb || !selectedDb.id) {
-      toast.error("Database connection is required");
-      return;
-    }
-    
-    if (onChartCreated) {
+    // When adding to dashboard from ChartPreviewDialog, the API call is already done
+    // We just need to notify that a chart was added to a dashboard so the dashboard can refresh
+    // and we stay on the current page (dashboard) instead of navigating to charts
+    // Preserve dashboardId as-is (can be number or string UUID)
+    if (onChartCreated && dashboardId) {
       onChartCreated({
         name: previewChart.name,
         type: previewChart.type,
-        dataSource: `Database ${selectedDb.id}`, // Format: "Database {uuid}" for extraction
+        dataSource: previewChart.dataSource || '',
         query: previewChart.query,
         status: 'published',
-          dashboardId: typeof dashboardId === 'string' ? (isNaN(Number(dashboardId)) ? undefined : Number(dashboardId)) : dashboardId
+        dashboardId: dashboardId // Preserve as number or string
       });
     }
     

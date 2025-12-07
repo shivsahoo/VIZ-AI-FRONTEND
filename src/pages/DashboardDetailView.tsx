@@ -6,6 +6,7 @@ import { Badge } from "../components/ui/badge";
 import { GradientButton } from "../components/shared/GradientButton";
 import { ChartCard } from "../components/features/charts/ChartCard";
 import { usePinnedCharts } from "../context/PinnedChartsContext";
+import { inferChartDataConfig, getDefaultChartDataConfig } from "../utils/chartData";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,6 +58,7 @@ interface DashboardDetailViewProps {
   onDelete?: (dashboardId: string, dashboardName: string) => void;
   onOpenAIAssistant?: () => void;
   onEditChart?: (chart: { name: string; type: 'line' | 'bar' | 'pie' | 'area'; description?: string }) => void;
+  refreshTrigger?: number;
 }
 
 interface ChartCardData {
@@ -98,7 +100,8 @@ export function DashboardDetailView({
   onBack,
   onDelete: _onDelete,
   onOpenAIAssistant, 
-  onEditChart 
+  onEditChart,
+  refreshTrigger
 }: DashboardDetailViewProps) {
   const { isPinned, togglePin } = usePinnedCharts();
   const [chartToRemove, setChartToRemove] = useState<ChartCardData | null>(null);
@@ -329,6 +332,13 @@ export function DashboardDetailView({
     fetchDashboardCharts();
   }, [fetchDashboardCharts]);
 
+  // Refresh charts when refreshTrigger changes (e.g., when a chart is added to dashboard)
+  useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0) {
+      fetchDashboardCharts();
+    }
+  }, [refreshTrigger, fetchDashboardCharts]);
+
   const handleEditChart = (chart: ChartCardData) => {
     // Pass chart info to parent
     if (onEditChart) {
@@ -480,46 +490,33 @@ export function DashboardDetailView({
     }
   };
 
-  // Prepare chart data for display
-  const getChartDisplayData = (chart: ChartCardData) => {
-    if (chart.chartData?.data && chart.chartData.data.length > 0) {
-      return chart.chartData.data;
+  // Prepare chart data for display using the same inference logic as ChartsView
+  const getChartDisplayConfig = (chart: ChartCardData) => {
+    if (!chart.chartData?.data || chart.chartData.data.length === 0) {
+      return getDefaultChartDataConfig();
     }
-    // Return empty data array if no data loaded yet
-    return [];
-  };
 
-  // Determine data keys based on chart type
-  const getDataKeys = (chart: ChartCardData, data: any[]) => {
+    // Use inferChartDataConfig to properly identify data keys and x-axis
+    // This ensures consistent behavior with ChartsView
+    const inferredConfig = inferChartDataConfig(chart.chartData.data, chart.type);
+
+    // Override with explicit x_axis and y_axis from API if available (like DashboardDetailView used to do)
     const metadataYAxis = chart.chartData?.metadata?.yAxis;
-    if (metadataYAxis) {
-      return { primary: metadataYAxis };
-    }
-    if (chart.yAxis) {
-      return { primary: chart.yAxis };
-    }
-
-    if (data.length === 0) return { primary: 'value' };
-    
-    const keys = Object.keys(data[0]);
-    if (keys.length >= 2) {
-      return { primary: keys[1], secondary: keys.length > 2 ? keys[2] : undefined };
-    }
-    return { primary: keys[0] };
-  };
-
-  const getXAxisKey = (chart: ChartCardData, data: any[]) => {
     const metadataXAxis = chart.chartData?.metadata?.xAxis;
-    if (metadataXAxis) {
-      return metadataXAxis;
-    }
-    if (chart.xAxis) {
-      return chart.xAxis;
-    }
+    
+    // Use explicit axis fields if provided, otherwise use inferred values
+    const finalDataKeys = {
+      primary: metadataYAxis || chart.yAxis || inferredConfig.dataKeys.primary,
+      secondary: inferredConfig.dataKeys.secondary, // Keep secondary from inference
+    };
+    
+    const finalXAxisKey = metadataXAxis || chart.xAxis || inferredConfig.xAxisKey;
 
-    if (data.length === 0) return 'name';
-    const keys = Object.keys(data[0]);
-    return keys[0] || 'name';
+    return {
+      data: inferredConfig.data,
+      dataKeys: finalDataKeys,
+      xAxisKey: finalXAxisKey,
+    };
   };
 
   const renderDateRangeButton = (chart: ChartCardData) => {
@@ -777,9 +774,7 @@ export function DashboardDetailView({
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {charts.map((chart) => {
-              const chartData = getChartDisplayData(chart);
-              const dataKeys = getDataKeys(chart, chartData);
-              const xAxisKey = getXAxisKey(chart, chartData);
+              const chartConfig = getChartDisplayConfig(chart);
               const numericId = parseInt(chart.id.replace(/-/g, '').substring(0, 8), 16) || 0;
               const isChartPinned = isPinned(numericId);
 
@@ -842,13 +837,14 @@ export function DashboardDetailView({
                       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                       <span className="ml-2 text-sm text-muted-foreground">Loading chart data...</span>
                     </div>
-                  ) : chartData.length > 0 ? (
+                  ) : chartConfig.data.length > 0 ? (
                     <ChartCard
                       type={chart.type}
-                      data={chartData}
-                      dataKeys={dataKeys}
-                      xAxisKey={xAxisKey}
+                      data={chartConfig.data}
+                      dataKeys={chartConfig.dataKeys}
+                      xAxisKey={chartConfig.xAxisKey}
                       height={300}
+                      showLegend={!!chartConfig.dataKeys.secondary && chart.type !== 'pie'}
                     />
                   ) : (
                     <div className="h-[300px] flex items-center justify-center border border-dashed border-border rounded-lg">

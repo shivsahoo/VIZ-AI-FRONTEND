@@ -795,22 +795,31 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
               const status = chart.status?.toString().toLowerCase() === 'draft' ? 'draft' as const : 'published' as const;
               const chartTypeSource = chart.chart_type || chart.type;
 
+              // Extract database connection ID from either database_connection_id or database_connection object
+              const databaseConnectionId = chart.database_connection_id || 
+                                          chart.database_connection?.id || 
+                                          undefined;
+              
+              // Get database name for display
+              const databaseName = chart.database_connection?.name || 
+                                  (databaseConnectionId ? `Database ${databaseConnectionId}` : "Unknown Database");
+
               return {
                 id: chart.id,
                 name: chart.title || "Untitled Chart",
                 type: mapChartType(chartTypeSource),
-                dataSource: chart.database_connection_id ? `Database ${chart.database_connection_id}` : "Unknown Database",
-                databaseId: chart.database_connection_id || undefined,
+                dataSource: databaseName,
+                databaseId: databaseConnectionId,
                 createdAt,
                 lastUpdated: formatTimeAgo(createdAt),
-                query: (chart as any).query || undefined,
+                query: chart.query || undefined,
                 status,
                 dashboardId: dashboard.dashboardId,
                 createdById: currentUser?.id,
                 projectId: dashboard.projectId || projectId,
                 isGenerated: false,
                 isFavorite: false,
-                is_time_based: (chart as any).is_time_based ?? false,
+                is_time_based: chart.is_time_based ?? false,
               };
             })
           );
@@ -1895,11 +1904,11 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             projectId={projectId}
             onAddToDashboard={(dashboardId) => {
               // Refresh charts after adding to dashboard
+              // Note: setPreviewChart(null) is already called by onClose in ChartPreviewDialog
               if (projectId) {
                 fetchCharts();
                 fetchDashboards(); // Refresh dashboards too
               }
-              setPreviewChart(null);
             }}
             onSaveAsDraft={() => {
               if (projectId) {

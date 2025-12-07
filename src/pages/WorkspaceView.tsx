@@ -56,6 +56,7 @@ interface WorkspaceViewProps {
   currentUser?: { id: number; name: string; email: string };
   projectId?: number | string;
   chartCreatedTrigger?: number;
+  dashboardRefreshTrigger?: number;
   pendingChartFromAI?: {
     id?: string;
     name: string;
@@ -63,14 +64,14 @@ interface WorkspaceViewProps {
     dataSource: string;
     query: string;
     status: 'draft' | 'published';
-    dashboardId?: number;
+    dashboardId?: number | string;
   } | null;
   onChartFromAIProcessed?: () => void;
   onOpenAIAssistant?: () => void;
   onEditChart?: (chart: { name: string; type: 'line' | 'bar' | 'pie' | 'area'; description?: string }) => void;
 }
 
-export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabChange, currentUser, projectId, chartCreatedTrigger, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart }: WorkspaceViewProps) {
+export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabChange, currentUser, projectId, chartCreatedTrigger, dashboardRefreshTrigger, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart }: WorkspaceViewProps) {
   const [selectedDashboard, setSelectedDashboard] = useState<{ id: string; name: string } | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
@@ -211,6 +212,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
           }}
           onOpenAIAssistant={onOpenAIAssistant}
           onEditChart={onEditChart}
+          refreshTrigger={dashboardRefreshTrigger}
         />
       );
     }

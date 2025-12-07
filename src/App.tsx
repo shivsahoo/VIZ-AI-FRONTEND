@@ -29,6 +29,7 @@ export default function App() {
   const [workspaceTab, setWorkspaceTab] = useState('home');
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
   const [chartCreatedTrigger, setChartCreatedTrigger] = useState(0);
+  const [dashboardRefreshTrigger, setDashboardRefreshTrigger] = useState(0);
   const [pendingChartFromAI, setPendingChartFromAI] = useState<{
     id?: string;
     name: string;
@@ -36,7 +37,7 @@ export default function App() {
     dataSource: string;
     query: string;
     status: 'draft' | 'published';
-    dashboardId?: number;
+    dashboardId?: number | string;
   } | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
@@ -267,8 +268,30 @@ export default function App() {
     dataSource: string;
     query: string;
     status: 'draft' | 'published';
-    dashboardId?: number;
+    dashboardId?: number | string;
   }) => {
+    // If chart was added to a dashboard, stay on current page and keep AI Assistant open
+    // Check if dashboardId exists (can be number or string UUID)
+    const hasDashboardId = chart.dashboardId !== undefined && 
+                           chart.dashboardId !== null && 
+                           (typeof chart.dashboardId === 'number' ? chart.dashboardId !== 0 : chart.dashboardId !== '');
+    
+    if (hasDashboardId) {
+      // Store the chart data (might be used for refresh)
+      setPendingChartFromAI(chart);
+      // Trigger re-render in ChartsView (in case user navigates there later)
+      setChartCreatedTrigger(prev => prev + 1);
+      // Trigger dashboard refresh to show the newly added chart
+      setDashboardRefreshTrigger(prev => prev + 1);
+      // Keep AI Assistant open so user can continue generating charts
+      if (!isAIAssistantOpen) {
+        setIsAIAssistantOpen(true);
+      }
+      // Don't navigate - stay on current page (dashboard)
+      return;
+    }
+
+    // For charts not added to dashboard, navigate to charts page
     // Store the chart data to be passed to ChartsView (used to trigger creation/refetch)
     setPendingChartFromAI(chart);
     // Trigger re-render in ChartsView
@@ -297,6 +320,7 @@ export default function App() {
           currentUser={currentUser ? { ...currentUser, id: MOCK_USER_ID } : undefined}
           projectId={projectId || undefined}
           chartCreatedTrigger={chartCreatedTrigger}
+          dashboardRefreshTrigger={dashboardRefreshTrigger}
           pendingChartFromAI={pendingChartFromAI}
           onChartFromAIProcessed={() => setPendingChartFromAI(null)}
           onOpenAIAssistant={() => setIsAIAssistantOpen(prev => !prev)}

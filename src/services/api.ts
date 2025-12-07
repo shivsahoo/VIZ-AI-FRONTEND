@@ -78,10 +78,14 @@ interface BackendError {
 
 /**
  * Make API request with authentication
+ * @param endpoint - API endpoint path
+ * @param options - Fetch options
+ * @param timeout - Request timeout in milliseconds (default: 60 seconds)
  */
 async function apiRequest<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  timeout: number = 60000 // Default 60 seconds
 ): Promise<T> {
   const token = getAccessToken();
   const url = `${API_BASE_URL}${endpoint}`;
@@ -100,34 +104,61 @@ async function apiRequest<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-    credentials: 'include', // Include cookies for CORS
-  });
+  // Create an AbortController for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-  // Handle token refresh on 401
-  if (response.status === 401 && token && !isPublicEndpoint) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
-      // Retry with new token
-      const newToken = getAccessToken();
-      if (newToken) {
-        headers['Authorization'] = `Bearer ${newToken}`;
-        const retryResponse = await fetch(url, {
-          ...options,
-          headers,
-          credentials: 'include',
-        });
-        return handleResponse<T>(retryResponse);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      credentials: 'include', // Include cookies for CORS
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    // Handle token refresh on 401
+    if (response.status === 401 && token && !isPublicEndpoint) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        // Retry with new token
+        const newToken = getAccessToken();
+        if (newToken) {
+          headers['Authorization'] = `Bearer ${newToken}`;
+          const retryController = new AbortController();
+          const retryTimeoutId = setTimeout(() => retryController.abort(), timeout);
+          try {
+            const retryResponse = await fetch(url, {
+              ...options,
+              headers,
+              credentials: 'include',
+              signal: retryController.signal,
+            });
+            clearTimeout(retryTimeoutId);
+            return handleResponse<T>(retryResponse);
+          } catch (retryError: any) {
+            clearTimeout(retryTimeoutId);
+            if (retryError.name === 'AbortError') {
+              throw new Error(`Request timeout after ${timeout / 1000} seconds`);
+            }
+            throw retryError;
+          }
+        }
       }
+      // Refresh failed, clear tokens
+      clearTokens();
+      throw new Error('Authentication failed. Please login again.');
     }
-    // Refresh failed, clear tokens
-    clearTokens();
-    throw new Error('Authentication failed. Please login again.');
-  }
 
-  return handleResponse<T>(response);
+    return handleResponse<T>(response);
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeout / 1000} seconds. The server may be processing a long-running operation.`);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -1020,6 +1051,12 @@ export const getUserDashboardCharts = async (): Promise<ApiResponse<Array<{
     type?: string | null;
     status?: string | null;
     database_connection_id?: string | null;
+    database_connection?: {
+      id: string;
+      name: string;
+      type?: string;
+    } | null;
+    query?: string | null;
     x_axis?: string | null;
     y_axis?: string | null;
     is_time_based?: boolean;
@@ -1040,6 +1077,12 @@ export const getUserDashboardCharts = async (): Promise<ApiResponse<Array<{
           type?: string | null;
           status?: string | null;
           database_connection_id?: string | null;
+          database_connection?: {
+            id: string;
+            name: string;
+            type?: string;
+          } | null;
+          query?: string | null;
           x_axis?: string | null;
           y_axis?: string | null;
           is_time_based?: boolean;
@@ -1954,6 +1997,7 @@ export interface ProjectInsightsResponse {
 
 /**
  * Generate business insights for a single database connection
+ * Note: This can take 12-35 seconds, so we use a longer timeout
  */
 export const generateBusinessInsights = async (
   databaseConnectionId: string
@@ -1966,7 +2010,8 @@ export const generateBusinessInsights = async (
         body: JSON.stringify({
           database_connection_id: databaseConnectionId,
         }),
-      }
+      },
+      120000 // 120 seconds (2 minutes) timeout for single database insights
     );
 
     return {
@@ -1986,6 +2031,7 @@ export const generateBusinessInsights = async (
 
 /**
  * Generate project-wide business insights for all databases in a project
+ * Note: This can take 30-120 seconds, so we use a much longer timeout
  */
 export const generateProjectInsights = async (
   projectId: string
@@ -1996,7 +2042,8 @@ export const generateProjectInsights = async (
       {
         method: 'POST',
         body: JSON.stringify({}),
-      }
+      },
+      180000 // 180 seconds (3 minutes) timeout for project-wide insights
     );
 
     return {
