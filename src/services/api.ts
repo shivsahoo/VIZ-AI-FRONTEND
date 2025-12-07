@@ -162,6 +162,57 @@ async function apiRequest<T>(
 }
 
 /**
+ * Sanitize error message from HTML responses
+ */
+function sanitizeErrorMessage(errorText: string, statusCode: number): string {
+  // If it's HTML, extract meaningful information or provide user-friendly message
+  if (errorText.includes('<html>') || errorText.includes('<!DOCTYPE') || errorText.includes('<title>')) {
+    // Extract title from HTML if possible
+    const titleMatch = errorText.match(/<title>(.*?)<\/title>/i);
+    const h1Match = errorText.match(/<h1>(.*?)<\/h1>/i);
+    
+    const extractedTitle = titleMatch?.[1] || h1Match?.[1] || '';
+    
+    // Map common HTTP error codes to user-friendly messages
+    const errorMessages: Record<number, string> = {
+      400: 'Invalid request. Please check your input and try again.',
+      401: 'Authentication required. Please log in again.',
+      403: 'You don\'t have permission to perform this action.',
+      404: 'The requested resource was not found.',
+      408: 'Request timed out. Please try again.',
+      429: 'Too many requests. Please wait a moment and try again.',
+      500: 'Server error. Our team has been notified. Please try again later.',
+      502: 'Service temporarily unavailable. The server is experiencing issues. Please try again in a moment.',
+      503: 'Service unavailable. The server is temporarily down for maintenance.',
+      504: 'Request timeout. The server took too long to respond. Please try again.',
+    };
+    
+    // Use specific message for status code, or generic message
+    if (errorMessages[statusCode]) {
+      return errorMessages[statusCode];
+    }
+    
+    // If we extracted a title, try to make it user-friendly
+    if (extractedTitle) {
+      const cleanTitle = extractedTitle
+        .replace(/Bad Gateway/i, 'Service temporarily unavailable')
+        .replace(/Gateway Time-out/i, 'Request timeout')
+        .replace(/Internal Server Error/i, 'Server error')
+        .replace(/Not Found/i, 'Resource not found')
+        .replace(/Unauthorized/i, 'Authentication required')
+        .replace(/Forbidden/i, 'Access denied');
+      
+      return cleanTitle + '. Please try again later.';
+    }
+    
+    return 'An unexpected error occurred. Please try again later.';
+  }
+  
+  // If it's not HTML, return as-is (but limit length)
+  return errorText.length > 500 ? errorText.substring(0, 500) + '...' : errorText;
+}
+
+/**
  * Handle API response
  */
 async function handleResponse<T>(response: Response): Promise<T> {
@@ -174,10 +225,13 @@ async function handleResponse<T>(response: Response): Promise<T> {
         const error: BackendError = await response.json();
         errorMessage = error.detail || error.message || errorMessage;
       } else {
-        errorMessage = await response.text();
+        const errorText = await response.text();
+        // Sanitize HTML error messages
+        errorMessage = sanitizeErrorMessage(errorText, response.status);
       }
-    } catch {
-      // Use default error message
+    } catch (parseError) {
+      // If we can't parse the error, use status code-based message
+      errorMessage = sanitizeErrorMessage('', response.status);
     }
     throw new Error(errorMessage);
   }

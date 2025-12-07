@@ -116,12 +116,15 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
           };
         });
         setProjects(uiProjects);
+        setError(null); // Clear any previous errors
       } else {
-        setError(response.error?.message || "Failed to fetch products");
-        toast.error(response.error?.message || "Failed to load products");
+        const errorMsg = response.error?.message || "Unable to load projects. Please try again.";
+        setError(errorMsg);
+        toast.error(errorMsg);
       }
     } catch (err: any) {
-      const errorMessage = err.message || "An error occurred while fetching projects";
+      // Error message is already sanitized by apiRequest
+      const errorMessage = err.message || "Unable to load projects. Please check your connection and try again.";
       setError(errorMessage);
       toast.error(errorMessage);
     } finally {
@@ -377,7 +380,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
       <div className="min-h-full bg-background flex items-center justify-center">
         <Card className="p-8 max-w-md">
           <div className="text-center">
-            <h3 className="text-lg font-semibold text-foreground mb-2">Failed to Load Products</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-2">Unable to Load Projects</h3>
             <p className="text-muted-foreground mb-4">{error}</p>
             <Button onClick={fetchProjects}>Try Again</Button>
           </div>
