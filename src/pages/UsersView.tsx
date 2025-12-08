@@ -606,6 +606,32 @@ export function UsersView({ projectId }: UsersViewProps) {
     }
   };
 
+  const toggleAllPermissions = () => {
+    // Get all permission IDs from mappedPermissions or fallback to allPermissions
+    const allPermissionIds = mappedPermissions.length > 0
+      ? mappedPermissions.map(p => p.id)
+      : allPermissions.map(p => p.id);
+    
+    // Check if all permissions are currently selected
+    const allSelected = allPermissionIds.every(id => selectedPermissions.includes(id));
+    
+    if (allSelected) {
+      // Deselect all
+      setSelectedPermissions([]);
+    } else {
+      // Select all
+      setSelectedPermissions([...allPermissionIds]);
+    }
+  };
+
+  const areAllPermissionsSelected = () => {
+    const allPermissionIds = mappedPermissions.length > 0
+      ? mappedPermissions.map(p => p.id)
+      : allPermissions.map(p => p.id);
+    
+    return allPermissionIds.length > 0 && allPermissionIds.every(id => selectedPermissions.includes(id));
+  };
+
   const toggleDatabaseExpanded = (databaseId: string) => {
     const newExpanded = new Set(expandedDatabases);
     if (newExpanded.has(databaseId)) {
@@ -1198,7 +1224,23 @@ export function UsersView({ projectId }: UsersViewProps) {
             
             {/* Permissions Section */}
             <div className="space-y-3">
-              <Label className="text-base">Permissions</Label>
+              <div className="space-y-2">
+                <Label className="text-base">Permissions</Label>
+                <div className="flex items-center gap-2 pb-2">
+                  <Checkbox
+                    id="select-all-permissions"
+                    checked={areAllPermissionsSelected()}
+                    onCheckedChange={toggleAllPermissions}
+                    disabled={editingRole?.isSystem}
+                  />
+                  <Label 
+                    htmlFor="select-all-permissions"
+                    className="text-sm font-medium cursor-pointer text-foreground hover:text-primary transition-colors"
+                  >
+                    Select All
+                  </Label>
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 {Object.entries(groupedPermissions).map(([category, permissions]) => (
                   <Card key={category} className="p-4 border border-border">

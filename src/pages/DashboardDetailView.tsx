@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2, Calendar as CalendarIcon, Users } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -117,6 +117,7 @@ export function DashboardDetailView({
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [isLoadingMembers, setIsLoadingMembers] = useState(false);
   const [isAddingMembers, setIsAddingMembers] = useState(false);
+  const lastRefreshTriggerRef = useRef<number>(0);
 
   // Helper to format date as YYYY-MM-DD for API calls
   const formatDateForAPI = (date: Date): string => {
@@ -334,8 +335,13 @@ export function DashboardDetailView({
 
   // Refresh charts when refreshTrigger changes (e.g., when a chart is added to dashboard)
   useEffect(() => {
-    if (refreshTrigger !== undefined && refreshTrigger > 0) {
-      fetchDashboardCharts();
+    if (refreshTrigger !== undefined && refreshTrigger > 0 && refreshTrigger !== lastRefreshTriggerRef.current) {
+      lastRefreshTriggerRef.current = refreshTrigger;
+      // Use a small delay to ensure any dialog overlays are fully removed before refreshing
+      const timeoutId = setTimeout(() => {
+        fetchDashboardCharts();
+      }, 200);
+      return () => clearTimeout(timeoutId);
     }
   }, [refreshTrigger, fetchDashboardCharts]);
 

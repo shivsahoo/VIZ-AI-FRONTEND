@@ -265,7 +265,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     return databaseId;
   };
 
-  const validateDatabaseId = (databaseId?: string) => {
+  const validateDatabaseId = (databaseId?: string): databaseId is string => {
     return !!databaseId && databaseId.trim().length > 0;
   };
 
@@ -325,6 +325,8 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       return;
     }
 
+    // At this point, databaseId is validated and guaranteed to be a string (type guard)
+
     setIsAddingToDashboard(true);
     setAddingToDashboardId(dashboardId);
     setIsDropdownOpen(false); // Close dropdown to show loading state in button
@@ -354,18 +356,23 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       if (response.success) {
         const dashboard = dashboards.find((d) => String(d.id) === String(dashboardId));
         toast.success(`Chart added to "${dashboard?.name || "dashboard"}"!`);
-        // Close dialog first to ensure overlay is removed
+        // Reset state first
+        setIsAddingToDashboard(false);
+        setAddingToDashboardId(null);
+        // Close dialog to ensure overlay is removed
         onClose();
-        // Call callback after a brief delay to ensure dialog cleanup completes
+        // Call callback after a longer delay to ensure dialog and overlay are fully removed
+        // This prevents the overlay from blocking interactions
         setTimeout(() => {
           onAddToDashboard?.(dashboardId);
-        }, 100);
+        }, 300);
       } else {
         toast.error(response.error?.message || "Failed to add chart to dashboard");
+        setIsAddingToDashboard(false);
+        setAddingToDashboardId(null);
       }
     } catch (err: any) {
       toast.error(err.message || "An error occurred while adding chart to dashboard");
-    } finally {
       setIsAddingToDashboard(false);
       setAddingToDashboardId(null);
     }
@@ -443,13 +450,16 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className="!w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] sm:!w-[85vw] sm:!max-w-[85vw] md:!max-w-xl lg:!max-w-2xl xl:!max-w-3xl max-h-[90vh] sm:max-h-[85vh] overflow-hidden flex flex-col p-3 sm:p-4 md:p-5">
-        <DialogHeader className="pb-2 sm:pb-3">
+      <DialogContent className="!w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] sm:!w-[85vw] sm:!max-w-[85vw] md:!max-w-xl lg:!max-w-2xl xl:!max-w-3xl max-h-[90vh] sm:max-h-[85vh] overflow-hidden flex flex-col p-0">
+        {/* Fixed Header */}
+        <DialogHeader className="px-3 sm:px-4 md:px-5 pt-3 sm:pt-4 md:pt-5 pb-2 sm:pb-3 flex-shrink-0 pr-12 sm:pr-14 relative">
           <div className="flex items-start justify-between gap-2 sm:gap-3">
             <div className="flex-1 min-w-0">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 mb-1.5">
-                <DialogTitle className="text-sm sm:text-base break-words">{chart.name}</DialogTitle>
-                <Badge variant="outline" className="capitalize w-fit text-xs">
+              <div className="flex items-center gap-2 mb-1.5" style={{ paddingRight: '60px' }}>
+                <DialogTitle className="text-sm sm:text-base flex-1 min-w-0 truncate whitespace-nowrap">
+                  {chart.name}
+                </DialogTitle>
+                <Badge variant="outline" className="capitalize w-fit text-xs flex-shrink-0">
                   {chart.type} Chart
                 </Badge>
               </div>
@@ -462,7 +472,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 mt-2">
                   <div className="flex items-center gap-1.5">
                     <LayoutDashboard className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                    <span className="text-xs text-muted-foreground">Part of:</span>
+                    <span className="text-xs text-muted-foreground mt-2">Part of:</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {chart.dashboards.map((dashboard, index) => (
@@ -477,96 +487,99 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
           </div>
         </DialogHeader>
 
-        {/* Chart Visualization */}
-        <div className="bg-muted/30 rounded-lg border border-border p-2 sm:p-3 md:p-4 mb-4">
-          <div className="relative w-full" style={{ height: `${getChartHeight()}px` }}>
-            {missingConfigMessage ? (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="max-w-xs text-sm text-muted-foreground leading-relaxed text-center">
-                  {missingConfigMessage}
+        {/* Scrollable Content Area */}
+        <div className="flex-1 overflow-y-auto px-3 sm:px-4 md:px-5 min-h-0">
+          {/* Chart Visualization */}
+          <div className="bg-muted/30 rounded-lg border border-border p-2 sm:p-3 md:p-4 mb-4">
+            <div className="relative w-full" style={{ height: `${getChartHeight()}px` }}>
+              {missingConfigMessage ? (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="max-w-xs text-sm text-muted-foreground leading-relaxed text-center">
+                    {missingConfigMessage}
+                  </div>
                 </div>
+              ) : (
+                <>
+                  {isExecutingQuery && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/70 backdrop-blur-sm text-muted-foreground z-10">
+                      <Clock className="w-5 h-5 animate-spin" />
+                      <span className="text-xs">Executing query…</span>
+                    </div>
+                  )}
+                  {!isExecutingQuery && chartDataError && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="max-w-xs text-sm text-muted-foreground leading-relaxed text-center">
+                        <p className="font-medium text-foreground mb-1">Unable to load data</p>
+                        <p>{chartDataError}</p>
+                      </div>
+                    </div>
+                  )}
+                  {!isExecutingQuery && !chartDataError && noDataReturned && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="max-w-xs text-sm text-muted-foreground leading-relaxed text-center">
+                        <p className="font-medium text-foreground mb-1">No data returned</p>
+                        <p>Try refining the SQL query or adjusting filters.</p>
+                      </div>
+                    </div>
+                  )}
+                  {!isExecutingQuery && !chartDataError && !noDataReturned && (
+                    <ChartCard
+                      type={chart.type}
+                      data={chartDataConfig.data}
+                      dataKeys={chartDataConfig.dataKeys}
+                      xAxisKey={chartDataConfig.xAxisKey}
+                      showLegend={!!chartDataConfig.dataKeys.secondary && chart.type !== 'pie'}
+                      height={getChartHeight()}
+                    />
+                  )}
+                </>
+              )}
+            </div>
+
+            {!missingConfigMessage && chartDataMetadata && (
+              <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+                {typeof chartDataMetadata.executionTime === 'number' && chartDataMetadata.executionTime > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-md border border-border bg-background/50 text-xs">
+                    {chartDataMetadata.executionTime} ms
+                  </span>
+                )}
+                {cachedAtDisplay && (
+                  <span className="px-1.5 py-0.5 rounded-md border border-border bg-background/50 text-xs">
+                    Cached at {cachedAtDisplay}
+                  </span>
+                )}
               </div>
-            ) : (
-              <>
-                {isExecutingQuery && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/70 backdrop-blur-sm text-muted-foreground z-10">
-                    <Clock className="w-5 h-5 animate-spin" />
-                    <span className="text-xs">Executing query…</span>
-                  </div>
-                )}
-                {!isExecutingQuery && chartDataError && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="max-w-xs text-sm text-muted-foreground leading-relaxed text-center">
-                      <p className="font-medium text-foreground mb-1">Unable to load data</p>
-                      <p>{chartDataError}</p>
-                    </div>
-                  </div>
-                )}
-                {!isExecutingQuery && !chartDataError && noDataReturned && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="max-w-xs text-sm text-muted-foreground leading-relaxed text-center">
-                      <p className="font-medium text-foreground mb-1">No data returned</p>
-                      <p>Try refining the SQL query or adjusting filters.</p>
-                    </div>
-                  </div>
-                )}
-                {!isExecutingQuery && !chartDataError && !noDataReturned && (
-                  <ChartCard
-                    type={chart.type}
-                    data={chartDataConfig.data}
-                    dataKeys={chartDataConfig.dataKeys}
-                    xAxisKey={chartDataConfig.xAxisKey}
-                    showLegend={!!chartDataConfig.dataKeys.secondary && chart.type !== 'pie'}
-                    height={getChartHeight()}
-                  />
-                )}
-              </>
             )}
           </div>
 
-          {!missingConfigMessage && chartDataMetadata && (
-            <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-              {typeof chartDataMetadata.executionTime === 'number' && chartDataMetadata.executionTime > 0 && (
-                <span className="px-1.5 py-0.5 rounded-md border border-border bg-background/50 text-xs">
-                  {chartDataMetadata.executionTime} ms
-                </span>
-              )}
-              {cachedAtDisplay && (
-                <span className="px-1.5 py-0.5 rounded-md border border-border bg-background/50 text-xs">
-                  Cached at {cachedAtDisplay}
-                </span>
-              )}
+          {/* SQL Query Section - Scrollable */}
+          <div className="space-y-3 pb-4">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5 font-medium">AI Reasoning:</p>
+              <div className="text-xs text-foreground bg-muted/50 p-2.5 rounded-lg break-words max-h-[200px] overflow-y-auto">
+                {chart.reasoning || "No reasoning summary provided."}
+              </div>
             </div>
-          )}
-        </div>
-
-        {/* SQL Query Section */}
-        <div className="space-y-3 mb-4">
-          <div>
-            <p className="text-xs text-muted-foreground mb-1.5 font-medium">AI Reasoning:</p>
-            <p className="text-xs text-foreground bg-muted/50 p-2.5 rounded-lg break-words">
-              {chart.reasoning || "No reasoning summary provided."}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-1.5 font-medium">SQL Query:</p>
-            <pre className="text-xs bg-muted/50 p-2.5 rounded-lg overflow-x-auto">
-              <code className="text-foreground break-words whitespace-pre-wrap">
-                {chart.query || "-- No query provided --"}
-              </code>
-            </pre>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5 font-medium">SQL Query:</p>
+              <pre className="text-xs bg-muted/50 p-2.5 pl-4 rounded-lg overflow-x-auto max-h-[300px] overflow-y-auto">
+                <code className="text-foreground break-words whitespace-pre-wrap">
+                  {chart.query || "-- No query provided --"}
+                </code>
+              </pre>
+            </div>
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2 border-t border-border mt-2">
-          {/* Only show Save as Draft button if it's not an existing published chart */}
-          {(!isExistingChart || chartStatus !== 'published') && (
+        {/* Fixed Actions at Bottom */}
+        <div className="flex flex-row items-stretch gap-2 pt-2 border-t border-border px-3 sm:px-4 md:px-5 pb-3 sm:pb-4 md:pb-5 bg-background flex-shrink-0 sticky bottom-0">
+          {/* Only show Save as Draft button when it's a new chart (not existing) */}
+          {!isExistingChart && (
             <Button
               variant="outline"
               onClick={handleSaveAsDraft}
               disabled={isSavingDraft}
-              className="w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9"
+              className="flex-1 text-xs sm:text-sm h-8 sm:h-9"
             >
               {isSavingDraft ? "Saving..." : "Save for later"}
             </Button>
@@ -575,7 +588,7 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
           <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
             <DropdownMenuTrigger asChild>
               <GradientButton 
-                className="gap-1.5 w-full sm:w-auto text-xs sm:text-sm h-8 sm:h-9" 
+                className="gap-1.5 flex-1 text-xs sm:text-sm h-8 sm:h-9"
                 disabled={isAddingToDashboard}
               >
                 {isAddingToDashboard ? (
