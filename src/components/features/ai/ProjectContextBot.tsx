@@ -60,6 +60,29 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
     scrollToBottom();
   }, [messages, isTyping]);
 
+  // Auto-focus input when component mounts, when typing stops, or when a new question arrives
+  useEffect(() => {
+    if (hasStarted && !isTyping && currentQuestion && inputRef.current) {
+      // Use requestAnimationFrame to ensure DOM is ready
+      const focusInput = () => {
+        if (inputRef.current && !inputRef.current.disabled) {
+          inputRef.current.focus();
+        }
+      };
+      
+      // Try multiple times with increasing delays to ensure focus
+      const timer1 = setTimeout(focusInput, 50);
+      const timer2 = setTimeout(focusInput, 200);
+      const timer3 = setTimeout(focusInput, 500);
+      
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+        clearTimeout(timer3);
+      };
+    }
+  }, [hasStarted, isTyping, currentQuestion]);
+
   useEffect(() => {
     if (!inputRef.current) {
       return;
@@ -102,6 +125,13 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
           
           // Add bot message with question
           addBotMessage(question);
+          
+          // Focus input after question is set
+          setTimeout(() => {
+            if (inputRef.current && !inputRef.current.disabled) {
+              inputRef.current.focus();
+            }
+          }, 900);
         } else if (response.status === 'completed') {
           // Project info collection complete
           const state = response.state || {};
@@ -226,6 +256,12 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
         }
       ]);
       setIsTyping(false);
+      // Focus input after bot message is added
+      setTimeout(() => {
+        if (inputRef.current && !inputRef.current.disabled) {
+          inputRef.current.focus();
+        }
+      }, 100);
     }, 800);
   };
 
@@ -284,6 +320,11 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
     wsClient.projectInfo({
       user_response: inputValue
     });
+
+    // Refocus input after sending
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
   };
 
   const handleSkipQuestion = () => {
@@ -463,7 +504,17 @@ export function ProjectContextBot({ onComplete, onCancel, userId }: ProjectConte
           ) : (
             <div className="flex gap-3 items-end flex-wrap">
               <Textarea
-                ref={inputRef}
+                ref={(el) => {
+                  inputRef.current = el;
+                  // Focus immediately when ref is set and element is available
+                  if (el && !el.disabled) {
+                    setTimeout(() => {
+                      if (el && !el.disabled) {
+                        el.focus();
+                      }
+                    }, 0);
+                  }
+                }}
                 value={userInput}
                 onChange={(e) => setUserInput(e.target.value)}
                 onKeyDown={handleKeyDown}

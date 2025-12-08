@@ -134,6 +134,28 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping, connectionError]);
 
+  // Auto-focus input when component mounts, when typing stops, or when a new question arrives
+  useEffect(() => {
+    if (hasStarted && !isTyping && currentQuestion && textareaRef.current) {
+      // Use multiple attempts to ensure focus
+      const focusInput = () => {
+        if (textareaRef.current && !textareaRef.current.disabled) {
+          textareaRef.current.focus();
+        }
+      };
+      
+      const timer1 = setTimeout(focusInput, 50);
+      const timer2 = setTimeout(focusInput, 200);
+      const timer3 = setTimeout(focusInput, 500);
+      
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+        clearTimeout(timer3);
+      };
+    }
+  }, [hasStarted, isTyping, currentQuestion]);
+
   useEffect(() => {
     return () => {
       if (wsClient) {
@@ -235,6 +257,11 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
       setIsTyping(false);
       toast.error(error?.message || "Failed to send your response. Please try again.");
     }
+
+    // Refocus input after sending
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 100);
   };
 
   const handleSkipQuestion = () => {
@@ -428,7 +455,17 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
           ) : (
             <div className="flex gap-3 items-end">
               <Textarea
-                ref={textareaRef}
+                ref={(el) => {
+                  textareaRef.current = el;
+                  // Focus immediately when ref is set and element is available
+                  if (el && !el.disabled) {
+                    setTimeout(() => {
+                      if (el && !el.disabled) {
+                        el.focus();
+                      }
+                    }, 0);
+                  }
+                }}
                 value={userInput}
                 onChange={(e) => setUserInput(e.target.value)}
                 onKeyDown={handleTextareaKeyDown}

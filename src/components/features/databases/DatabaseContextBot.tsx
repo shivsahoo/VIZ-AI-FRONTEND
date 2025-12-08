@@ -69,6 +69,7 @@ export function DatabaseContextBot({
   const [probableAnswers, setProbableAnswers] = useState<string[]>([]);
   const isCompletedRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -77,6 +78,28 @@ export function DatabaseContextBot({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
+
+  // Auto-focus input when component mounts, when typing stops, or when a new question arrives
+  useEffect(() => {
+    if (hasStarted && !isTyping && currentQuestion && inputRef.current) {
+      // Use multiple attempts to ensure focus
+      const focusInput = () => {
+        if (inputRef.current && !inputRef.current.disabled) {
+          inputRef.current.focus();
+        }
+      };
+      
+      const timer1 = setTimeout(focusInput, 50);
+      const timer2 = setTimeout(focusInput, 200);
+      const timer3 = setTimeout(focusInput, 500);
+      
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+        clearTimeout(timer3);
+      };
+    }
+  }, [hasStarted, isTyping, currentQuestion]);
 
   // Initialize WebSocket connection
   const initWebSocket = async (): Promise<VizAIWebSocket | null> => {
@@ -117,6 +140,13 @@ export function DatabaseContextBot({
           
           // Add bot message with question
           addBotMessage(question);
+          
+          // Focus input after question is set
+          setTimeout(() => {
+            if (inputRef.current && !inputRef.current.disabled) {
+              inputRef.current.focus();
+            }
+          }, 900);
         } else if (response.status === 'completed') {
           // KPI collection complete
           console.log('[DatabaseContextBot] KPI collection completed, setting completion flag');
@@ -239,6 +269,12 @@ export function DatabaseContextBot({
         }
       ]);
       setIsTyping(false);
+      // Focus input after bot message is added
+      setTimeout(() => {
+        if (inputRef.current && !inputRef.current.disabled) {
+          inputRef.current.focus();
+        }
+      }, 100);
     }, 800);
   };
 
@@ -342,6 +378,11 @@ export function DatabaseContextBot({
     }
 
     wsClient.kpiInfo(payload);
+
+    // Refocus input after sending
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
   };
 
   const handleSendMessage = () => {
@@ -357,6 +398,10 @@ export function DatabaseContextBot({
 
   const handleSuggestedAnswer = (answer: string) => {
     sendResponse(answer);
+    // Refocus input after selecting suggested answer
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
   };
 
   const currentPlaceholder = currentQuestion 
@@ -517,6 +562,17 @@ export function DatabaseContextBot({
               )}
               <div className="flex gap-3">
                 <Input
+                  ref={(el) => {
+                    inputRef.current = el;
+                    // Focus immediately when ref is set and element is available
+                    if (el && !el.disabled) {
+                      setTimeout(() => {
+                        if (el && !el.disabled) {
+                          el.focus();
+                        }
+                      }, 0);
+                    }
+                  }}
                   value={userInput}
                   onChange={(e) => setUserInput(e.target.value)}
                   onKeyPress={handleKeyPress}

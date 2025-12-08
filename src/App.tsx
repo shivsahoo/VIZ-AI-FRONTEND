@@ -68,6 +68,11 @@ export default function App() {
       const refreshToken = localStorage.getItem('vizai_refresh_token');
       
       if (!accessToken || !refreshToken) {
+        // No tokens, ensure user is logged out
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+        setSelectedProject(null);
+        setSelectedProjectId(null);
         setIsCheckingAuth(false);
         return; // No tokens, user needs to login
       }
@@ -84,31 +89,30 @@ export default function App() {
           });
           setIsAuthenticated(true);
           
-          // Restore last project if exists
-          const lastProject = localStorage.getItem('vizai_last_project');
-          const lastProjectId = localStorage.getItem('vizai_last_project_id');
-          if (lastProject) {
-            setSelectedProject(lastProject);
-            setSelectedProjectId(lastProjectId);
-            setCurrentView('workspace');
-            setWorkspaceTab('home');
-          } else {
-            setCurrentView('home');
-          }
-          
           // Check onboarding status
           const hasCompletedOnboardingBefore = localStorage.getItem('vizai_onboarding_completed') === 'true';
           setHasCompletedOnboarding(hasCompletedOnboardingBefore);
           setShowOnboarding(false);
+          
+          // Note: Project restoration will happen after projects are fetched
+          // to ensure the project still exists
         } else {
-          // Token invalid, clear tokens
+          // Token invalid, clear tokens and logout
           localStorage.removeItem('vizai_access_token');
           localStorage.removeItem('vizai_refresh_token');
+          setIsAuthenticated(false);
+          setCurrentUser(null);
+          setSelectedProject(null);
+          setSelectedProjectId(null);
         }
       } catch (error) {
-        // Token invalid or expired, clear tokens
+        // Token invalid or expired, clear tokens and logout
         localStorage.removeItem('vizai_access_token');
         localStorage.removeItem('vizai_refresh_token');
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+        setSelectedProject(null);
+        setSelectedProjectId(null);
       } finally {
         setIsCheckingAuth(false);
       }
@@ -117,12 +121,63 @@ export default function App() {
     checkAuth();
   }, []); // Run only on mount
 
+  // Listen for storage changes (logout in other tabs)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      // Check if tokens were removed
+      if (e.key === 'vizai_access_token' || e.key === 'vizai_refresh_token') {
+        const accessToken = localStorage.getItem('vizai_access_token');
+        const refreshToken = localStorage.getItem('vizai_refresh_token');
+        
+        // If tokens are missing, logout this tab immediately
+        if (!accessToken || !refreshToken) {
+          setIsAuthenticated(false);
+          setCurrentUser(null);
+          setSelectedProject(null);
+          setSelectedProjectId(null);
+          setCurrentView('home');
+          setWorkspaceTab('home');
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
   // Fetch projects on mount to have project IDs available
   useEffect(() => {
     if (isAuthenticated) {
       fetchProjects();
     }
   }, [isAuthenticated]);
+
+  // Restore last selected project after projects are loaded
+  useEffect(() => {
+    if (isAuthenticated && projects.length > 0 && !selectedProject) {
+      const lastProject = localStorage.getItem('vizai_last_project');
+      const lastProjectId = localStorage.getItem('vizai_last_project_id');
+      
+      if (lastProject) {
+        // Verify the project still exists in the projects list
+        const projectExists = projects.find(p => p.name === lastProject || p.id === lastProjectId);
+        
+        if (projectExists) {
+          // Restore the project
+          setSelectedProject(lastProject);
+          setSelectedProjectId(projectExists.id);
+          setCurrentView('workspace');
+          setWorkspaceTab('home');
+        } else {
+          // Project no longer exists, clear from localStorage
+          localStorage.removeItem('vizai_last_project');
+          localStorage.removeItem('vizai_last_project_id');
+        }
+      }
+    }
+  }, [isAuthenticated, projects, selectedProject]);
 
   const fetchProjects = async () => {
     try {
@@ -150,12 +205,11 @@ export default function App() {
     
     setCurrentView('workspace');
     setWorkspaceTab('home'); // Reset to home when entering a project
-    // Store last visited project for project users
-    if (currentUser?.role === 'project_user') {
-      localStorage.setItem('vizai_last_project', projectName);
-      if (finalProjectId) {
-        localStorage.setItem('vizai_last_project_id', finalProjectId);
-      }
+    
+    // Store last visited project for ALL users (not just project_user)
+    localStorage.setItem('vizai_last_project', projectName);
+    if (finalProjectId) {
+      localStorage.setItem('vizai_last_project_id', finalProjectId);
     }
   };
 
@@ -164,12 +218,11 @@ export default function App() {
     setSelectedProject(projectName);
     setSelectedProjectId(project?.id || null);
     setWorkspaceTab('home'); // Reset to home when switching projects
-    // Store last visited project for project users
-    if (currentUser?.role === 'project_user') {
-      localStorage.setItem('vizai_last_project', projectName);
-      if (project?.id) {
-        localStorage.setItem('vizai_last_project_id', project.id);
-      }
+    
+    // Store last visited project for ALL users (not just project_user)
+    localStorage.setItem('vizai_last_project', projectName);
+    if (project?.id) {
+      localStorage.setItem('vizai_last_project_id', project.id);
     }
   };
 
@@ -228,11 +281,19 @@ export default function App() {
   };
 
   const handleSignOut = () => {
+    // Clear authentication state
     setCurrentUser(null);
     setIsAuthenticated(false);
     setSelectedProject(null);
+    setSelectedProjectId(null);
     setCurrentView('home');
     setWorkspaceTab('home');
+    
+    // Clear local storage tokens
+    localStorage.removeItem('vizai_access_token');
+    localStorage.removeItem('vizai_refresh_token');
+    localStorage.removeItem('vizai_last_project');
+    localStorage.removeItem('vizai_last_project_id');
   };
 
   const handleUpdateProfile = (user: { name: string; email: string }) => {

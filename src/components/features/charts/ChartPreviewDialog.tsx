@@ -478,30 +478,36 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
         </DialogHeader>
 
         {/* Chart Visualization */}
-        <div className="flex-1 min-h-0 bg-muted/30 rounded-lg border border-border p-2 sm:p-3 md:p-4">
-          <div className="relative w-full h-[200px] sm:h-[250px] md:h-[280px] lg:h-[320px] flex items-center justify-center text-center">
+        <div className="bg-muted/30 rounded-lg border border-border p-2 sm:p-3 md:p-4 mb-4">
+          <div className="relative w-full" style={{ height: `${getChartHeight()}px` }}>
             {missingConfigMessage ? (
-              <div className="max-w-xs text-sm text-muted-foreground leading-relaxed">
-                {missingConfigMessage}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="max-w-xs text-sm text-muted-foreground leading-relaxed text-center">
+                  {missingConfigMessage}
+                </div>
               </div>
             ) : (
               <>
                 {isExecutingQuery && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/70 backdrop-blur-sm text-muted-foreground">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/70 backdrop-blur-sm text-muted-foreground z-10">
                     <Clock className="w-5 h-5 animate-spin" />
                     <span className="text-xs">Executing query…</span>
                   </div>
                 )}
                 {!isExecutingQuery && chartDataError && (
-                  <div className="max-w-xs text-sm text-muted-foreground leading-relaxed">
-                    <p className="font-medium text-foreground mb-1">Unable to load data</p>
-                    <p>{chartDataError}</p>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="max-w-xs text-sm text-muted-foreground leading-relaxed text-center">
+                      <p className="font-medium text-foreground mb-1">Unable to load data</p>
+                      <p>{chartDataError}</p>
+                    </div>
                   </div>
                 )}
                 {!isExecutingQuery && !chartDataError && noDataReturned && (
-                  <div className="max-w-xs text-sm text-muted-foreground leading-relaxed">
-                    <p className="font-medium text-foreground mb-1">No data returned</p>
-                    <p>Try refining the SQL query or adjusting filters.</p>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="max-w-xs text-sm text-muted-foreground leading-relaxed text-center">
+                      <p className="font-medium text-foreground mb-1">No data returned</p>
+                      <p>Try refining the SQL query or adjusting filters.</p>
+                    </div>
                   </div>
                 )}
                 {!isExecutingQuery && !chartDataError && !noDataReturned && (
@@ -535,16 +541,16 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
         </div>
 
         {/* SQL Query Section */}
-        <div className="space-y-2 max-h-24 sm:max-h-32 md:max-h-40 overflow-y-auto mt-2">
+        <div className="space-y-3 mb-4">
           <div>
-            <p className="text-xs text-muted-foreground mb-1">AI Reasoning:</p>
-            <p className="text-xs text-foreground bg-muted/50 p-2 rounded-lg break-words line-clamp-2">
+            <p className="text-xs text-muted-foreground mb-1.5 font-medium">AI Reasoning:</p>
+            <p className="text-xs text-foreground bg-muted/50 p-2.5 rounded-lg break-words">
               {chart.reasoning || "No reasoning summary provided."}
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground mb-1">SQL Query:</p>
-            <pre className="text-xs bg-muted/50 p-2 rounded-lg overflow-x-auto max-h-32">
+            <p className="text-xs text-muted-foreground mb-1.5 font-medium">SQL Query:</p>
+            <pre className="text-xs bg-muted/50 p-2.5 rounded-lg overflow-x-auto">
               <code className="text-foreground break-words whitespace-pre-wrap">
                 {chart.query || "-- No query provided --"}
               </code>

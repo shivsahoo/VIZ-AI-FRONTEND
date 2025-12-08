@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Sparkles, Send, TrendingUp, Calendar, Users } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -25,6 +25,7 @@ export function AskVizAIView() {
   const [query, setQuery] = useState("");
   const [hasResults, setHasResults] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = () => {
     if (!query.trim()) return;
@@ -34,7 +35,22 @@ export function AskVizAIView() {
       setIsAnalyzing(false);
       setHasResults(true);
     }, 1500);
+
+    // Refocus input after submitting
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
   };
+
+  // Auto-focus input when component mounts or when not analyzing
+  useEffect(() => {
+    if (!isAnalyzing && inputRef.current) {
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isAnalyzing, hasResults]);
 
   return (
     <div className="px-12 py-10">
@@ -61,12 +77,14 @@ export function AskVizAIView() {
             <Card className="p-2 border-2 border-border shadow-lg">
               <div className="flex gap-2">
                 <input
+                  ref={inputRef}
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
                   placeholder="Ask VizAI about your data..."
                   className="flex-1 px-4 py-4 bg-transparent border-0 outline-none text-foreground placeholder:text-muted-foreground"
+                  autoFocus
                 />
                 <Button 
                   onClick={handleSubmit}
@@ -95,7 +113,13 @@ export function AskVizAIView() {
                 {suggestedQuestions.map((question, idx) => (
                   <button
                     key={idx}
-                    onClick={() => setQuery(question)}
+                    onClick={() => {
+                      setQuery(question);
+                      // Refocus input after selecting suggested question
+                      setTimeout(() => {
+                        inputRef.current?.focus();
+                      }, 100);
+                    }}
                     className="p-4 rounded-xl border border-border hover:border-accent hover:bg-accent/5 transition-all text-left text-sm text-foreground"
                   >
                     {question}
