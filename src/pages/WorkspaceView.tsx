@@ -95,8 +95,8 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
     }
   }, [projectId]);
 
-  const fetchDashboards = async () => {
-    if (!projectId) return;
+  const fetchDashboards = async (): Promise<Dashboard[] | null> => {
+    if (!projectId) return null;
     
     setIsLoadingDashboards(true);
     try {
@@ -144,11 +144,14 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
             }
           }
         }
+        return uiDashboards;
       } else {
         toast.error(response.error?.message || "Failed to load dashboards");
+        return null;
       }
     } catch (err: any) {
       toast.error(err.message || "An error occurred while fetching dashboards");
+      return null;
     } finally {
       setIsLoadingDashboards(false);
     }
@@ -228,7 +231,20 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
       await new Promise(resolve => setTimeout(resolve, 500));
       
       // Refresh dashboards to get the newly created one
-      await fetchDashboards();
+      const updatedDashboards = await fetchDashboards();
+      
+      // Find the newly created dashboard by name and navigate to it
+      if (updatedDashboards) {
+        const newDashboard = updatedDashboards.find(d => d.name === dashboard.name);
+        if (newDashboard) {
+          // Navigate to the newly created dashboard
+          handleViewDashboard(newDashboard.name, newDashboard.id);
+          // Ensure we're on the dashboards tab
+          if (activeTab !== 'dashboards') {
+            onTabChange('dashboards');
+          }
+        }
+      }
     } catch (err: any) {
       toast.error(err.message || "An error occurred while fetching dashboard");
     }
