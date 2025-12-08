@@ -470,50 +470,62 @@ export function ChartCard({
       })();
       
       return (
-        <ResponsiveContainer width="100%" height={height}>
-          <PieChart>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              labelLine={false}
-              label={(entry) => {
+        <div className="flex flex-col w-full" style={{ height: `${height}px` }}>
+          {/* Chart Area */}
+          <div className="flex-shrink-0" style={{ height: `${height - 80}px` }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                <Pie
+                  data={data}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={false}
+                  outerRadius={outerRadius}
+                  innerRadius={innerRadius}
+                  fill="#8884d8"
+                  dataKey={finalDataKeys.primary}
+                  nameKey={pieLabelKey}
+                  paddingAngle={2}
+                >
+                  {data.map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip 
+                  content={<CustomChartTooltip />}
+                  formatter={(value: any, name: any, props: any) => {
+                    const labelText = props.payload[pieLabelKey] || props.payload.name || 'Unknown';
+                    const percentage = props.payload.percent ? ((props.payload.percent * 100).toFixed(1)) : '0';
+                    return [`${labelText}: ${value} (${percentage}%)`, ''];
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          {/* Scrollable Legend Container - Fixed height with scroll */}
+          <div className="flex-shrink-0 h-20 mt-2 overflow-y-auto overflow-x-hidden border-t border-border/50 pt-2">
+            <div className="flex flex-wrap gap-x-3 gap-y-1.5 items-center justify-center px-1">
+              {data.map((entry: any, index: number) => {
                 const labelText = entry[pieLabelKey] || entry.name || 'Unknown';
-                const percentage = ((entry.percent || 0) * 100).toFixed(0);
+                const color = PIE_COLORS[index % PIE_COLORS.length];
                 return (
-                  <text 
-                    x={0} 
-                    y={0} 
-                    textAnchor="middle" 
-                    fill="hsl(var(--foreground))"
-                    fontSize="11px"
-                    fontWeight="500"
+                  <div
+                    key={`legend-item-${index}`}
+                    className="flex items-center gap-1.5 text-xs shrink-0"
+                    style={{ color: 'hsl(var(--muted-foreground))' }}
                   >
-                    {`${labelText} ${percentage}%`}
-                  </text>
+                    <div
+                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="text-[11px] whitespace-nowrap">{labelText}</span>
+                  </div>
                 );
-              }}
-              outerRadius={outerRadius}
-              innerRadius={innerRadius}
-              fill="#8884d8"
-              dataKey={finalDataKeys.primary}
-              nameKey={pieLabelKey}
-              paddingAngle={2}
-            >
-              {data.map((_, index) => (
-                <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip content={<CustomChartTooltip />} />
-            <Legend 
-              verticalAlign="bottom" 
-              height={36}
-              iconType="square"
-              wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }}
-              formatter={(value) => <span style={{ fontSize: '11px', color: 'hsl(var(--muted-foreground))' }}>{value}</span>}
-            />
-          </PieChart>
-        </ResponsiveContainer>
+              })}
+            </div>
+          </div>
+        </div>
       );
 
     case 'area':

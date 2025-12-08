@@ -154,6 +154,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
   const [isAwaitingClarification, setIsAwaitingClarification] = useState(false);
   const [chartWorkflowState, setChartWorkflowState] = useState<Record<string, any> | null>(null);
   const chartWorkflowStateRef = useRef<Record<string, any> | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Ensure any open preview dialog is dismissed when the assistant closes
   useEffect(() => {
@@ -166,6 +167,16 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
   useEffect(() => {
     chartWorkflowStateRef.current = chartWorkflowState;
   }, [chartWorkflowState]);
+
+  // Auto-focus input when database is selected and not generating
+  useEffect(() => {
+    if (selectedDatabase && !isGenerating && inputRef.current) {
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedDatabase, isGenerating]);
 
   const replaceAnalyzingMessage = (content: string) => {
     setMessages((prev) => {
@@ -684,6 +695,11 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       setChartWorkflowState(null);
     }
 
+    // Refocus input after sending
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
+
     const payload: ChartCreationRequestPayload = isClarificationResponse && chartRequestRef.current
       ? { ...chartRequestRef.current }
       : {
@@ -1112,7 +1128,13 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
               {suggestions.map((suggestion, idx) => (
                 <button
                   key={idx}
-                  onClick={() => setInput(suggestion)}
+                  onClick={() => {
+                    setInput(suggestion);
+                    // Refocus input after selecting suggestion
+                    setTimeout(() => {
+                      inputRef.current?.focus();
+                    }, 100);
+                  }}
                   className="w-full text-left px-4 py-3 rounded-lg border border-border hover:border-accent hover:bg-accent/5 transition-all text-sm text-foreground"
                 >
                   {suggestion}
@@ -1169,6 +1191,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
           <div className="p-6 border-t border-border bg-card shrink-0">
             <div className="flex gap-3">
               <input
+                ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -1180,6 +1203,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
                 placeholder="Describe the charts you need..."
                 disabled={isGenerating}
                 className="flex-1 px-4 py-3 bg-input-background border border-border rounded-lg outline-none focus:ring-2 focus:ring-accent text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
+                autoFocus
               />
               <GradientButton
                 onClick={handleSend}
