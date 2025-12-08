@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Database, LayoutDashboard, Lightbulb, TrendingUp, BarChart3, PieChart, LineChart } from "lucide-react";
 import { HomeDashboardView } from "./HomeDashboardView";
 import { DatabasesView } from "./DatabasesView";
@@ -72,10 +72,21 @@ interface WorkspaceViewProps {
 }
 
 export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabChange, currentUser, projectId, chartCreatedTrigger, dashboardRefreshTrigger, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart }: WorkspaceViewProps) {
-  const [selectedDashboard, setSelectedDashboard] = useState<{ id: string; name: string } | null>(null);
+  // Restore selected dashboard from localStorage
+  const [selectedDashboard, setSelectedDashboard] = useState<{ id: string; name: string } | null>(() => {
+    if (typeof window !== 'undefined' && projectId) {
+      const savedDashboardId = localStorage.getItem(`vizai_selected_dashboard_${projectId}`);
+      const savedDashboardName = localStorage.getItem(`vizai_selected_dashboard_name_${projectId}`);
+      if (savedDashboardId && savedDashboardName) {
+        return { id: savedDashboardId, name: savedDashboardName };
+      }
+    }
+    return null;
+  });
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [isLoadingDashboards, setIsLoadingDashboards] = useState(false);
+  const isRestoringDashboardRef = useRef(false);
 
   // Fetch dashboards when projectId is available
   useEffect(() => {
@@ -104,6 +115,35 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
           status: 'active' as const,
         }));
         setDashboards(uiDashboards);
+        
+        // Restore selected dashboard if it exists and is still valid
+        if (!selectedDashboard) {
+          const savedDashboardId = localStorage.getItem(`vizai_selected_dashboard_${projectId}`);
+          const savedDashboardName = localStorage.getItem(`vizai_selected_dashboard_name_${projectId}`);
+          if (savedDashboardId && savedDashboardName) {
+            // Verify dashboard still exists
+            const dashboardExists = uiDashboards.find(
+              d => String(d.id) === savedDashboardId || d.name === savedDashboardName
+            );
+            if (dashboardExists) {
+              // Restore dashboard and switch to dashboards tab
+              isRestoringDashboardRef.current = true;
+              setSelectedDashboard({ id: String(dashboardExists.id), name: dashboardExists.name });
+              // Switch to dashboards tab to show the restored dashboard
+              if (activeTab !== 'dashboards') {
+                onTabChange('dashboards');
+              }
+              // Reset flag after a short delay
+              setTimeout(() => {
+                isRestoringDashboardRef.current = false;
+              }, 100);
+            } else {
+              // Dashboard no longer exists, clear from localStorage
+              localStorage.removeItem(`vizai_selected_dashboard_${projectId}`);
+              localStorage.removeItem(`vizai_selected_dashboard_name_${projectId}`);
+            }
+          }
+        }
       } else {
         toast.error(response.error?.message || "Failed to load dashboards");
       }
@@ -114,10 +154,34 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
     }
   };
 
-  // Clear selected dashboard when activeTab changes (navigation from sidebar)
+  // Save selected dashboard to localStorage
   useEffect(() => {
-    setSelectedDashboard(null);
-  }, [activeTab]);
+    if (projectId && selectedDashboard) {
+      localStorage.setItem(`vizai_selected_dashboard_${projectId}`, selectedDashboard.id);
+      localStorage.setItem(`vizai_selected_dashboard_name_${projectId}`, selectedDashboard.name);
+    } else if (projectId && !selectedDashboard) {
+      // Clear saved dashboard when deselected (but not during initial restore)
+      const savedDashboardId = localStorage.getItem(`vizai_selected_dashboard_${projectId}`);
+      if (!savedDashboardId) {
+        // Only clear if there's no saved dashboard (user explicitly navigated away)
+        localStorage.removeItem(`vizai_selected_dashboard_${projectId}`);
+        localStorage.removeItem(`vizai_selected_dashboard_name_${projectId}`);
+      }
+    }
+  }, [selectedDashboard, projectId]);
+
+  // Clear selected dashboard when activeTab changes (navigation from sidebar)
+  // But only if it's a user-initiated navigation, not during restore
+  useEffect(() => {
+    // Don't clear if we're restoring a dashboard
+    if (isRestoringDashboardRef.current) {
+      return;
+    }
+    // Only clear if dashboards are loaded and user navigated away from dashboards tab
+    if (dashboards.length > 0 && activeTab !== 'dashboards' && selectedDashboard) {
+      setSelectedDashboard(null);
+    }
+  }, [activeTab, dashboards.length, selectedDashboard]);
 
   const handleViewDashboard = (dashboardName: string, dashboardId?: string | number) => {
     // Find the dashboard by name or ID to get the full dashboard info

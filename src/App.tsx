@@ -21,12 +21,23 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true); // Add loading state for auth check
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string; role: UserRole } | null>(null);
-  const [currentView, setCurrentView] = useState('home');
+  // Initialize state from localStorage if available
+  const [currentView, setCurrentView] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('vizai_current_view') || 'home';
+    }
+    return 'home';
+  });
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
   const [isDark, setIsDark] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState('home');
+  const [workspaceTab, setWorkspaceTab] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('vizai_workspace_tab') || 'home';
+    }
+    return 'home';
+  });
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
   const [chartCreatedTrigger, setChartCreatedTrigger] = useState(0);
   const [dashboardRefreshTrigger, setDashboardRefreshTrigger] = useState(0);
@@ -154,11 +165,27 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
-  // Restore last selected project after projects are loaded
+  // Save currentView to localStorage whenever it changes
+  useEffect(() => {
+    if (isAuthenticated && typeof window !== 'undefined') {
+      localStorage.setItem('vizai_current_view', currentView);
+    }
+  }, [currentView, isAuthenticated]);
+
+  // Save workspaceTab to localStorage whenever it changes
+  useEffect(() => {
+    if (isAuthenticated && typeof window !== 'undefined') {
+      localStorage.setItem('vizai_workspace_tab', workspaceTab);
+    }
+  }, [workspaceTab, isAuthenticated]);
+
+  // Restore last selected project and view after projects are loaded
   useEffect(() => {
     if (isAuthenticated && projects.length > 0 && !selectedProject) {
       const lastProject = localStorage.getItem('vizai_last_project');
       const lastProjectId = localStorage.getItem('vizai_last_project_id');
+      const savedView = localStorage.getItem('vizai_current_view');
+      const savedTab = localStorage.getItem('vizai_workspace_tab');
       
       if (lastProject) {
         // Verify the project still exists in the projects list
@@ -168,13 +195,35 @@ export default function App() {
           // Restore the project
           setSelectedProject(lastProject);
           setSelectedProjectId(projectExists.id);
-          setCurrentView('workspace');
-          setWorkspaceTab('home');
+          
+          // Restore view and tab if they were in workspace
+          if (savedView === 'workspace') {
+            setCurrentView('workspace');
+            if (savedTab) {
+              setWorkspaceTab(savedTab);
+            }
+          }
         } else {
           // Project no longer exists, clear from localStorage
           localStorage.removeItem('vizai_last_project');
           localStorage.removeItem('vizai_last_project_id');
+          // If view was workspace but project doesn't exist, go to home
+          if (savedView === 'workspace') {
+            setCurrentView('home');
+            localStorage.setItem('vizai_current_view', 'home');
+          }
         }
+      } else {
+        // No project saved, but restore view if it's not workspace
+        if (savedView && savedView !== 'workspace') {
+          setCurrentView(savedView);
+        }
+      }
+    } else if (isAuthenticated && !selectedProject) {
+      // Authenticated but no project - restore non-workspace views
+      const savedView = localStorage.getItem('vizai_current_view');
+      if (savedView && savedView !== 'workspace') {
+        setCurrentView(savedView);
       }
     }
   }, [isAuthenticated, projects, selectedProject]);
@@ -294,6 +343,8 @@ export default function App() {
     localStorage.removeItem('vizai_refresh_token');
     localStorage.removeItem('vizai_last_project');
     localStorage.removeItem('vizai_last_project_id');
+    localStorage.removeItem('vizai_current_view');
+    localStorage.removeItem('vizai_workspace_tab');
   };
 
   const handleUpdateProfile = (user: { name: string; email: string }) => {
@@ -316,6 +367,8 @@ export default function App() {
     localStorage.removeItem('vizai_refresh_token');
     localStorage.removeItem('vizai_last_project');
     localStorage.removeItem('vizai_last_project_id');
+    localStorage.removeItem('vizai_current_view');
+    localStorage.removeItem('vizai_workspace_tab');
   };
 
   const handleThemeToggle = () => {
