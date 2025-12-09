@@ -516,7 +516,7 @@ export function ChartCard({
                     style={{ color: 'hsl(var(--muted-foreground))' }}
                   >
                     <div
-                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                      className="h-2.5 w-2.5 shrink-0 rounded-sm ml-2"
                       style={{ backgroundColor: color }}
                     />
                     <span className="text-[11px] whitespace-nowrap">{labelText}</span>
