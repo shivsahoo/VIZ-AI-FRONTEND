@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { 
   Lightbulb, 
   TrendingUp, 
@@ -8,7 +8,6 @@ import {
   AlertOctagon,
   BarChart3,
   CheckCircle2,
-  Filter, 
   LineChart,
   Loader2, 
   Sparkles, 
@@ -29,7 +28,6 @@ import {
   getDatabases,
   type ProjectInsightsResponse,
   type BusinessInsightsResponse,
-  type LatestBusinessInsightResponse,
   type BusinessInsightRecord,
   type Database as ApiDatabase,
 } from "../services/api";
@@ -90,6 +88,10 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   const [activeFilter, setActiveFilter] = useState("all");
   const [filteredInsights, setFilteredInsights] = useState<Insight[]>([]);
   const [copiedInsightId, setCopiedInsightId] = useState<string | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingStartTimeRef = useRef<number | null>(null);
+  const currentInsightsRef = useRef<Insight[]>([]);
 
   const insightStats = useMemo(() => {
     const stats = {
@@ -198,6 +200,8 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     }
 
     setFilteredInsights(currentFilter.filterFn(insights));
+    // Keep ref in sync with current insights
+    currentInsightsRef.current = insights;
   }, [filterOptions, activeFilter, insights]);
 
   const fetchDatabases = useCallback(async () => {
@@ -271,6 +275,16 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   useEffect(() => {
     loadExistingInsights();
   }, [loadExistingInsights]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   // Reset selected database to "all" when dialog opens
   useEffect(() => {
@@ -965,6 +979,81 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     }
   };
 
+  // Poll for insights after timeout
+  const pollForInsights = useCallback(async () => {
+    if (!projectId) return;
+
+    const MAX_POLLING_TIME = 180000; // 3 minutes
+
+    // Check if we've been polling too long
+    if (pollingStartTimeRef.current) {
+      const elapsed = Date.now() - pollingStartTimeRef.current;
+      if (elapsed > MAX_POLLING_TIME) {
+        setIsPolling(false);
+        setIsGenerating(false);
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+        pollingStartTimeRef.current = null;
+        toast.error("Insights generation is taking longer than expected. Please try again later or refresh the page.");
+        return;
+      }
+    }
+
+    try {
+      const response = await getLatestBusinessInsight(String(projectId));
+      if (response.success && response.data) {
+        const transformed = transformBusinessInsightRecord(response.data.insight);
+        if (transformed.length > 0) {
+          // Check if these are new insights (created after the request started)
+          const insightCreatedAt = new Date(response.data.insight.created_at).getTime();
+          // Use a 5 second buffer to account for clock differences and processing time
+          const isNewInsight = !pollingStartTimeRef.current || 
+                               insightCreatedAt >= (pollingStartTimeRef.current - 5000);
+
+          if (isNewInsight) {
+            // Check for duplicates using the ref (current state)
+            const existingIds = new Set(currentInsightsRef.current.map(i => i.id));
+            const newInsights = transformed.filter(i => !existingIds.has(i.id));
+            
+            if (newInsights.length > 0) {
+              // Update state with new insights
+              setInsights(prev => [...newInsights, ...prev]);
+              
+              // Stop polling since we found new insights
+              setIsPolling(false);
+              setIsGenerating(false);
+              if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+              }
+              pollingStartTimeRef.current = null;
+              toast.success(`Generated ${newInsights.length} insights successfully!`);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // Silently continue polling on error
+      console.log("Polling for insights...", error);
+    }
+  }, [projectId]);
+
+  const startPolling = useCallback((requestStartTime: number) => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
+    
+    // Use the request start time, not the current time
+    pollingStartTimeRef.current = requestStartTime;
+    setIsPolling(true);
+    
+    // Start polling immediately, then every 3 seconds
+    pollForInsights();
+    pollingIntervalRef.current = setInterval(pollForInsights, 3000);
+  }, [pollForInsights]);
+
   const handleGenerateInsights = async () => {
     if (!projectId) {
       toast.error("Project ID is required to generate insights");
@@ -973,6 +1062,9 @@ export function InsightsView({ projectId }: InsightsViewProps) {
 
     setIsGenerating(true);
     setShowGenerateDialog(false);
+    
+    // Store timestamp BEFORE making the request to detect new insights
+    const requestStartTime = Date.now();
 
     try {
       let response;
@@ -1020,15 +1112,21 @@ export function InsightsView({ projectId }: InsightsViewProps) {
       // Check for timeout errors
       const errorMessage = error.message || "An error occurred while generating insights";
       if (errorMessage.includes("timeout") || errorMessage.includes("504") || errorMessage.includes("Gateway")) {
-        toast.error(
-          "Request timed out. Insight generation can take 30-120 seconds. The server may still be processing. Please wait a moment and check if insights appear, or try generating insights for a single database instead.",
-          { duration: 8000 }
+        toast.info(
+          "Request timed out. The server is still processing your request. Checking for insights automatically...",
+          { duration: 5000 }
         );
+        // Start polling for insights using the request start time
+        startPolling(requestStartTime);
+        return; // Don't set isGenerating to false yet - keep it true while polling
       } else {
         toast.error(errorMessage);
       }
     } finally {
-      setIsGenerating(false);
+      // Only set isGenerating to false if we're not polling
+      if (!isPolling) {
+        setIsGenerating(false);
+      }
       setSelectedDatabase("all");
     }
   };
@@ -1161,12 +1259,12 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             <Button 
               className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all"
               onClick={() => setShowGenerateDialog(true)}
-              disabled={!projectId || isGenerating}
+              disabled={!projectId || isGenerating || isPolling}
             >
-              {isGenerating ? (
+              {isGenerating || isPolling ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Generating...
+                  {isPolling ? "Checking for insights..." : "Generating..."}
                 </>
               ) : (
                 <>
@@ -1446,13 +1544,13 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                 </Button>
                 <Button 
                   onClick={handleGenerateInsights}
-                  disabled={isGenerating || (selectedDatabase !== "all" && !databases.find(db => db.id === selectedDatabase))}
+                  disabled={isGenerating || isPolling || (selectedDatabase !== "all" && !databases.find(db => db.id === selectedDatabase))}
                   className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
                 >
-                  {isGenerating ? (
+                  {isGenerating || isPolling ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Generating...
+                      {isPolling ? "Checking for insights..." : "Generating..."}
                     </>
                   ) : (
                     <>
