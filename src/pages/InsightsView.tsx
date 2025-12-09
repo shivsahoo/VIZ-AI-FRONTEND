@@ -1035,8 +1035,8 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         }
       }
     } catch (error) {
-      // Silently continue polling on error
-      console.log("Polling for insights...", error);
+      // Silently continue polling on error - don't log to console to avoid noise
+      // The polling will continue until insights are found or timeout
     }
   }, [projectId]);
 
@@ -1082,7 +1082,24 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             toast.error("Failed to process insights data. Please try again.");
           }
         } else {
-          toast.error(response.error?.message || "Failed to generate insights");
+          const errorMessage = response.error?.message || "Failed to generate insights";
+          // Check if it's a timeout error (504) - silently start polling instead of showing error
+          const errorLower = errorMessage.toLowerCase();
+          const isTimeoutError = errorLower.includes("timeout") || 
+                                errorLower.includes("504") || 
+                                errorLower.includes("gateway") ||
+                                errorMessage.includes("504 Gateway Time-out") ||
+                                errorMessage.includes("Gateway Time-out");
+          
+          if (isTimeoutError) {
+            // Silently start polling in the background - no error message shown
+            // Note: Single database insights are not saved to DB, so polling won't work for them
+            // But we still handle it silently to avoid showing error
+            startPolling(requestStartTime);
+            return; // Don't set isGenerating to false yet - keep it true while polling
+          } else {
+            toast.error(errorMessage);
+          }
         }
       } else {
         // Generate project-wide insights
@@ -1104,23 +1121,42 @@ export function InsightsView({ projectId }: InsightsViewProps) {
           if (errorMessage.includes("No database connections found")) {
             toast.error("No database connections found for this project. Please add a database connection first.");
           } else {
-            toast.error(errorMessage);
+            // Check if it's a timeout error (504) - silently start polling instead of showing error
+            const errorLower = errorMessage.toLowerCase();
+            const isTimeoutError = errorLower.includes("timeout") || 
+                                  errorLower.includes("504") || 
+                                  errorLower.includes("gateway") ||
+                                  errorMessage.includes("504 Gateway Time-out") ||
+                                  errorMessage.includes("Gateway Time-out");
+            
+            if (isTimeoutError) {
+              // Silently start polling in the background - no error message shown
+              startPolling(requestStartTime);
+              return; // Don't set isGenerating to false yet - keep it true while polling
+            } else {
+              toast.error(errorMessage);
+            }
           }
         }
       }
     } catch (error: any) {
-      // Check for timeout errors
-      const errorMessage = error.message || "An error occurred while generating insights";
-      if (errorMessage.includes("timeout") || errorMessage.includes("504") || errorMessage.includes("Gateway")) {
-        toast.info(
-          "Request timed out. The server is still processing your request. Checking for insights automatically...",
-          { duration: 5000 }
-        );
-        // Start polling for insights using the request start time
+      // Check for timeout errors (504 Gateway Timeout)
+      const errorMessage = error.message || "";
+      const errorLower = errorMessage.toLowerCase();
+      const isTimeoutError = errorLower.includes("timeout") || 
+                            errorLower.includes("504") || 
+                            errorLower.includes("gateway") ||
+                            errorMessage.includes("504 Gateway Time-out") ||
+                            errorMessage.includes("Gateway Time-out");
+      
+      if (isTimeoutError) {
+        // Silently start polling in the background - no error message shown
+        // The button will show "Checking for insights..." state
         startPolling(requestStartTime);
         return; // Don't set isGenerating to false yet - keep it true while polling
       } else {
-        toast.error(errorMessage);
+        // Only show error for non-timeout errors
+        toast.error(errorMessage || "An error occurred while generating insights");
       }
     } finally {
       // Only set isGenerating to false if we're not polling
