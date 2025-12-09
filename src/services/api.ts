@@ -2065,7 +2065,7 @@ export const generateBusinessInsights = async (
           database_connection_id: databaseConnectionId,
         }),
       },
-      120000 // 120 seconds (2 minutes) timeout for single database insights
+      600000 // 600 seconds (10 minutes) timeout for single database insights
     );
 
     return {
@@ -2097,7 +2097,7 @@ export const generateProjectInsights = async (
         method: 'POST',
         body: JSON.stringify({}),
       },
-      180000 // 180 seconds (3 minutes) timeout for project-wide insights
+      600000 // 600 seconds (10 minutes) timeout for project-wide insights
     );
 
     return {
