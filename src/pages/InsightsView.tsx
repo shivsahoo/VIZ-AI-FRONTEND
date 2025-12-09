@@ -1013,24 +1013,18 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                                insightCreatedAt >= (pollingStartTimeRef.current - 5000);
 
           if (isNewInsight) {
-            // Check for duplicates using the ref (current state)
-            const existingIds = new Set(currentInsightsRef.current.map(i => i.id));
-            const newInsights = transformed.filter(i => !existingIds.has(i.id));
+            // Replace old insights with new ones (don't append)
+            setInsights(transformed);
             
-            if (newInsights.length > 0) {
-              // Update state with new insights
-              setInsights(prev => [...newInsights, ...prev]);
-              
-              // Stop polling since we found new insights
-              setIsPolling(false);
-              setIsGenerating(false);
-              if (pollingIntervalRef.current) {
-                clearInterval(pollingIntervalRef.current);
-                pollingIntervalRef.current = null;
-              }
-              pollingStartTimeRef.current = null;
-              toast.success(`Generated ${newInsights.length} insights successfully!`);
+            // Stop polling since we found new insights
+            setIsPolling(false);
+            setIsGenerating(false);
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
             }
+            pollingStartTimeRef.current = null;
+            toast.success(`Generated ${transformed.length} insights successfully!`);
           }
         }
       }
@@ -1075,7 +1069,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         if (response.success && response.data) {
           try {
             const transformed = transformBusinessInsights(response.data);
-            setInsights(prev => [...transformed, ...prev]);
+            setInsights(transformed); // Replace old insights with new ones
             toast.success(`Generated ${transformed.length} insights from ${response.data.database_name}`);
           } catch (transformError: any) {
             console.error("Error transforming business insights:", transformError);
@@ -1107,7 +1101,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         if (response.success && response.data) {
           try {
             const transformed = transformProjectInsights(response.data);
-            setInsights(prev => [...transformed, ...prev]);
+            setInsights(transformed); // Replace old insights with new ones
             toast.success(
               `Generated ${transformed.length} insights from ${response.data.successful_analyses} databases`
             );
