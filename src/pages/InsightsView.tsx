@@ -621,54 +621,32 @@ export function InsightsView({ projectId }: InsightsViewProps) {
 
       const timestamp = formatTimestamp(record.created_at);
 
-      // Transform key_metrics - can be object or array
-      if (record.key_metrics) {
-        if (Array.isArray(record.key_metrics)) {
-          // Handle array format (from fresh generation)
-          record.key_metrics.forEach((metric: any) => {
-            try {
-              const kpiName = String(metric?.kpi_name || 'Unknown KPI');
-              const valueInterpretation = String(metric?.value_interpretation || '');
-              const businessImpact = String(metric?.business_impact || '');
-              const isPositive = valueInterpretation.toLowerCase().includes("good") ||
-                               valueInterpretation.toLowerCase().includes("excellent") ||
-                               valueInterpretation.toLowerCase().includes("improving");
-              
-              transformed.push({
-                id: `record-metric-${record.id}-${idCounter++}`,
-                title: kpiName,
-                description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
-                type: isPositive ? "positive" : "negative",
-                category: "Key Metric",
-                timestamp: timestamp,
-                impact: "Medium",
-                source: "Project-wide",
-              });
-            } catch (err) {
-              console.error("Error processing key metric from record:", err, metric);
-            }
-          });
-        } else if (typeof record.key_metrics === 'object') {
-          // Handle object format (from stored insights) - show as summary
-          const metrics = record.key_metrics as any;
-          if (metrics.overall_health_score) {
-            const healthScore = String(metrics.overall_health_score || 'unknown');
-            const totalDbs = metrics.total_databases_analyzed || 0;
-            const successful = metrics.successful_analyses || 0;
-            const isPositive = healthScore.toLowerCase() === "excellent" || healthScore.toLowerCase() === "good";
+      // Transform key_metrics - only handle array format (skip object format with overall_health_score)
+      if (record.key_metrics && Array.isArray(record.key_metrics)) {
+        // Handle array format (from fresh generation)
+        record.key_metrics.forEach((metric: any) => {
+          try {
+            const kpiName = String(metric?.kpi_name || 'Unknown KPI');
+            const valueInterpretation = String(metric?.value_interpretation || '');
+            const businessImpact = String(metric?.business_impact || '');
+            const isPositive = valueInterpretation.toLowerCase().includes("good") ||
+                             valueInterpretation.toLowerCase().includes("excellent") ||
+                             valueInterpretation.toLowerCase().includes("improving");
             
             transformed.push({
-              id: `record-metric-summary-${record.id}-${idCounter++}`,
-              title: `Overall Health: ${healthScore.charAt(0).toUpperCase() + healthScore.slice(1)}`,
-              description: `Analyzed ${totalDbs} database(s) with ${successful} successful analysis(es)`,
+              id: `record-metric-${record.id}-${idCounter++}`,
+              title: kpiName,
+              description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
               type: isPositive ? "positive" : "negative",
               category: "Key Metric",
               timestamp: timestamp,
-              impact: "High",
+              impact: "Medium",
               source: "Project-wide",
             });
+          } catch (err) {
+            console.error("Error processing key metric from record:", err, metric);
           }
-        }
+        });
       }
 
       // Transform insights_and_patterns - check for both 'pattern' and 'insight' fields
