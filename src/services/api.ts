@@ -1963,20 +1963,33 @@ export interface Recommendation {
   priority: 'high' | 'medium' | 'low';
   title: string;
   description: string;
+  reasoning?: string;
 }
 
 export interface KeyMetricAnalysis {
   kpi_name: string;
   value_interpretation: string;
   business_impact: string;
+  reasoning?: string;
+}
+
+export interface InsightPattern {
+  insight: string;
+  reasoning?: string;
+}
+
+export interface Concern {
+  concern: string;
+  reasoning?: string;
 }
 
 export interface BusinessInsights {
   executive_summary: string;
+  reasoning?: string;
   key_metrics: KeyMetricAnalysis[];
-  insights_and_patterns: string[];
+  insights_and_patterns: InsightPattern[];
   recommendations: Recommendation[];
-  areas_of_concern: string[];
+  areas_of_concern: Concern[];
 }
 
 export interface BusinessInsightsResponse {
@@ -2017,23 +2030,36 @@ export interface StrategicPriority {
   title: string;
   description: string;
   impact: 'high' | 'medium' | 'low';
+  reasoning?: string;
+}
+
+export interface RiskDetail {
+  risk: string;
+  reasoning?: string;
 }
 
 export interface RiskAssessment {
-  critical_risks: string[];
-  moderate_risks: string[];
+  critical_risks: RiskDetail[];
+  moderate_risks: RiskDetail[];
 }
 
 export interface Opportunity {
   title: string;
   description: string;
   potential_impact: string;
+  reasoning?: string;
+}
+
+export interface PatternDetail {
+  pattern: string;
+  reasoning?: string;
 }
 
 export interface ConsolidatedInsights {
   overall_health_score: string;
   health_assessment: string;
-  cross_database_patterns: string[];
+  reasoning?: string;
+  cross_database_patterns: PatternDetail[];
   strategic_priorities: StrategicPriority[];
   risk_assessment: RiskAssessment;
   opportunities: Opportunity[];
