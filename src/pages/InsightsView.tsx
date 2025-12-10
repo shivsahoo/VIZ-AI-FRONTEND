@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { 
   Lightbulb, 
   TrendingUp, 
@@ -24,11 +24,9 @@ import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { 
   generateProjectInsights, 
   generateBusinessInsights,
-  getLatestBusinessInsight,
   getDatabases,
   type ProjectInsightsResponse,
   type BusinessInsightsResponse,
-  type BusinessInsightRecord,
   type Database as ApiDatabase,
 } from "../services/api";
 import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
@@ -80,7 +78,6 @@ const mapDatabaseMetadataToApiDatabase = (entry: DatabaseMetadataEntry): ApiData
 
 export function InsightsView({ projectId }: InsightsViewProps) {
   const [insights, setInsights] = useState<Insight[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [databases, setDatabases] = useState<ApiDatabase[]>([]);
   const [selectedDatabase, setSelectedDatabase] = useState<string>("all");
@@ -88,10 +85,6 @@ export function InsightsView({ projectId }: InsightsViewProps) {
   const [activeFilter, setActiveFilter] = useState("all");
   const [filteredInsights, setFilteredInsights] = useState<Insight[]>([]);
   const [copiedInsightId, setCopiedInsightId] = useState<string | null>(null);
-  const [isPolling, setIsPolling] = useState(false);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const pollingStartTimeRef = useRef<number | null>(null);
-  const currentInsightsRef = useRef<Insight[]>([]);
 
   const insightStats = useMemo(() => {
     const stats = {
@@ -200,8 +193,6 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     }
 
     setFilteredInsights(currentFilter.filterFn(insights));
-    // Keep ref in sync with current insights
-    currentInsightsRef.current = insights;
   }, [filterOptions, activeFilter, insights]);
 
   const fetchDatabases = useCallback(async () => {
@@ -245,46 +236,6 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     fetchDatabases();
   }, [projectId, fetchDatabases]);
 
-  // Load existing insights when component mounts
-  const loadExistingInsights = useCallback(async () => {
-    if (!projectId) return;
-
-    setIsLoading(true);
-    try {
-      const response = await getLatestBusinessInsight(String(projectId));
-      if (response.success && response.data) {
-        const transformed = transformBusinessInsightRecord(response.data.insight);
-        if (transformed.length > 0) {
-          setInsights(transformed);
-        }
-      } else if (response.error) {
-        // It's okay if there are no existing insights - don't show error
-        if (!response.error.message?.includes("No business insights found")) {
-          console.log("No existing insights found for this project");
-        }
-      }
-    } catch (error) {
-      // Silently fail - it's okay if there are no existing insights
-      console.log("Could not load existing insights:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [projectId]);
-
-  // Load existing insights on mount
-  useEffect(() => {
-    loadExistingInsights();
-  }, [loadExistingInsights]);
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
-    };
-  }, []);
 
   // Reset selected database to "all" when dialog opens
   useEffect(() => {
@@ -299,37 +250,18 @@ export function InsightsView({ projectId }: InsightsViewProps) {
 
   const transformProjectInsights = (data: ProjectInsightsResponse): Insight[] => {
     try {
-      const transformed: Insight[] = [];
+      // Separate arrays to maintain exact order
+      const opportunities: Insight[] = [];
+      const insightsAndPatterns: Insight[] = [];
+      const recommendations: Insight[] = [];
+      const strategicPriorities: Insight[] = [];
+      const rest: Insight[] = [];
       let idCounter = 1;
 
-    // Transform consolidated insights (project-wide)
+    // 1. OPPORTUNITIES (First Priority) - from consolidated_insights.opportunities only
     if (data.consolidated_insights) {
       const consolidated = data.consolidated_insights;
       
-      // Strategic priorities as opportunities
-      consolidated.strategic_priorities?.forEach((priority) => {
-        try {
-          const title = String(priority?.title || 'Untitled Priority');
-          const description = formatWithReasoning(
-            String(priority?.description || ''),
-            (priority as any)?.reasoning
-          );
-          transformed.push({
-            id: `priority-${idCounter++}`,
-            title: title,
-            description: description,
-            type: "opportunity",
-            category: "Strategic Priority",
-            timestamp: "Just now",
-            impact: priority.impact === "high" ? "High" : priority.impact === "medium" ? "Medium" : "Low",
-            source: "Project-wide",
-          });
-        } catch (err) {
-          console.error("Error processing strategic priority:", err, priority);
-        }
-      });
-
-      // Opportunities
       consolidated.opportunities?.forEach((opportunity) => {
         try {
           const title = String(opportunity?.title || 'Untitled Opportunity');
@@ -340,7 +272,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             ? `${baseDescription} - Potential Impact: ${potentialImpact}`
             : baseDescription;
           const description = formatWithReasoning(descriptionWithImpact, reasoning);
-          transformed.push({
+          opportunities.push({
             id: `opportunity-${idCounter++}`,
             title: title,
             description: description,
@@ -354,85 +286,51 @@ export function InsightsView({ projectId }: InsightsViewProps) {
           console.error("Error processing opportunity:", err, opportunity);
         }
       });
+    }
 
-      // Critical risks as negative insights
-      consolidated.risk_assessment?.critical_risks?.forEach((riskItem) => {
-        try {
-          // Handle both object format { risk, reasoning } and string format
-          const riskText = typeof riskItem === 'string' 
-            ? riskItem 
-            : (riskItem as any)?.risk || '';
-          const reasoning = typeof riskItem === 'string' 
-            ? '' 
-            : (riskItem as any)?.reasoning || '';
-          
-          // Skip if no risk text
-          if (!riskText || typeof riskText !== 'string') {
-            return;
+    // 2. INSIGHTS_AND_PATTERNS (Second Priority)
+    // First from database insights (insights_and_patterns)
+    data.database_insights?.forEach((dbInsight) => {
+      if (dbInsight.insights) {
+        const insights = dbInsight.insights;
+        
+        insights.insights_and_patterns?.forEach((patternItem) => {
+          try {
+            const insightText = typeof patternItem === 'string' 
+              ? patternItem 
+              : (patternItem as any)?.insight || '';
+            const reasoning = typeof patternItem === 'string' 
+              ? '' 
+              : (patternItem as any)?.reasoning || '';
+            
+            if (!insightText || typeof insightText !== 'string') {
+              return;
+            }
+            
+            const description = formatWithReasoning(insightText, reasoning);
+            
+            insightsAndPatterns.push({
+              id: `pattern-${dbInsight.database_id}-${idCounter++}`,
+              title: insightText.substring(0, 60) + (insightText.length > 60 ? "..." : ""),
+              description: description,
+              type: "opportunity",
+              category: "Pattern",
+              timestamp: "Just now",
+              impact: "Medium",
+              source: dbInsight.database_name || "Unknown",
+            });
+          } catch (err) {
+            console.error("Error processing insight pattern:", err, patternItem);
           }
-          
-          const description = formatWithReasoning(
-            `Critical risk identified: ${riskText}`,
-            reasoning
-          );
-          
-          transformed.push({
-            id: `risk-critical-${idCounter++}`,
-            title: riskText,
-            description: description,
-            type: "negative",
-            category: "Risk",
-            timestamp: "Just now",
-            impact: "High",
-            source: "Project-wide",
-          });
-        } catch (err) {
-          console.error("Error processing critical risk:", err, riskItem);
-          // Skip this item and continue with others
-        }
-      });
+        });
+      }
+    });
 
-      // Moderate risks
-      consolidated.risk_assessment?.moderate_risks?.forEach((riskItem) => {
-        try {
-          // Handle both object format { risk, reasoning } and string format
-          const riskText = typeof riskItem === 'string' 
-            ? riskItem 
-            : (riskItem as any)?.risk || '';
-          const reasoning = typeof riskItem === 'string' 
-            ? '' 
-            : (riskItem as any)?.reasoning || '';
-          
-          // Skip if no risk text
-          if (!riskText || typeof riskText !== 'string') {
-            return;
-          }
-          
-          const description = formatWithReasoning(
-            `Moderate risk identified: ${riskText}`,
-            reasoning
-          );
-          
-          transformed.push({
-            id: `risk-moderate-${idCounter++}`,
-            title: riskText,
-            description: description,
-            type: "negative",
-            category: "Risk",
-            timestamp: "Just now",
-            impact: "Medium",
-            source: "Project-wide",
-          });
-        } catch (err) {
-          console.error("Error processing moderate risk:", err, riskItem);
-          // Skip this item and continue with others
-        }
-      });
-
-      // Cross-database patterns
+    // Then from consolidated insights (cross_database_patterns)
+    if (data.consolidated_insights) {
+      const consolidated = data.consolidated_insights;
       consolidated.cross_database_patterns?.forEach((patternItem) => {
         try {
-          // Handle both object format { pattern, reasoning } and string format
           const patternText = typeof patternItem === 'string' 
             ? patternItem 
             : (patternItem as any)?.pattern || '';
@@ -440,14 +338,13 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             ? '' 
             : (patternItem as any)?.reasoning || '';
           
-          // Skip if no pattern text
           if (!patternText || typeof patternText !== 'string') {
             return;
           }
           
           const description = formatWithReasoning(patternText, reasoning);
           
-          transformed.push({
+          insightsAndPatterns.push({
             id: `cross-pattern-${idCounter++}`,
             title: patternText.substring(0, 60) + (patternText.length > 60 ? "..." : ""),
             description: description,
@@ -459,17 +356,15 @@ export function InsightsView({ projectId }: InsightsViewProps) {
           });
         } catch (err) {
           console.error("Error processing cross-database pattern:", err, patternItem);
-          // Skip this item and continue with others
         }
       });
     }
 
-    // Transform database-specific insights
+    // 3. RECOMMENDATIONS (Third Priority) - from database_insights[].insights.recommendations ONLY
     data.database_insights?.forEach((dbInsight) => {
       if (dbInsight.insights) {
         const insights = dbInsight.insights;
         
-        // Recommendations
         insights.recommendations?.forEach((rec) => {
           try {
             const title = String(rec?.title || 'Untitled Recommendation');
@@ -477,7 +372,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
               String(rec?.description || ''),
               (rec as any)?.reasoning
             );
-            transformed.push({
+            recommendations.push({
               id: `rec-${dbInsight.database_id}-${idCounter++}`,
               title: title,
               description: description,
@@ -491,11 +386,117 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             console.error("Error processing recommendation:", err, rec);
           }
         });
+      }
+    });
 
-        // Areas of concern as negative insights
+    // Strategic Priorities - separate from recommendations, goes in rest section
+    if (data.consolidated_insights) {
+      const consolidated = data.consolidated_insights;
+      consolidated.strategic_priorities?.forEach((priority) => {
+        try {
+          const title = String(priority?.title || 'Untitled Priority');
+          const description = formatWithReasoning(
+            String(priority?.description || ''),
+            (priority as any)?.reasoning
+          );
+          strategicPriorities.push({
+            id: `priority-${idCounter++}`,
+            title: title,
+            description: description,
+            type: "opportunity",
+            category: "Strategic Priority",
+            timestamp: "Just now",
+            impact: priority.impact === "high" ? "High" : priority.impact === "medium" ? "Medium" : "Low",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing strategic priority:", err, priority);
+        }
+      });
+    }
+
+    // 4. REST (Everything else - strategic priorities, risks, concerns, metrics)
+    // Strategic priorities first in rest section
+    rest.push(...strategicPriorities);
+
+    // Consolidated risks
+    if (data.consolidated_insights) {
+      const consolidated = data.consolidated_insights;
+      
+      consolidated.risk_assessment?.critical_risks?.forEach((riskItem) => {
+        try {
+          const riskText = typeof riskItem === 'string' 
+            ? riskItem 
+            : (riskItem as any)?.risk || '';
+          const reasoning = typeof riskItem === 'string' 
+            ? '' 
+            : (riskItem as any)?.reasoning || '';
+          
+          if (!riskText || typeof riskText !== 'string') {
+            return;
+          }
+          
+          const description = formatWithReasoning(
+            `Critical risk identified: ${riskText}`,
+            reasoning
+          );
+          
+          rest.push({
+            id: `risk-critical-${idCounter++}`,
+            title: riskText,
+            description: description,
+            type: "negative",
+            category: "Risk",
+            timestamp: "Just now",
+            impact: "High",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing critical risk:", err, riskItem);
+        }
+      });
+
+      consolidated.risk_assessment?.moderate_risks?.forEach((riskItem) => {
+        try {
+          const riskText = typeof riskItem === 'string' 
+            ? riskItem 
+            : (riskItem as any)?.risk || '';
+          const reasoning = typeof riskItem === 'string' 
+            ? '' 
+            : (riskItem as any)?.reasoning || '';
+          
+          if (!riskText || typeof riskText !== 'string') {
+            return;
+          }
+          
+          const description = formatWithReasoning(
+            `Moderate risk identified: ${riskText}`,
+            reasoning
+          );
+          
+          rest.push({
+            id: `risk-moderate-${idCounter++}`,
+            title: riskText,
+            description: description,
+            type: "negative",
+            category: "Risk",
+            timestamp: "Just now",
+            impact: "Medium",
+            source: "Project-wide",
+          });
+        } catch (err) {
+          console.error("Error processing moderate risk:", err, riskItem);
+        }
+      });
+    }
+
+    // Database-specific rest items
+    data.database_insights?.forEach((dbInsight) => {
+      if (dbInsight.insights) {
+        const insights = dbInsight.insights;
+        
         insights.areas_of_concern?.forEach((concernItem) => {
           try {
-            // Handle both object format { concern, reasoning } and string format
             const concernText = typeof concernItem === 'string' 
               ? concernItem 
               : (concernItem as any)?.concern || '';
@@ -503,7 +504,6 @@ export function InsightsView({ projectId }: InsightsViewProps) {
               ? '' 
               : (concernItem as any)?.reasoning || '';
             
-            // Skip if no concern text
             if (!concernText || typeof concernText !== 'string') {
               return;
             }
@@ -513,7 +513,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
               reasoning
             );
             
-            transformed.push({
+            rest.push({
               id: `concern-${dbInsight.database_id}-${idCounter++}`,
               title: concernText,
               description: description,
@@ -525,11 +525,9 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             });
           } catch (err) {
             console.error("Error processing area of concern:", err, concernItem);
-            // Skip this item and continue with others
           }
         });
 
-        // Key metrics as positive/negative based on interpretation
         insights.key_metrics?.forEach((metric) => {
           try {
             const kpiName = String(metric?.kpi_name || 'Unknown KPI');
@@ -539,7 +537,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                              valueInterpretation.toLowerCase().includes("excellent") ||
                              valueInterpretation.toLowerCase().includes("improving");
             
-            transformed.push({
+            rest.push({
               id: `metric-${dbInsight.database_id}-${idCounter++}`,
               title: kpiName,
               description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
@@ -553,44 +551,17 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             console.error("Error processing key metric:", err, metric);
           }
         });
-
-        // Insights and patterns
-        insights.insights_and_patterns?.forEach((patternItem) => {
-          try {
-            // Handle both object format { insight, reasoning } and string format
-            const insightText = typeof patternItem === 'string' 
-              ? patternItem 
-              : (patternItem as any)?.insight || '';
-            const reasoning = typeof patternItem === 'string' 
-              ? '' 
-              : (patternItem as any)?.reasoning || '';
-            
-            // Skip if no insight text
-            if (!insightText || typeof insightText !== 'string') {
-              return;
-            }
-            
-            const description = formatWithReasoning(insightText, reasoning);
-            
-            transformed.push({
-              id: `pattern-${dbInsight.database_id}-${idCounter++}`,
-              title: insightText.substring(0, 60) + (insightText.length > 60 ? "..." : ""),
-              description: description,
-              type: "opportunity",
-              category: "Pattern",
-              timestamp: "Just now",
-              impact: "Medium",
-              source: dbInsight.database_name || "Unknown",
-            });
-          } catch (err) {
-            console.error("Error processing insight pattern:", err, patternItem);
-            // Skip this item and continue with others
-          }
-        });
       }
     });
 
-      return transformed;
+    // Combine in the exact order: 1. Opportunities, 2. Insights_and_patterns, 3. Recommendations, 4. Rest
+    const transformed: Insight[] = [];
+    transformed.push(...opportunities);           // Position 1
+    transformed.push(...insightsAndPatterns);   // Position 2
+    transformed.push(...recommendations);       // Position 3
+    transformed.push(...rest);                  // Position 4+ (strategic priorities, risks, concerns, metrics)
+
+    return transformed;
     } catch (error) {
       console.error("Error in transformProjectInsights:", error, data);
       return []; // Return empty array on error to prevent crash
@@ -608,243 +579,6 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     return `${text}\nReasoning: ${trimmed}`;
   };
 
-  const transformBusinessInsightRecord = (record: BusinessInsightRecord): Insight[] => {
-    try {
-      const transformed: Insight[] = [];
-      let idCounter = 1;
-
-      // Helper to format timestamp
-      const formatTimestamp = (dateString: string) => {
-        try {
-          const date = new Date(dateString);
-          const now = new Date();
-          const diffMs = now.getTime() - date.getTime();
-          const diffMins = Math.floor(diffMs / 60000);
-          const diffHours = Math.floor(diffMs / 3600000);
-          const diffDays = Math.floor(diffMs / 86400000);
-
-          if (diffMins < 1) return "Just now";
-          if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
-          if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-          if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-          return date.toLocaleDateString();
-        } catch {
-          return "Recently";
-        }
-      };
-
-      const timestamp = formatTimestamp(record.created_at);
-
-      // Transform key_metrics - only handle array format (skip object format with overall_health_score)
-      if (record.key_metrics && Array.isArray(record.key_metrics)) {
-        // Handle array format (from fresh generation)
-        record.key_metrics.forEach((metric: any) => {
-          try {
-            const kpiName = String(metric?.kpi_name || 'Unknown KPI');
-            const valueInterpretation = String(metric?.value_interpretation || '');
-            const businessImpact = String(metric?.business_impact || '');
-            const isPositive = valueInterpretation.toLowerCase().includes("good") ||
-                             valueInterpretation.toLowerCase().includes("excellent") ||
-                             valueInterpretation.toLowerCase().includes("improving");
-            
-            transformed.push({
-              id: `record-metric-${record.id}-${idCounter++}`,
-              title: kpiName,
-              description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
-              type: isPositive ? "positive" : "negative",
-              category: "Key Metric",
-              timestamp: timestamp,
-              impact: "Medium",
-              source: "Project-wide",
-            });
-          } catch (err) {
-            console.error("Error processing key metric from record:", err, metric);
-          }
-        });
-      }
-
-      // Transform insights_and_patterns - check for both 'pattern' and 'insight' fields
-      if (record.insights_and_patterns && Array.isArray(record.insights_and_patterns)) {
-        record.insights_and_patterns.forEach((patternItem: any) => {
-          try {
-            // Handle both 'pattern' (from stored) and 'insight' (from fresh) field names
-            const patternText = typeof patternItem === 'string' 
-              ? patternItem 
-              : (patternItem as any)?.pattern || (patternItem as any)?.insight || '';
-            const reasoning = typeof patternItem === 'string' 
-              ? '' 
-              : (patternItem as any)?.reasoning || '';
-            
-            if (!patternText || typeof patternText !== 'string') {
-              return;
-            }
-            
-            const description = formatWithReasoning(patternText, reasoning);
-            
-            transformed.push({
-              id: `record-pattern-${record.id}-${idCounter++}`,
-              title: patternText.substring(0, 60) + (patternText.length > 60 ? "..." : ""),
-              description: description,
-              type: "opportunity",
-              category: "Pattern",
-              timestamp: timestamp,
-              impact: "Medium",
-              source: "Project-wide",
-            });
-          } catch (err) {
-            console.error("Error processing insight pattern from record:", err, patternItem);
-          }
-        });
-      }
-
-      // Transform recommendations - check for both 'priority' and 'impact' fields
-      if (record.recommendations && Array.isArray(record.recommendations)) {
-        record.recommendations.forEach((rec: any) => {
-          try {
-            const title = String(rec?.title || 'Untitled Recommendation');
-            const description = formatWithReasoning(
-              String(rec?.description || ''),
-              rec?.reasoning
-            );
-            // Handle both 'priority' (from fresh) and 'impact' (from stored) field names
-            const priority = rec.priority || rec.impact || 'medium';
-            const impactLevel = priority === "high" ? "High" : priority === "medium" ? "Medium" : "Low";
-            transformed.push({
-              id: `record-rec-${record.id}-${idCounter++}`,
-              title: title,
-              description: description,
-              type: priority === "high" ? "opportunity" : "positive",
-              category: "Recommendation",
-              timestamp: timestamp,
-              impact: impactLevel,
-              source: "Project-wide",
-            });
-          } catch (err) {
-            console.error("Error processing recommendation from record:", err, rec);
-          }
-        });
-      }
-
-      // Transform areas_of_concern - can be array or object with critical_risks/moderate_risks
-      if (record.areas_of_concern) {
-        if (Array.isArray(record.areas_of_concern)) {
-          // Handle array format (from fresh generation)
-          record.areas_of_concern.forEach((concernItem: any) => {
-            try {
-              const concernText = typeof concernItem === 'string' 
-                ? concernItem 
-                : (concernItem as any)?.concern || '';
-              const reasoning = typeof concernItem === 'string' 
-                ? '' 
-                : (concernItem as any)?.reasoning || '';
-              
-              if (!concernText || typeof concernText !== 'string') {
-                return;
-              }
-              
-              const description = formatWithReasoning(
-                `Area requiring attention: ${concernText}`,
-                reasoning
-              );
-              
-              transformed.push({
-                id: `record-concern-${record.id}-${idCounter++}`,
-                title: concernText,
-                description: description,
-                type: "negative",
-                category: "Concern",
-                timestamp: timestamp,
-                impact: "High",
-                source: "Project-wide",
-              });
-            } catch (err) {
-              console.error("Error processing area of concern from record:", err, concernItem);
-            }
-          });
-        } else if (typeof record.areas_of_concern === 'object') {
-          // Handle object format with critical_risks and moderate_risks (from stored insights)
-          const concerns = record.areas_of_concern as any;
-          
-          // Process critical risks
-          if (concerns.critical_risks && Array.isArray(concerns.critical_risks)) {
-            concerns.critical_risks.forEach((riskItem: any) => {
-              try {
-                const riskText = typeof riskItem === 'string' 
-                  ? riskItem 
-                  : (riskItem as any)?.risk || '';
-                const reasoning = typeof riskItem === 'string' 
-                  ? '' 
-                  : (riskItem as any)?.reasoning || '';
-                
-                if (!riskText || typeof riskText !== 'string') {
-                  return;
-                }
-                
-                const description = formatWithReasoning(
-                  `Critical risk: ${riskText}`,
-                  reasoning
-                );
-                
-                transformed.push({
-                  id: `record-risk-critical-${record.id}-${idCounter++}`,
-                  title: riskText,
-                  description: description,
-                  type: "negative",
-                  category: "Risk",
-                  timestamp: timestamp,
-                  impact: "High",
-                  source: "Project-wide",
-                });
-              } catch (err) {
-                console.error("Error processing critical risk from record:", err, riskItem);
-              }
-            });
-          }
-          
-          // Process moderate risks
-          if (concerns.moderate_risks && Array.isArray(concerns.moderate_risks)) {
-            concerns.moderate_risks.forEach((riskItem: any) => {
-              try {
-                const riskText = typeof riskItem === 'string' 
-                  ? riskItem 
-                  : (riskItem as any)?.risk || '';
-                const reasoning = typeof riskItem === 'string' 
-                  ? '' 
-                  : (riskItem as any)?.reasoning || '';
-                
-                if (!riskText || typeof riskText !== 'string') {
-                  return;
-                }
-                
-                const description = formatWithReasoning(
-                  `Moderate risk: ${riskText}`,
-                  reasoning
-                );
-                
-                transformed.push({
-                  id: `record-risk-moderate-${record.id}-${idCounter++}`,
-                  title: riskText,
-                  description: description,
-                  type: "negative",
-                  category: "Risk",
-                  timestamp: timestamp,
-                  impact: "Medium",
-                  source: "Project-wide",
-                });
-              } catch (err) {
-                console.error("Error processing moderate risk from record:", err, riskItem);
-              }
-            });
-          }
-        }
-      }
-
-      return transformed;
-    } catch (error) {
-      console.error("Error in transformBusinessInsightRecord:", error, record);
-      return [];
-    }
-  };
 
   const transformBusinessInsights = (data: BusinessInsightsResponse): Insight[] => {
     try {
@@ -979,74 +713,6 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     }
   };
 
-  // Poll for insights after timeout
-  const pollForInsights = useCallback(async () => {
-    if (!projectId) return;
-
-    const MAX_POLLING_TIME = 180000; // 3 minutes
-
-    // Check if we've been polling too long
-    if (pollingStartTimeRef.current) {
-      const elapsed = Date.now() - pollingStartTimeRef.current;
-      if (elapsed > MAX_POLLING_TIME) {
-        setIsPolling(false);
-        setIsGenerating(false);
-        if (pollingIntervalRef.current) {
-          clearInterval(pollingIntervalRef.current);
-          pollingIntervalRef.current = null;
-        }
-        pollingStartTimeRef.current = null;
-        toast.error("Insights generation is taking longer than expected. Please try again later or refresh the page.");
-        return;
-      }
-    }
-
-    try {
-      const response = await getLatestBusinessInsight(String(projectId));
-      if (response.success && response.data) {
-        const transformed = transformBusinessInsightRecord(response.data.insight);
-        if (transformed.length > 0) {
-          // Check if these are new insights (created after the request started)
-          const insightCreatedAt = new Date(response.data.insight.created_at).getTime();
-          // Use a 5 second buffer to account for clock differences and processing time
-          const isNewInsight = !pollingStartTimeRef.current || 
-                               insightCreatedAt >= (pollingStartTimeRef.current - 5000);
-
-          if (isNewInsight) {
-            // Replace old insights with new ones (don't append)
-            setInsights(transformed);
-            
-            // Stop polling since we found new insights
-            setIsPolling(false);
-            setIsGenerating(false);
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current);
-              pollingIntervalRef.current = null;
-            }
-            pollingStartTimeRef.current = null;
-            toast.success(`Generated ${transformed.length} insights successfully!`);
-          }
-        }
-      }
-    } catch (error) {
-      // Silently continue polling on error - don't log to console to avoid noise
-      // The polling will continue until insights are found or timeout
-    }
-  }, [projectId]);
-
-  const startPolling = useCallback((requestStartTime: number) => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-    }
-    
-    // Use the request start time, not the current time
-    pollingStartTimeRef.current = requestStartTime;
-    setIsPolling(true);
-    
-    // Start polling immediately, then every 3 seconds
-    pollForInsights();
-    pollingIntervalRef.current = setInterval(pollForInsights, 3000);
-  }, [pollForInsights]);
 
   const handleGenerateInsights = async () => {
     if (!projectId) {
@@ -1056,9 +722,6 @@ export function InsightsView({ projectId }: InsightsViewProps) {
 
     setIsGenerating(true);
     setShowGenerateDialog(false);
-    
-    // Store timestamp BEFORE making the request to detect new insights
-    const requestStartTime = Date.now();
 
     try {
       let response;
@@ -1077,23 +740,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
           }
         } else {
           const errorMessage = response.error?.message || "Failed to generate insights";
-          // Check if it's a timeout error (504) - silently start polling instead of showing error
-          const errorLower = errorMessage.toLowerCase();
-          const isTimeoutError = errorLower.includes("timeout") || 
-                                errorLower.includes("504") || 
-                                errorLower.includes("gateway") ||
-                                errorMessage.includes("504 Gateway Time-out") ||
-                                errorMessage.includes("Gateway Time-out");
-          
-          if (isTimeoutError) {
-            // Silently start polling in the background - no error message shown
-            // Note: Single database insights are not saved to DB, so polling won't work for them
-            // But we still handle it silently to avoid showing error
-            startPolling(requestStartTime);
-            return; // Don't set isGenerating to false yet - keep it true while polling
-          } else {
-            toast.error(errorMessage);
-          }
+          toast.error(errorMessage);
         }
       } else {
         // Generate project-wide insights
@@ -1115,48 +762,15 @@ export function InsightsView({ projectId }: InsightsViewProps) {
           if (errorMessage.includes("No database connections found")) {
             toast.error("No database connections found for this project. Please add a database connection first.");
           } else {
-            // Check if it's a timeout error (504) - silently start polling instead of showing error
-            const errorLower = errorMessage.toLowerCase();
-            const isTimeoutError = errorLower.includes("timeout") || 
-                                  errorLower.includes("504") || 
-                                  errorLower.includes("gateway") ||
-                                  errorMessage.includes("504 Gateway Time-out") ||
-                                  errorMessage.includes("Gateway Time-out");
-            
-            if (isTimeoutError) {
-              // Silently start polling in the background - no error message shown
-              startPolling(requestStartTime);
-              return; // Don't set isGenerating to false yet - keep it true while polling
-            } else {
-              toast.error(errorMessage);
-            }
+            toast.error(errorMessage);
           }
         }
       }
     } catch (error: any) {
-      // Check for timeout errors (504 Gateway Timeout)
-      const errorMessage = error.message || "";
-      const errorLower = errorMessage.toLowerCase();
-      const isTimeoutError = errorLower.includes("timeout") || 
-                            errorLower.includes("504") || 
-                            errorLower.includes("gateway") ||
-                            errorMessage.includes("504 Gateway Time-out") ||
-                            errorMessage.includes("Gateway Time-out");
-      
-      if (isTimeoutError) {
-        // Silently start polling in the background - no error message shown
-        // The button will show "Checking for insights..." state
-        startPolling(requestStartTime);
-        return; // Don't set isGenerating to false yet - keep it true while polling
-      } else {
-        // Only show error for non-timeout errors
-        toast.error(errorMessage || "An error occurred while generating insights");
-      }
+      const errorMessage = error.message || "An error occurred while generating insights";
+      toast.error(errorMessage);
     } finally {
-      // Only set isGenerating to false if we're not polling
-      if (!isPolling) {
-        setIsGenerating(false);
-      }
+      setIsGenerating(false);
       setSelectedDatabase("all");
     }
   };
@@ -1289,12 +903,12 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             <Button 
               className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all"
               onClick={() => setShowGenerateDialog(true)}
-              disabled={!projectId || isGenerating || isPolling}
+              disabled={!projectId || isGenerating}
             >
-              {isGenerating || isPolling ? (
+              {isGenerating ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {isPolling ? "Checking for insights..." : "Generating..."}
+                  Generating...
                 </>
               ) : (
                 <>
@@ -1395,11 +1009,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         </Tabs>
 
         {/* Insights Grid */}
-        {isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-          </div>
-        ) : filteredInsights.length === 0 ? (
+        {filteredInsights.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
               <Lightbulb className="w-8 h-8 text-muted-foreground" />
@@ -1574,13 +1184,13 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                 </Button>
                 <Button 
                   onClick={handleGenerateInsights}
-                  disabled={isGenerating || isPolling || (selectedDatabase !== "all" && !databases.find(db => db.id === selectedDatabase))}
+                  disabled={isGenerating || (selectedDatabase !== "all" && !databases.find(db => db.id === selectedDatabase))}
                   className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
                 >
-                  {isGenerating || isPolling ? (
+                  {isGenerating ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      {isPolling ? "Checking for insights..." : "Generating..."}
+                      Generating...
                     </>
                   ) : (
                     <>
