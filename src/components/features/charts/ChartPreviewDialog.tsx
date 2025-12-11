@@ -62,17 +62,14 @@ interface ChartPreviewDialogProps {
   chartStatus?: 'draft' | 'published';
 }
 
-interface Dashboard {
-  id: number | string;
-  name: string;
-}
-
-export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], projectId, onAddToDashboard, onSaveAsDraft, isExistingChart = false, chartStatus }: ChartPreviewDialogProps) {
+export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], projectId, onAddToDashboard, onSaveAsDraft, isExistingChart = false, chartStatus: _chartStatus }: ChartPreviewDialogProps) {
   const [isSavingDraft, setIsSavingDraft] = React.useState(false);
   const isSavingDraftRef = React.useRef(false);
   const [isAddingToDashboard, setIsAddingToDashboard] = React.useState(false);
   const [addingToDashboardId, setAddingToDashboardId] = React.useState<number | string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
+  const isAddingToDashboardRef = React.useRef(false);
+  const pendingDashboardCallbackRef = React.useRef<number | string | null>(null);
   const [chartDataConfig, setChartDataConfig] = React.useState<ChartDataConfig>(() => getDefaultChartDataConfig());
   const [chartDataMetadata, setChartDataMetadata] = React.useState<ApiChartData['metadata'] | undefined>(undefined);
   const [chartDataError, setChartDataError] = React.useState<string | undefined>(undefined);
@@ -112,12 +109,49 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
     }
   }, [isOpen, chart, dashboards, projectId]);
   
-  // Reset dropdown state when dialog closes
+  // Reset dropdown state when dialog closes and force cleanup of portals
   React.useEffect(() => {
     if (!isOpen) {
       setIsDropdownOpen(false);
       setIsAddingToDashboard(false);
       setAddingToDashboardId(null);
+      // Reset refs when dialog closes
+      isAddingToDashboardRef.current = false;
+      pendingDashboardCallbackRef.current = null;
+      
+      // Force cleanup of any remaining dropdown portals that might block interactions
+      // Use a timeout to ensure this runs after React has finished its updates
+      const cleanupTimeout = setTimeout(() => {
+        // Remove any dropdown menu portals that might still be in the DOM
+        const dropdownPortals = document.querySelectorAll('[data-slot="dropdown-menu-portal"]');
+        dropdownPortals.forEach(portal => {
+          try {
+            if (portal.parentNode) {
+              portal.parentNode.removeChild(portal);
+            }
+          } catch (e) {
+            // Ignore errors if portal is already removed
+          }
+        });
+        
+        // Also remove any Radix UI portals that might be lingering
+        const radixPortals = document.querySelectorAll('[data-radix-portal]');
+        radixPortals.forEach(portal => {
+          // Only remove if it's a dropdown menu portal
+          const isDropdownPortal = portal.querySelector('[data-slot="dropdown-menu-content"]');
+          if (isDropdownPortal) {
+            try {
+              if (portal.parentNode) {
+                portal.parentNode.removeChild(portal);
+              }
+            } catch (e) {
+              // Ignore errors if portal is already removed
+            }
+          }
+        });
+      }, 100);
+      
+      return () => clearTimeout(cleanupTimeout);
     }
   }, [isOpen]);
   
@@ -313,6 +347,11 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       return;
     }
 
+    // Prevent duplicate calls
+    if (isAddingToDashboardRef.current) {
+      return;
+    }
+
     const databaseId = chart.databaseId || chart.dataConnectionId || extractDatabaseId();
 
     if (!validateDatabaseId(databaseId)) {
@@ -327,9 +366,15 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
 
     // At this point, databaseId is validated and guaranteed to be a string (type guard)
 
+    // Force close dropdown immediately to prevent portal overlay issues
+    setIsDropdownOpen(false);
+    
+    // Use a small delay to ensure dropdown portal is fully closed before proceeding
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    isAddingToDashboardRef.current = true;
     setIsAddingToDashboard(true);
     setAddingToDashboardId(dashboardId);
-    setIsDropdownOpen(false); // Close dropdown to show loading state in button
 
     try {
     const axisFields = resolveAxisFields();
@@ -356,25 +401,32 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
       if (response.success) {
         const dashboard = dashboards.find((d) => String(d.id) === String(dashboardId));
         toast.success(`Chart added to "${dashboard?.name || "dashboard"}"!`);
+        
+        // Force close dropdown immediately and wait for it to fully close
+        setIsDropdownOpen(false);
+        
+        // Wait a bit to ensure dropdown portal is removed
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Store the dashboard ID for the callback
+        pendingDashboardCallbackRef.current = dashboardId;
         // Reset state first
         setIsAddingToDashboard(false);
         setAddingToDashboardId(null);
-        // Close dialog to ensure overlay is removed
+        // Close dialog - this will trigger handleOpenChange
         onClose();
-        // Call callback after a longer delay to ensure dialog and overlay are fully removed
-        // This prevents the overlay from blocking interactions
-        setTimeout(() => {
-          onAddToDashboard?.(dashboardId);
-        }, 300);
+        // The callback will be called in handleOpenChange after dialog fully closes
       } else {
         toast.error(response.error?.message || "Failed to add chart to dashboard");
         setIsAddingToDashboard(false);
         setAddingToDashboardId(null);
+        isAddingToDashboardRef.current = false;
       }
     } catch (err: any) {
       toast.error(err.message || "An error occurred while adding chart to dashboard");
       setIsAddingToDashboard(false);
       setAddingToDashboardId(null);
+      isAddingToDashboardRef.current = false;
     }
   };
 
@@ -440,10 +492,67 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
-      // Reset all state when dialog closes
+      // Force close dropdown immediately to prevent portal overlay from blocking
       setIsDropdownOpen(false);
+      
+      // Reset all state when dialog closes
       setIsAddingToDashboard(false);
       setAddingToDashboardId(null);
+      
+      // If we have a pending callback (chart was successfully added to dashboard),
+      // wait for the dialog animation to complete before calling it
+      // This ensures the overlay is fully removed and doesn't block interactions
+      if (pendingDashboardCallbackRef.current !== null) {
+        const dashboardId = pendingDashboardCallbackRef.current;
+        pendingDashboardCallbackRef.current = null;
+        
+        // Wait for dialog close animation to complete and ensure all portals are cleaned up
+        // The dialog animation is 200ms, so we wait longer to ensure everything is removed
+        const callbackTimeout = setTimeout(() => {
+          // Force remove any remaining dropdown portals that might block interactions
+          const dropdownPortals = document.querySelectorAll('[data-slot="dropdown-menu-portal"]');
+          dropdownPortals.forEach(portal => {
+            try {
+              if (portal.parentNode) {
+                portal.parentNode.removeChild(portal);
+              }
+            } catch (e) {
+              // Portal might already be removed, ignore
+            }
+          });
+          
+          // Also check for any Radix UI portals
+          const allPortals = document.querySelectorAll('[data-radix-portal]');
+          allPortals.forEach(portal => {
+            const hasDropdownContent = portal.querySelector('[data-slot="dropdown-menu-content"]');
+            if (hasDropdownContent) {
+              try {
+                if (portal.parentNode) {
+                  portal.parentNode.removeChild(portal);
+                }
+              } catch (e) {
+                // Portal might already be removed, ignore
+              }
+            }
+          });
+          
+          // Additional small delay to ensure DOM is fully updated
+          setTimeout(() => {
+            // Reset the ref guard
+            isAddingToDashboardRef.current = false;
+            // Call the callback - this will trigger state updates in parent components
+            // By this time, all overlays should be removed
+            onAddToDashboard?.(dashboardId);
+          }, 50);
+        }, 400); // Wait 400ms for dialog animation (200ms) + buffer
+        
+        // Store timeout ID for cleanup if component unmounts
+        return () => clearTimeout(callbackTimeout);
+      } else {
+        // Reset the ref guard if no pending callback
+        isAddingToDashboardRef.current = false;
+      }
+      
       onClose();
     }
   };
@@ -607,8 +716,18 @@ export function ChartPreviewDialog({ isOpen, onClose, chart, dashboards = [], pr
             </DropdownMenuTrigger>
             <DropdownMenuContent 
               align="end" 
-              className="w-[calc(100vw-2rem)] sm:w-[250px] max-w-[250px] !z-[99999]" 
+              className="w-[calc(100vw-2rem)] sm:w-[250px] max-w-[250px] !z-[100]" 
               onCloseAutoFocus={(e) => e.preventDefault()}
+              onEscapeKeyDown={() => {
+                setIsDropdownOpen(false);
+              }}
+              onPointerDownOutside={(e) => {
+                // Prevent closing if clicking on the trigger button
+                const target = e.target as HTMLElement;
+                if (target.closest('[data-slot="dropdown-menu-trigger"]')) {
+                  e.preventDefault();
+                }
+              }}
             >
               <DropdownMenuLabel>Select a dashboard</DropdownMenuLabel>
               <DropdownMenuSeparator />
