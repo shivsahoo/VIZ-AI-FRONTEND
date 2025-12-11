@@ -45,6 +45,10 @@ if (typeof document !== 'undefined') {
       .react-datepicker__input-container .react-datepicker__close-icon::after {
         display: none !important;
       }
+      /* Fix calendar height to be consistent across all months */
+      .react-datepicker__month-container {
+        height: 300px !important;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -815,7 +819,7 @@ export function DashboardDetailView({
                         <Download className="w-4 h-4" />
                       )}
                     </Button>
-                    <Button
+                    {/* <Button
                       variant="outline"
                       size="icon"
                       className="h-8 w-8 border-border hover:bg-muted"
@@ -823,7 +827,7 @@ export function DashboardDetailView({
                       title="Edit Chart"
                     >
                       <Edit2 className="w-4 h-4" />
-                    </Button>
+                    </Button> */}
                     <Button
                       variant="outline"
                       size="icon"
