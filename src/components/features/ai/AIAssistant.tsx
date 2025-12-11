@@ -10,6 +10,7 @@ import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry
 import { VizAIWebSocket, WebSocketResponse, type ChartSpec } from "../../../services/websocket";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
+import { useChartGenerationStore } from "../../../store/chartGenerationStore";
 
 interface Message {
   id: number;
@@ -47,7 +48,7 @@ type ChartCreationRequestPayload = {
   nlq_query: string;
   data_connection_id: string;
   db_schema: string;
-  db_type: 'postgres' | 'mysql' | 'sqlite';
+  db_type: 'postgres' | 'mysql' | 'sqlite' | 'oracledb';
   role: string;
   kpi_info?: string;
   dashboard_kpi_info?: string;
@@ -61,6 +62,7 @@ interface AIAssistantProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   projectId?: number | string;
+  currentTab?: string; // Current workspace tab to determine if we should keep WebSocket connected
   onChartCreated?: (chart: {
     id?: string;
     name: string;
@@ -68,7 +70,7 @@ interface AIAssistantProps {
     dataSource: string;
     query: string;
     status: 'draft' | 'published';
-    dashboardId?: number;
+    dashboardId?: number | string;
   }) => void;
   editingChart?: {
     name: string;
@@ -107,11 +109,18 @@ const normalizeChartType = (type?: string): 'line' | 'bar' | 'pie' | 'area' => {
   return 'line';
 };
 
-const normalizeDbType = (type?: string): 'postgres' | 'mysql' | 'sqlite' => {
+const normalizeDbType = (type?: string): 'postgres' | 'mysql' | 'sqlite' | 'oracledb' => {
   if (!type) return 'postgres';
   const lower = type.toLowerCase();
+  // Handle Oracle database types
+  if (lower.includes('oracle')) return 'oracledb';
+  // Handle MySQL
   if (lower.includes('mysql')) return 'mysql';
+  // Handle SQLite
   if (lower.includes('sqlite')) return 'sqlite';
+  // Handle PostgreSQL variations (postgresql, postgres, pg)
+  if (lower.includes('postgres') || lower.includes('pg')) return 'postgres';
+  // Default to postgres if type is not recognized
   return 'postgres';
 };
 
@@ -128,20 +137,27 @@ const ensureSchemaString = (schema?: string | null): string => {
   }
 };
 
-export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, editingChart }: AIAssistantProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      type: 'database-prompt',
-      content: 'Hello! I\'m VizAI. To get started, please select which database you\'d like to generate charts from.'
-    }
-  ]);
+export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onChartCreated, editingChart }: AIAssistantProps) {
+  // Use Zustand store for persistent state
+  const {
+    messages: storeMessages,
+    selectedDatabase: storeSelectedDatabase,
+    isGenerating: storeIsGenerating,
+    chartWorkflowState: storeChartWorkflowState,
+    setMessages: setStoreMessages,
+    setSelectedDatabase: setStoreSelectedDatabase,
+    setIsGenerating: setStoreIsGenerating,
+    setChartWorkflowState: setStoreChartWorkflowState,
+  } = useChartGenerationStore();
+
+  // Local state - initialize from store to restore history
+  const [messages, setMessages] = useState<Message[]>(storeMessages);
   const [input, setInput] = useState("");
-  const [selectedDatabase, setSelectedDatabase] = useState("");
+  const [selectedDatabase, setSelectedDatabase] = useState(storeSelectedDatabase);
   const [expandedSuggestion, setExpandedSuggestion] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(storeIsGenerating);
   const [previewChart, setPreviewChart] = useState<ChartSuggestion | null>(null);
-  const [showDatabaseSelection, setShowDatabaseSelection] = useState(true);
+  const [showDatabaseSelection, setShowDatabaseSelection] = useState(!storeSelectedDatabase);
   const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
   const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string; schema?: string | null }>>([]);
   const [isLoadingDatabases, setIsLoadingDatabases] = useState(false);
@@ -152,9 +168,99 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
   const [dynamicSuggestions, setDynamicSuggestions] = useState<string[]>([]);
   const chartRequestRef = useRef<ChartCreationRequestPayload | null>(null);
   const [isAwaitingClarification, setIsAwaitingClarification] = useState(false);
-  const [chartWorkflowState, setChartWorkflowState] = useState<Record<string, any> | null>(null);
+  const [chartWorkflowState, setChartWorkflowState] = useState<Record<string, any> | null>(storeChartWorkflowState);
   const chartWorkflowStateRef = useRef<Record<string, any> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Track if we're restoring from store to avoid sync loops
+  const isRestoringRef = useRef(false);
+
+  // Load state from store when opening (only when isOpen changes from false to true)
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      // Assistant just opened - restore history from Zustand store
+      // Get fresh store state directly to avoid stale closure issues
+      const storeState = useChartGenerationStore.getState();
+      console.log('[AIAssistant] Restoring from store:', {
+        messagesCount: storeState.messages.length,
+        hasDatabase: !!storeState.selectedDatabase,
+        chartSuggestionsCount: storeState.messages.filter(m => m.type === 'chart-suggestions').length,
+        messages: storeState.messages
+      });
+      
+      isRestoringRef.current = true;
+      // Always restore messages from store to ensure history is shown
+      // Even if empty, set it to ensure consistency
+      setMessages(storeState.messages);
+      
+      if (storeState.selectedDatabase) {
+        setSelectedDatabase(storeState.selectedDatabase);
+        setShowDatabaseSelection(false);
+      } else {
+        // If no database in store, show selection
+        setShowDatabaseSelection(true);
+      }
+      
+      setIsGenerating(storeState.isGenerating);
+      if (storeState.chartWorkflowState) {
+        setChartWorkflowState(storeState.chartWorkflowState);
+      }
+      
+      // Reset restore flag after state updates (longer delay to ensure other effects don't interfere)
+      setTimeout(() => {
+        isRestoringRef.current = false;
+        console.log('[AIAssistant] Restore complete, messages after restore:', storeState.messages.length);
+      }, 300);
+    }
+    wasOpenRef.current = isOpen;
+  }, [isOpen]); // ONLY depend on isOpen - get fresh store state inside effect
+
+  // CRITICAL: Always sync messages to store (even when closed) to preserve history
+  // This ensures that when you close and reopen the assistant, your chart generation history is restored
+  // Use a ref to track previous messages to avoid unnecessary updates
+  const prevMessagesRef = useRef<Message[]>([]);
+  useEffect(() => {
+    // Skip sync if we're currently restoring from store to avoid loops
+    if (isRestoringRef.current) {
+      console.log('[AIAssistant] Skipping sync - currently restoring from store');
+      prevMessagesRef.current = messages;
+      return;
+    }
+    
+    // Only sync if messages actually changed and exist
+    const messagesChanged = JSON.stringify(prevMessagesRef.current) !== JSON.stringify(messages);
+    if (messagesChanged && messages.length > 0) {
+      console.log('[AIAssistant] Syncing messages to store:', {
+        count: messages.length,
+        hasChartSuggestions: messages.some(m => m.type === 'chart-suggestions')
+      });
+      // Directly update store - this is safe in useEffect (not during render)
+      setStoreMessages(messages);
+    }
+    prevMessagesRef.current = messages;
+  }, [messages, setStoreMessages]);
+
+  // Sync selectedDatabase to store (persist even when closed)
+  useEffect(() => {
+    if (!isRestoringRef.current && selectedDatabase) {
+      setStoreSelectedDatabase(selectedDatabase);
+    }
+  }, [selectedDatabase, setStoreSelectedDatabase]);
+
+  // Sync isGenerating to store (only when open)
+  useEffect(() => {
+    if (!isRestoringRef.current && isOpen) {
+      setStoreIsGenerating(isGenerating);
+    }
+  }, [isGenerating, isOpen, setStoreIsGenerating]);
+
+  // Sync chartWorkflowState to store (persist even when closed)
+  useEffect(() => {
+    if (!isRestoringRef.current) {
+      setStoreChartWorkflowState(chartWorkflowState);
+    }
+  }, [chartWorkflowState, setStoreChartWorkflowState]);
 
   // Ensure any open preview dialog is dismissed when the assistant closes
   useEffect(() => {
@@ -237,11 +343,33 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
     }
   }, [projectId, isOpen]);
 
+  // Track previous tab to detect navigation away from charts page
+  const prevTabRef = useRef<string | undefined>(currentTab);
+  
+  // Separate effect to handle WebSocket disconnection when navigating away from charts page
+  useEffect(() => {
+    const prevTab = prevTabRef.current;
+    // If we're navigating away from charts page, disconnect WebSocket
+    if (prevTab === 'charts' && currentTab !== 'charts' && wsClient) {
+      console.log('[AIAssistant] Navigating away from charts page - disconnecting WebSocket');
+      wsClient.disconnect();
+      setWsClient(null);
+    }
+    prevTabRef.current = currentTab;
+  }, [currentTab, wsClient]);
+
+  // Effect to handle WebSocket connection when assistant opens
   useEffect(() => {
     if (!isOpen || !userId) {
       return;
     }
 
+    // Don't create new connection if we already have one
+    if (wsClient) {
+      return;
+    }
+
+    console.log('[AIAssistant] Creating WebSocket connection');
     const client = new VizAIWebSocket(userId);
     setIsConnecting(true);
     setConnectionError(null);
@@ -310,15 +438,18 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
         `I've analyzed your request and generated ${suggestions.length} chart suggestion${suggestions.length > 1 ? 's' : ''}.`;
 
       removeAnalyzingMessage();
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: prev.length + 1,
-          type: 'chart-suggestions',
-          content: contentMessage,
-          chartSuggestions: suggestions,
-        },
-      ]);
+      setMessages((prev) => {
+        const newMessages = [
+          ...prev,
+          {
+            id: prev.length + 1,
+            type: 'chart-suggestions' as const,
+            content: contentMessage,
+            chartSuggestions: suggestions,
+          },
+        ];
+        return newMessages;
+      });
     };
 
     const handleChartCreation = (response: WebSocketResponse) => {
@@ -450,11 +581,16 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
         toast.error(error?.message || 'Failed to connect to AI assistant');
       });
 
+    // Cleanup: Don't disconnect when assistant closes - only when navigating away
+    // The disconnect when navigating away from charts page is handled in the separate effect above
+    // This cleanup only runs when isOpen or userId changes, not when component unmounts
+    // Cleanup: Don't disconnect or remove listeners when assistant closes
+    // Keep connection and listeners alive - only disconnect when navigating away from charts page
+    // The disconnect when navigating away is handled in the separate effect above
     return () => {
-      client.off('chart_creation', handleChartCreation);
-      client.off('regenerate', handleRegenerate);
-      client.disconnect();
-      setWsClient(null);
+      // Do nothing - keep connection and listeners alive
+      // This allows the connection to persist when closing/reopening the assistant
+      console.log('[AIAssistant] Assistant closed - keeping WebSocket connection alive');
     };
   }, [isOpen, userId]);
 
@@ -548,7 +684,13 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
   };
 
   // Update initial message when editing a chart
+  // IMPORTANT: Don't reset messages if we're restoring from store or if messages already exist
   useEffect(() => {
+    // Skip if we just restored from store (give it time to complete)
+    if (isRestoringRef.current) {
+      return;
+    }
+    
     if (editingChart && isOpen) {
       setMessages([
         {
@@ -559,19 +701,23 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       ]);
       setShowDatabaseSelection(false);
       setSelectedDatabase('editing-mode');
-    } else if (!editingChart && isOpen) {
-      // Reset to initial state when not editing
-      setMessages([
-        {
-          id: 1,
-          type: 'database-prompt',
-          content: 'Hello! I\'m VizAI. To get started, please select which database you\'d like to generate charts from.'
-        }
-      ]);
-      setShowDatabaseSelection(true);
-      setSelectedDatabase('');
+    } else if (!editingChart && isOpen && messages.length === 0) {
+      // Only reset to initial state if there are NO messages (fresh start)
+      // Don't reset if we have restored messages from store
+      const storeState = useChartGenerationStore.getState();
+      if (storeState.messages.length === 0) {
+        setMessages([
+          {
+            id: 1,
+            type: 'database-prompt',
+            content: 'Hello! I\'m VizAI. To get started, please select which database you\'d like to generate charts from.'
+          }
+        ]);
+        setShowDatabaseSelection(true);
+        setSelectedDatabase('');
+      }
     }
-  }, [editingChart, isOpen]);
+  }, [editingChart, isOpen, messages.length]);
 
   // Use fetched databases if available, otherwise fall back to mock databases
   const availableDatabases = databases.length > 0 
@@ -700,13 +846,20 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
       inputRef.current?.focus();
     }, 100);
 
+    const dbType = normalizeDbType(selectedDb.type);
+    console.log('[AIAssistant] Normalizing db_type:', {
+      originalType: selectedDb.type,
+      normalizedType: dbType,
+      databaseName: selectedDb.name
+    });
+
     const payload: ChartCreationRequestPayload = isClarificationResponse && chartRequestRef.current
       ? { ...chartRequestRef.current }
       : {
           nlq_query: trimmedInput,
           data_connection_id: String(selectedDb.id),
           db_schema: schemaString,
-          db_type: normalizeDbType(selectedDb.type),
+          db_type: dbType,
           role: 'Analyst',
         };
 
@@ -836,20 +989,21 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
     });
     
     // Remove the suggestion from the message
-    setMessages(prevMessages => 
-      prevMessages.map(msg => {
-        if (msg.type === 'chart-suggestions' && msg.chartSuggestions) {
-          return {
-            ...msg,
-            chartSuggestions: msg.chartSuggestions.filter(s => s.id !== previewChart.id)
-          };
-        }
-        return msg;
-      })
-    );
+    const updatedMessages = messages.map(msg => {
+      if (msg.type === 'chart-suggestions' && msg.chartSuggestions) {
+        return {
+          ...msg,
+          chartSuggestions: msg.chartSuggestions.filter(s => s.id !== previewChart.id)
+        };
+      }
+      return msg;
+    });
+    setMessages(updatedMessages);
+    setStoreMessages(updatedMessages);
 
-    // Close preview
+    // Close preview but keep AI assistant open
     setPreviewChart(null);
+    // Don't close AI assistant - let user continue generating charts
   };
 
   const handleAddChartToDashboard = (dashboardId: number | string) => {
@@ -871,20 +1025,21 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, onChartCreated, e
     }
     
     // Remove the suggestion from the message
-    setMessages(prevMessages => 
-      prevMessages.map(msg => {
-        if (msg.type === 'chart-suggestions' && msg.chartSuggestions) {
-          return {
-            ...msg,
-            chartSuggestions: msg.chartSuggestions.filter(s => s.id !== previewChart.id)
-          };
-        }
-        return msg;
-      })
-    );
+    const updatedMessages = messages.map(msg => {
+      if (msg.type === 'chart-suggestions' && msg.chartSuggestions) {
+        return {
+          ...msg,
+          chartSuggestions: msg.chartSuggestions.filter(s => s.id !== previewChart.id)
+        };
+      }
+      return msg;
+    });
+    setMessages(updatedMessages);
+    setStoreMessages(updatedMessages);
 
-    // Close preview
+    // Close preview but keep AI assistant open
     setPreviewChart(null);
+    // Don't close AI assistant - let user continue generating charts
   };
 
   const toggleSuggestionExpand = (id: string) => {

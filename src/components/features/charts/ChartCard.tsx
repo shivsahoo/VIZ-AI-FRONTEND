@@ -190,9 +190,20 @@ export function ChartCard({
         );
       }
 
+      // Calculate bottom margin based on whether we need space for rotated labels
+      // For date axes with many points, we may need more space
+      const dataPointCount = displayData.length;
+      const needsRotatedLabels = isDateAxis && dataPointCount > 5;
+      const lineBottomMargin = needsRotatedLabels ? 50 : 20;
+      
+      // Calculate minimum width for horizontal scrolling - allow comfortable spacing per data point
+      const minChartWidth = Math.max(400, dataPointCount * 60);
+
       return (
-        <ResponsiveContainer width="100%" height={height}>
-          <LineChart data={displayData} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+        <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+          <div style={{ minWidth: `${minChartWidth}px` }}>
+            <ResponsiveContainer width="100%" height={height}>
+              <LineChart data={displayData} margin={{ top: 10, right: 10, left: 10, bottom: lineBottomMargin }}>
             {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />}
             <XAxis 
               dataKey={finalXAxisKey} 
@@ -205,10 +216,14 @@ export function ChartCard({
                   const date = new Date(value);
                   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 } catch {
-                  return value;
+                  return String(value);
                 }
               } : undefined}
               allowDuplicatedCategory={false}
+              interval={isDateAxis ? (dataPointCount > 12 ? Math.floor(dataPointCount / 8) : 0) : 0}
+              angle={needsRotatedLabels ? -45 : 0}
+              textAnchor={needsRotatedLabels ? "end" : "middle"}
+              height={needsRotatedLabels ? 50 : undefined}
               tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
               axisLine={{ stroke: "hsl(var(--border))" }}
             />
@@ -284,8 +299,10 @@ export function ChartCard({
                 );
               });
             })()}
-          </LineChart>
-        </ResponsiveContainer>
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
       );
 
     case 'bar':
@@ -370,9 +387,14 @@ export function ChartCard({
       const shouldRotateLabels = barCount > 5;
       const bottomMargin = shouldRotateLabels ? 60 : 20;
       
+      // Calculate minimum width for horizontal scrolling - allow comfortable spacing per bar
+      const minBarChartWidth = Math.max(400, barCount * 80);
+      
       return (
-        <ResponsiveContainer width="100%" height={height}>
-          <BarChart data={normalizedBarData} margin={{ top: 10, right: 10, left: 10, bottom: bottomMargin }}>
+        <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+          <div style={{ minWidth: `${minBarChartWidth}px` }}>
+            <ResponsiveContainer width="100%" height={height}>
+              <BarChart data={normalizedBarData} margin={{ top: 10, right: 10, left: 10, bottom: bottomMargin }}>
             {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />}
             <XAxis 
               dataKey={finalXAxisKey} 
@@ -435,8 +457,10 @@ export function ChartCard({
                 );
               });
             })()}
-          </BarChart>
-        </ResponsiveContainer>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
       );
 
     case 'pie':
@@ -529,9 +553,15 @@ export function ChartCard({
       );
 
     case 'area':
+      // Calculate minimum width for horizontal scrolling - allow comfortable spacing per data point
+      const areaDataPointCount = data.length;
+      const minAreaChartWidth = Math.max(400, areaDataPointCount * 60);
+      
       return (
-        <ResponsiveContainer width="100%" height={height}>
-          <AreaChart data={data} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+        <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+          <div style={{ minWidth: `${minAreaChartWidth}px` }}>
+            <ResponsiveContainer width="100%" height={height}>
+              <AreaChart data={data} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
             <defs>
               <linearGradient id={`gradient-${dataKeys.primary}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor={colors[0]} stopOpacity={0.4}/>
@@ -587,8 +617,10 @@ export function ChartCard({
                 name={finalDataKeys.secondary}
               />
             )}
-          </AreaChart>
-        </ResponsiveContainer>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
       );
 
     default:

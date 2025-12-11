@@ -11,6 +11,7 @@ import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
 import { PinnedChartsProvider } from "./context/PinnedChartsContext";
 import { getProjects, getCurrentUser } from "./services/api";
+import { useChartGenerationStore } from "./store/chartGenerationStore";
 
 // Mock user ID for now
 const MOCK_USER_ID = 1;
@@ -58,8 +59,22 @@ export default function App() {
     description?: string;
   } | null>(null);
   const prevWorkspaceTabRef = useRef<string>(workspaceTab);
+  const prevTabForAICloseRef = useRef<string>(workspaceTab);
+  const clearChartGenerationState = useChartGenerationStore((state) => state.clearState);
 
   const isInWorkspace = currentView === 'workspace' && Boolean(selectedProject);
+  
+  // Clear chart generation state when navigating away from charts page
+  useEffect(() => {
+    const prevTab = prevWorkspaceTabRef.current;
+    if (prevTab !== workspaceTab) {
+      // Only clear if navigating away from charts page
+      if (prevTab === 'charts' && workspaceTab !== 'charts') {
+        clearChartGenerationState();
+      }
+      prevWorkspaceTabRef.current = workspaceTab;
+    }
+  }, [workspaceTab, clearChartGenerationState]);
 
   useEffect(() => {
     if (isDark) {
@@ -384,17 +399,17 @@ export default function App() {
     status: 'draft' | 'published';
     dashboardId?: number | string;
   }) => {
-    // If chart was added to a dashboard, stay on current page and keep AI Assistant open
-    // Check if dashboardId exists (can be number or string UUID)
+    // Store the chart data (might be used for refresh)
+    setPendingChartFromAI(chart);
+    // Trigger re-render in ChartsView (in case user navigates there later)
+    setChartCreatedTrigger(prev => prev + 1);
+    
+    // Check if chart was added to a dashboard
     const hasDashboardId = chart.dashboardId !== undefined && 
                            chart.dashboardId !== null && 
                            (typeof chart.dashboardId === 'number' ? chart.dashboardId !== 0 : chart.dashboardId !== '');
     
     if (hasDashboardId) {
-      // Store the chart data (might be used for refresh)
-      setPendingChartFromAI(chart);
-      // Trigger re-render in ChartsView (in case user navigates there later)
-      setChartCreatedTrigger(prev => prev + 1);
       // Trigger dashboard refresh to show the newly added chart
       setDashboardRefreshTrigger(prev => prev + 1);
       // Keep AI Assistant open so user can continue generating charts
@@ -405,17 +420,12 @@ export default function App() {
       return;
     }
 
-    // For charts not added to dashboard, navigate to charts page
-    // Store the chart data to be passed to ChartsView (used to trigger creation/refetch)
-    setPendingChartFromAI(chart);
-    // Trigger re-render in ChartsView
-    setChartCreatedTrigger(prev => prev + 1);
+    // For charts saved as draft, keep AI Assistant open and navigate to charts page
     // Switch to charts tab to show the newly created chart
     setWorkspaceTab('charts');
-    // Ensure AI assistant (and any modal it spawns) closes so the charts page stays interactive
-    if (isAIAssistantOpen) {
-      setIsAIAssistantOpen(false);
-      setEditingChart(null);
+    // Keep AI assistant open so user can continue generating charts
+    if (!isAIAssistantOpen) {
+      setIsAIAssistantOpen(true);
     }
   };
 
@@ -470,14 +480,20 @@ export default function App() {
   }, [isInWorkspace, isAIAssistantOpen]);
 
   // Auto-close assistant when navigating to a different tab/page within workspace
+  // Specifically close when navigating away from charts page
   useEffect(() => {
-    // Only close if tab actually changed (not on initial mount)
-    if (prevWorkspaceTabRef.current !== workspaceTab && isInWorkspace && isAIAssistantOpen) {
+    const prevTab = prevTabForAICloseRef.current;
+    // Only close if tab actually changed (not on initial mount) and we're in workspace
+    if (prevTab !== workspaceTab && isInWorkspace && isAIAssistantOpen) {
+      // Close AI assistant when navigating away from charts page (or any page)
+      console.log('[App] Closing AI assistant - navigating from', prevTab, 'to', workspaceTab);
       setIsAIAssistantOpen(false);
       setEditingChart(null); // Clear editing chart when navigating away
     }
-    // Update ref for next comparison
-    prevWorkspaceTabRef.current = workspaceTab;
+    // Update ref for next comparison (only update if tab actually changed)
+    if (prevTab !== workspaceTab) {
+      prevTabForAICloseRef.current = workspaceTab;
+    }
   }, [workspaceTab, isInWorkspace, isAIAssistantOpen]);
 
   // Show loading state while checking authentication
@@ -560,6 +576,7 @@ export default function App() {
             }
           }}
           projectId={selectedProjectId || projects.find(p => p.name === selectedProject)?.id || undefined}
+          currentTab={workspaceTab}
           onChartCreated={handleChartCreatedFromAI}
           editingChart={editingChart}
         />
