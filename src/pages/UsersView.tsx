@@ -275,13 +275,32 @@ export function UsersView({ projectId }: UsersViewProps) {
       if (response.success && response.data) {
         // Map API users to UI format
         const uiUsers: User[] = response.data.map((user, index) => {
-          // Find role by name to get roleId (roles might be empty, so handle that)
-          const role = roles.find(r => r.name === user.role);
+          // Find role by name (case-insensitive, trim whitespace for better matching)
+          const normalizedUserRole = user.role?.trim().toLowerCase() || '';
+          let foundRole = roles.find(r => {
+            const normalizedRoleName = r.name?.trim().toLowerCase() || '';
+            return normalizedRoleName === normalizedUserRole;
+          });
+          
+          // If still not found, try partial match (handles "Super Admin" vs "SuperAdmin")
+          if (!foundRole) {
+            foundRole = roles.find(r => {
+              const normalizedRoleName = r.name?.trim().toLowerCase().replace(/\s+/g, '') || '';
+              const normalizedUserRoleNoSpaces = normalizedUserRole.replace(/\s+/g, '');
+              return normalizedRoleName === normalizedUserRoleNoSpaces;
+            });
+          }
+          
+          // Log warning if role not found (helps with debugging)
+          if (!foundRole && user.role && roles.length > 0) {
+            console.warn(`[UsersView] Role "${user.role}" not found in roles list. Available roles:`, roles.map(r => r.name));
+          }
+          
           return {
             id: index + 1, // Temporary ID for UI
             name: user.name,
             email: user.email,
-            roleId: role?.id || (roles.length > 0 ? roles[0].id : 1), // Default to first role if not found, or 1 if no roles
+            roleId: foundRole?.id || (roles.length > 0 ? roles[0].id : 1), // Default to first role if not found, or 1 if no roles
             status: "active" as const,
             avatar: user.name.split(" ").map(n => n[0]).join("").toUpperCase(),
           };
