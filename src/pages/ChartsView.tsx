@@ -62,6 +62,10 @@ if (typeof document !== 'undefined') {
       .react-datepicker__input-container .react-datepicker__close-icon::after {
         display: none !important;
       }
+      /* Fix calendar height to be consistent across all months */
+      .react-datepicker__month-container {
+        height: 300px !important;
+      }
     `;
     document.head.appendChild(style);
   }

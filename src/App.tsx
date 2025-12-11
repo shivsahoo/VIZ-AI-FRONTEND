@@ -254,7 +254,7 @@ export default function App() {
     }
   };
 
-  const handleProjectSelect = (projectName: string, projectId?: string) => {
+  const handleProjectSelect = (projectName: string, projectId?: string, isNewProject?: boolean) => {
     setSelectedProject(projectName);
     
     // Find project ID if not provided
@@ -268,7 +268,8 @@ export default function App() {
     setSelectedProjectId(finalProjectId);
     
     setCurrentView('workspace');
-    setWorkspaceTab('home'); // Reset to home when entering a project
+    // Redirect to charts page for new projects, home for existing projects
+    setWorkspaceTab(isNewProject ? 'charts' : 'home');
     
     // Store last visited project for ALL users (not just project_user)
     localStorage.setItem('vizai_last_project', projectName);

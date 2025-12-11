@@ -741,6 +741,12 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     setSelectedDatabase(dbValue);
     const selectedDb = availableDatabases.find(db => db.value === dbValue || db.id === dbValue);
     
+    // Clear the previous chart request ref when database changes
+    // This ensures that subsequent prompts use the new database type
+    chartRequestRef.current = null;
+    setIsAwaitingClarification(false);
+    setChartWorkflowState(null);
+    
     // Add user selection message
     const userMessage: Message = {
       id: messages.length + 1,
@@ -853,8 +859,16 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       databaseName: selectedDb.name
     });
 
+    // Always use the current selected database's type, even for clarification responses
+    // This ensures that if the database was changed, the new type is used
     const payload: ChartCreationRequestPayload = isClarificationResponse && chartRequestRef.current
-      ? { ...chartRequestRef.current }
+      ? { 
+          ...chartRequestRef.current,
+          // Override with current database info to ensure correct db_type
+          data_connection_id: String(selectedDb.id),
+          db_schema: schemaString,
+          db_type: dbType,
+        }
       : {
           nlq_query: trimmedInput,
           data_connection_id: String(selectedDb.id),

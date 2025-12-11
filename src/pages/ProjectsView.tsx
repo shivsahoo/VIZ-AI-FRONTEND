@@ -58,7 +58,7 @@ interface UIProject extends ApiProject {
 }
 
 interface ProjectsViewProps {
-  onProjectSelect: (projectName: string, projectId?: string) => void;
+  onProjectSelect: (projectName: string, projectId?: string, isNewProject?: boolean) => void;
 }
 
 export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
@@ -215,7 +215,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
       );
       
       setTimeout(() => {
-        onProjectSelect(projectData.name, projectId);
+        onProjectSelect(projectData.name, projectId, true); // true indicates this is a new project
       }, 500);
     } catch (err: any) {
       toast.error(err.message || "An error occurred while setting up project");
@@ -259,7 +259,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
       // Navigate to the created project after a brief delay
       setTimeout(() => {
         setShowKPICollection(false);
-        onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId);
+        onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId, true); // true indicates this is a new project
         setPendingProjectData(null);
       }, 500);
     } else {
@@ -273,7 +273,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     // Skip KPI collection and select the project
     setShowKPICollection(false);
     if (pendingProjectData) {
-      onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId);
+      onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId, true); // true indicates this is a new project
     }
     setPendingProjectData(null);
   };
