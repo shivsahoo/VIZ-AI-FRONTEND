@@ -2394,21 +2394,34 @@ export const inviteUser = async (
   data: {
     username: string;
     email: string;
+    password?: string;
     role_id: string; // Role ID (UUID)
   }
 ): Promise<ApiResponse<{ user_id: string; project_id: string }>> => {
   try {
+    const requestBody: {
+      username: string;
+      email: string;
+      password?: string;
+      role_id: string;
+    } = {
+      username: data.username,
+      email: data.email,
+      role_id: data.role_id,
+    };
+    
+    // Only include password if provided
+    if (data.password) {
+      requestBody.password = data.password;
+    }
+    
     const response = await apiRequest<{
       message: string;
       user_id: string;
       project_id: string;
     }>(`/api/v1/backend/projects/${projectId}/users`, {
       method: 'POST',
-      body: JSON.stringify({
-        username: data.username,
-        email: data.email,
-        role_id: data.role_id,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     return {
