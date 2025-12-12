@@ -64,6 +64,7 @@ interface User {
   name: string;
   email: string;
   roleId: number;
+  roleName?: string; // Store the actual role name from backend
   status: "active" | "inactive";
   avatar: string;
 }
@@ -302,6 +303,7 @@ export function UsersView({ projectId }: UsersViewProps) {
             name: user.name,
             email: user.email,
             roleId: foundRole?.id || (roles.length > 0 ? roles[0].id : 1), // Default to first role if not found, or 1 if no roles
+            roleName: user.role || foundRole?.name, // Store the actual role name from backend
             status: "active" as const,
             avatar: user.name.split(" ").map(n => n[0]).join("").toUpperCase(),
           };
@@ -392,7 +394,12 @@ export function UsersView({ projectId }: UsersViewProps) {
     user.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const getRoleName = (roleId: number) => {
+  const getRoleName = (roleId: number, roleName?: string) => {
+    // If we have the actual role name from backend, use it
+    if (roleName) {
+      return roleName;
+    }
+    // Otherwise, look it up from roles list
     return roles.find(r => r.id === roleId)?.name || "Unknown";
   };
 
@@ -909,7 +916,9 @@ export function UsersView({ projectId }: UsersViewProps) {
                               onValueChange={(value) => handleChangeUserRole(user.id, parseInt(value))}
                             >
                               <SelectTrigger className="w-36 h-8 border-0 bg-transparent hover:bg-muted text-sm">
-                                <SelectValue />
+                                <SelectValue>
+                                  {getRoleName(user.roleId, user.roleName)}
+                                </SelectValue>
                               </SelectTrigger>
                               <SelectContent>
                                 {roles.map((role) => (

@@ -1554,10 +1554,7 @@ export const updateFavoriteChart = async (chartId: string): Promise<ApiResponse<
 /**
  * Delete a chart
  * If dashboardId is provided, deletes the chart from that specific dashboard.
- * Otherwise, attempts to delete the chart entirely using a general delete endpoint.
- * 
- * Note: The backend currently only has a delete-from-dashboard endpoint.
- * If a general delete endpoint doesn't exist, this will fail for charts without a dashboardId.
+ * Otherwise, deletes the chart entirely using the general delete endpoint.
  */
 export const deleteChart = async (chartId: string, dashboardId?: number | string): Promise<ApiResponse<{ message: string }>> => {
   try {
@@ -1578,35 +1575,19 @@ export const deleteChart = async (chartId: string, dashboardId?: number | string
       };
     }
     
-    // Try to delete chart directly using general delete endpoint
-    // This endpoint may not exist in the backend - if it doesn't, we'll handle the error
-    try {
-      const response = await apiRequest<{
-        message: string;
-      }>(`/api/v1/backend/charts/${chartId}`, {
-        method: 'DELETE',
-      });
+    // Delete chart directly using general delete endpoint
+    const response = await apiRequest<{
+      message: string;
+    }>(`/api/v1/backend/charts/${chartId}`, {
+      method: 'DELETE',
+    });
 
-      return {
-        success: true,
-        data: {
-          message: response.message || 'Chart deleted successfully',
-        },
-      };
-    } catch (generalDeleteError: any) {
-      // If general delete endpoint doesn't exist (404), return a helpful error
-      if (generalDeleteError.message?.includes('404') || generalDeleteError.message?.includes('Not Found')) {
-        return {
-          success: false,
-          error: {
-            code: 'DELETE_CHART_FAILED',
-            message: 'Cannot delete chart: Chart is not associated with a dashboard. Please add the chart to a dashboard first, then delete it.',
-          },
-        };
-      }
-      // Re-throw other errors
-      throw generalDeleteError;
-    }
+    return {
+      success: true,
+      data: {
+        message: response.message || 'Chart deleted successfully',
+      },
+    };
   } catch (error: any) {
     return {
       success: false,
