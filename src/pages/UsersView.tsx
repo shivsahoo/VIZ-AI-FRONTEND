@@ -197,6 +197,7 @@ export function UsersView({ projectId }: UsersViewProps) {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteName, setInviteName] = useState("");
   const [inviteUsername, setInviteUsername] = useState("");
+  const [invitePassword, setInvitePassword] = useState("");
   const [inviteRoleId, setInviteRoleId] = useState<string>("");
 
   // Edit member state
@@ -405,7 +406,7 @@ export function UsersView({ projectId }: UsersViewProps) {
       return;
     }
 
-    if (!inviteEmail || !inviteName || !inviteUsername || !inviteRoleId) {
+    if (!inviteEmail || !inviteName || !inviteUsername || !invitePassword || !inviteRoleId) {
       toast.error("Please fill in all fields");
       return;
     }
@@ -421,6 +422,7 @@ export function UsersView({ projectId }: UsersViewProps) {
       const response = await inviteUser(String(projectId), {
         username: inviteUsername,
         email: inviteEmail,
+        password: invitePassword,
         role_id: apiRoleId, // Use the actual API role ID (UUID)
       });
 
@@ -430,6 +432,7 @@ export function UsersView({ projectId }: UsersViewProps) {
         setInviteEmail("");
         setInviteName("");
         setInviteUsername("");
+        setInvitePassword("");
         setInviteRoleId("");
         
         // Refresh users list
@@ -1105,6 +1108,16 @@ export function UsersView({ projectId }: UsersViewProps) {
                 placeholder="john.doe@company.com"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Enter password for login"
+                value={invitePassword}
+                onChange={(e) => setInvitePassword(e.target.value)}
               />
             </div>
             <div className="space-y-2">
