@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, Pin, Trash2, Plus, Clock, Filter, Calendar as CalendarIcon, X } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, Pin, Trash2, Plus, Clock, Filter, Calendar as CalendarIcon, X, Download } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -38,6 +38,7 @@ import {
 import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
 import { ChartCard } from "../components/features/charts/ChartCard";
 import { toast } from "sonner";
+import { exportChartAsImage } from "../utils/chartExport";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { getCharts, createChart, addChartToDashboard, generateCharts, getDatabases, getDashboards, updateFavoriteChart, deleteChart, getUserDashboardCharts, getChartData, type Chart as ApiChart, type ChartData as ApiChartData } from "../services/api";
@@ -1309,7 +1310,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     const error = status?.error;
 
     return (
-      <div className="relative h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden p-4 flex items-center justify-center">
+      <div className="relative h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden p-4 flex items-center justify-center" data-chart-visualization="true">
         {isLoading && hasQueryAndConnection && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/90 backdrop-blur-md rounded-lg z-10">
             {/* Three dot loader */}
@@ -1502,6 +1503,32 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     );
   };
 
+  const handleExportChart = async (chart: Chart) => {
+    try {
+      const chartName = chart.name?.trim() || "Untitled Chart";
+      // Find the chart visualization container
+      const chartContainer = document.querySelector(`[data-chart-id="${chart.id}"]`) as HTMLElement;
+      
+      if (!chartContainer) {
+        toast.error('Chart element not found');
+        return;
+      }
+
+      // Find the actual chart visualization div inside the container
+      const chartVisualization = chartContainer.querySelector('[data-chart-visualization="true"]') as HTMLElement;
+      const elementToExport = chartVisualization || chartContainer;
+
+      await exportChartAsImage(elementToExport, chartName, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+      });
+      toast.success(`Chart "${chartName}" exported successfully!`);
+    } catch (error: any) {
+      console.error('Error exporting chart:', error);
+      toast.error(error?.message || 'Failed to export chart');
+    }
+  };
+
   const renderChartCard = (chart: Chart, isGenerated: boolean = false) => {
     const Icon = chartTypeIcons[chart.type];
     const dashboard = resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId));
@@ -1604,6 +1631,16 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                   //   variant: "ghost"
                   // },
                   {
+                    icon: <Download />,
+                    onClick: async (e) => {
+                      e?.stopPropagation();
+                      await handleExportChart(chart);
+                    },
+                    label: "Export chart as image",
+                    variant: "ghost",
+                    className: "hover:text-primary"
+                  },
+                  {
                     icon: <Trash2 />,
                     onClick: (e) => {
                       e?.stopPropagation();
@@ -1630,7 +1667,10 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         </div>
 
         {/* Chart Visualization */}
-        <div className="pt-24 px-2 pb-12 relative">
+        <div 
+          className="pt-24 px-2 pb-12 relative"
+          data-chart-id={chart.id}
+        >
           {renderChartPreview(chart)}
         </div>
 
@@ -1672,7 +1712,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             {/* Skeleton for controls */}
             <div className="w-full sm:w-[140px] h-9 bg-muted/50 rounded-md animate-pulse opacity-50" />
           </div>
-
+ 
           {/* Skeleton grid */}
           <SkeletonGrid count={6} variant="chart" />
         </div>
