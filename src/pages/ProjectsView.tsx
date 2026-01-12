@@ -1,7 +1,8 @@
 import { useState, useEffect, type MouseEvent } from "react";
-import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2, Loader2 } from "lucide-react";
+import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2, Loader2, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { Input } from "../components/ui/input";
 import { GradientButton } from "../components/shared/GradientButton";
 import { OnboardingFlow } from "./OnboardingFlow";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
@@ -78,6 +79,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     enhancedDescription?: string;
   } | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Fetch projects and user ID on mount
   useEffect(() => {
@@ -424,34 +426,57 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
 
       {/* Projects Section */}
       <div className="px-8 py-12 max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <h2 className="text-2xl text-foreground mb-1">Your Products</h2>
             <p className="text-muted-foreground">Select a product to view analytics and insights</p>
           </div>
-          <GradientButton 
-            onClick={() => setShowNewProjectFlow(true)}
-            className="shadow-lg hover:shadow-xl transition-all"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            New Product
-          </GradientButton>
+          <div className="flex items-center gap-3">
+            <div className="relative max-w-xs w-full sm:w-auto">
+              <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search projects..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 border-border text-sm"
+              />
+            </div>
+            <GradientButton 
+              onClick={() => setShowNewProjectFlow(true)}
+              className="shadow-lg hover:shadow-xl transition-all"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              New Product
+            </GradientButton>
+          </div>
         </div>
 
         {/* Projects Grid */}
-        {projects.length === 0 ? (
+        {(() => {
+          const filteredProjects = projects.filter(project =>
+            project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (project.description || "").toLowerCase().includes(searchQuery.toLowerCase())
+          );
+
+          return filteredProjects.length === 0 ? (
           <Card className="p-12 text-center border border-border">
             <LayoutDashboard className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-            <h3 className="text-xl font-semibold text-foreground mb-2">No projects yet</h3>
-            <p className="text-muted-foreground mb-6">Create your first project to get started</p>
-            <GradientButton onClick={() => setShowNewProjectFlow(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create Your First Project
-            </GradientButton>
+            <h3 className="text-xl font-semibold text-foreground mb-2">
+              {searchQuery ? "No projects found" : "No projects yet"}
+            </h3>
+            <p className="text-muted-foreground mb-6">
+              {searchQuery ? "Try adjusting your search" : "Create your first project to get started"}
+            </p>
+            {!searchQuery && (
+              <GradientButton onClick={() => setShowNewProjectFlow(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                Create Your First Project
+              </GradientButton>
+            )}
           </Card>
         ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {projects.map((project) => (
+            {filteredProjects.map((project) => (
             <Card 
               key={project.id}
               className="group relative overflow-hidden border border-border hover:border-primary/30 hover:shadow-xl transition-all duration-300 cursor-pointer bg-card"
@@ -530,7 +555,8 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
             </Card>
           ))}
         </div>
-        )}
+        );
+        })()}
 
       </div>
 
