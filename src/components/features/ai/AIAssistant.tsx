@@ -11,6 +11,7 @@ import { VizAIWebSocket, WebSocketResponse, type ChartSpec } from "../../../serv
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
 import { useChartGenerationStore } from "../../../store/chartGenerationStore";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../ui/dialog";
 
 interface Message {
   id: number;
@@ -171,6 +172,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
   const [chartWorkflowState, setChartWorkflowState] = useState<Record<string, any> | null>(storeChartWorkflowState);
   const chartWorkflowStateRef = useRef<Record<string, any> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [showWelcomeScreen, setShowWelcomeScreen] = useState(false);
 
   // Track if we're restoring from store to avoid sync loops
   const isRestoringRef = useRef(false);
@@ -701,21 +703,27 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       ]);
       setShowDatabaseSelection(false);
       setSelectedDatabase('editing-mode');
+      setShowWelcomeScreen(false);
     } else if (!editingChart && isOpen && messages.length === 0) {
       // Only reset to initial state if there are NO messages (fresh start)
       // Don't reset if we have restored messages from store
       const storeState = useChartGenerationStore.getState();
       if (storeState.messages.length === 0) {
+        setShowWelcomeScreen(true);
         setMessages([
           {
             id: 1,
-            type: 'database-prompt',
-            content: 'Hello! I\'m VizAI. To get started, please select which database you\'d like to generate charts from.'
+            type: 'ai',
+            content: "Hi! 👋 I'm your VizAI assistant. I'll help you set up your analytics product through a quick conversation. Ready to get started?"
           }
         ]);
-        setShowDatabaseSelection(true);
+        setShowDatabaseSelection(false);
         setSelectedDatabase('');
+      } else {
+        setShowWelcomeScreen(false);
       }
+    } else {
+      setShowWelcomeScreen(false);
     }
   }, [editingChart, isOpen, messages.length]);
 
@@ -746,6 +754,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     chartRequestRef.current = null;
     setIsAwaitingClarification(false);
     setChartWorkflowState(null);
+    setShowWelcomeScreen(false);
     
     // Add user selection message
     const userMessage: Message = {
@@ -1060,14 +1069,55 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     setExpandedSuggestion(expandedSuggestion === id ? null : id);
   };
 
-  const handleChangeDatabase = () => {
-    setShowDatabaseSelection(true);
-    const aiMessage: Message = {
-      id: messages.length + 1,
-      type: 'database-prompt',
-      content: 'Sure! Which database would you like to switch to?'
-    };
-    setMessages(prev => [...prev, aiMessage]);
+  // Parse message content to extract questions
+  const parseQuestions = (content: string): { hasQuestions: boolean; parts: Array<{ type: 'text' | 'question'; content: string; questionNumber?: number }> } => {
+    // Check if content contains "Question 1:", "Question 2:", etc.
+    // Match "Question X:" followed by text until next "Question" or end
+    const questionRegex = /Question\s+(\d+):\s*([^Q]+?)(?=Question\s+\d+:|$)/gi;
+    const matches = Array.from(content.matchAll(questionRegex));
+    
+    if (!matches || matches.length === 0) {
+      return { hasQuestions: false, parts: [{ type: 'text', content }] };
+    }
+
+    const parts: Array<{ type: 'text' | 'question'; content: string; questionNumber?: number }> = [];
+    let lastIndex = 0;
+
+    matches.forEach((match) => {
+      if (match.index === undefined) return;
+      
+      // Add text before this question
+      if (match.index > lastIndex) {
+        const textBefore = content.substring(lastIndex, match.index).trim();
+        if (textBefore) {
+          parts.push({ type: 'text', content: textBefore });
+        }
+      }
+
+      // Extract question number and content
+      const questionNumber = parseInt(match[1], 10);
+      const questionContent = match[2].trim();
+      
+      if (questionNumber && questionContent) {
+        parts.push({ 
+          type: 'question', 
+          content: questionContent,
+          questionNumber 
+        });
+      }
+
+      lastIndex = match.index + match[0].length;
+    });
+
+    // Add remaining text after last question
+    if (lastIndex < content.length) {
+      const textAfter = content.substring(lastIndex).trim();
+      if (textAfter) {
+        parts.push({ type: 'text', content: textAfter });
+      }
+    }
+
+    return { hasQuestions: true, parts };
   };
 
   const suggestions = dynamicSuggestions.length > 0
@@ -1078,110 +1128,154 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     "Customer demographics breakdown"
   ];
 
+  const handleGetStarted = () => {
+    setShowWelcomeScreen(false);
+    setShowDatabaseSelection(true);
+    setMessages([
+      {
+        id: 1,
+        type: 'database-prompt',
+        content: 'Hello! I\'m VizAI. To get started, please select which database you\'d like to generate charts from.'
+      }
+    ]);
+  };
+
   return (
     <>
-      {/* Slide-in Panel */}
-      <div 
-        className={`h-full bg-card border-l border-border shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${
-          isOpen ? 'w-[480px]' : 'w-0'
-        }`}
-        style={{ 
-          overflow: isOpen ? 'visible' : 'hidden'
-        }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 bg-gradient-to-r from-primary to-accent border-b border-white/10 shrink-0">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur-sm flex-shrink-0">
-              <Sparkles className="w-5 h-5 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-white">Ask VizAI</h3>
-              {selectedDatabase ? (
-                <div className="flex items-center gap-2 mt-0.5">
-                  <p className="text-xs text-white/80 truncate">
-                    {availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase)?.label || selectedDatabase}
-                  </p>
-                  <button
-                    onClick={handleChangeDatabase}
-                    className="text-xs text-white/90 hover:text-white underline underline-offset-2 flex-shrink-0"
-                  >
-                    Change
-                  </button>
+      {/* Centered Modal Dialog */}
+      <Dialog open={isOpen} onOpenChange={onOpenChange}>
+        <DialogContent 
+          className="w-full p-0 flex flex-col overflow-hidden"
+          style={{ maxWidth: '65vw', maxHeight: '90vh', height: '85vh' }}
+          hideCloseButton={true}
+        >
+          {/* Header */}
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="w-5 h-5 text-white" />
                 </div>
-              ) : (
-                <p className="text-xs text-white/80">AI-powered chart generation</p>
-              )}
-            </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onOpenChange(false)}
-            className="text-white hover:bg-white/20 h-9 w-9 flex-shrink-0"
-          >
-            <X className="w-5 h-5" />
-          </Button>
-        </div>
-
-        {/* Editing Chart Context Banner */}
-        {editingChart && (
-          <div className="p-4 bg-muted/50 border-b border-border shrink-0">
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${chartTypeColors[editingChart.type]} border`}>
-                {(() => {
-                  const Icon = chartTypeIcons[editingChart.type];
-                  return <Icon className="w-5 h-5" />;
-                })()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <p className="text-xs text-muted-foreground">Editing Chart</p>
-                  <Badge variant="outline" className="text-xs h-5">
-                    {editingChart.type}
-                  </Badge>
+                <div className="flex-1 min-w-0">
+                  <DialogTitle className="text-lg font-semibold text-foreground">VizAI Assistant</DialogTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">Ready to help you get started.</p>
                 </div>
-                <h4 className="text-sm text-foreground truncate">{editingChart.name}</h4>
-                {editingChart.description && (
-                  <p className="text-xs text-muted-foreground mt-0.5 truncate">{editingChart.description}</p>
-                )}
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onOpenChange(false)}
+                className="h-9 w-9 flex-shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </Button>
             </div>
-            <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
-              All chart modifications will be applied to this chart. Ask me to change the chart type, update data, or modify styling.
-            </p>
-          </div>
-        )}
+          </DialogHeader>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-muted/20">
-          {connectionError && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-              {connectionError}
+          {/* Editing Chart Context Banner */}
+          {editingChart && (
+            <div className="px-6 py-4 bg-muted/50 border-b border-border shrink-0">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${chartTypeColors[editingChart.type]} border`}>
+                  {(() => {
+                    const Icon = chartTypeIcons[editingChart.type];
+                    return <Icon className="w-5 h-5" />;
+                  })()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <p className="text-xs text-muted-foreground">Editing Chart</p>
+                    <Badge variant="outline" className="text-xs h-5">
+                      {editingChart.type}
+                    </Badge>
+                  </div>
+                  <h4 className="text-sm text-foreground truncate">{editingChart.name}</h4>
+                  {editingChart.description && (
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{editingChart.description}</p>
+                  )}
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
+                All chart modifications will be applied to this chart. Ask me to change the chart type, update data, or modify styling.
+              </p>
             </div>
           )}
-          <AnimatePresence>
-            {messages.map((message) => (
-            <div key={message.id}>
-              {message.type === 'user' && (
-                <div className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-gradient-to-r from-primary to-accent text-white">
-                    <p className="text-sm leading-relaxed">{message.content}</p>
-                  </div>
-                </div>
-              )}
 
-              {(message.type === 'ai' || message.type === 'database-prompt') && (
-                <div className="flex justify-start">
-                  <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
-                    <p className="text-sm leading-relaxed">{message.content}</p>
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-background min-h-0">
+            {connectionError && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+                {connectionError}
+              </div>
+            )}
+            <AnimatePresence>
+              {messages.map((message) => (
+              <div key={message.id}>
+                {message.type === 'user' && (
+                  <div className="flex justify-end">
+                    <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-gradient-to-r from-primary to-accent text-white">
+                      <p className="text-sm leading-relaxed">{message.content}</p>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+
+                {(message.type === 'ai' || message.type === 'database-prompt') && (() => {
+                  const { hasQuestions, parts } = parseQuestions(message.content);
+                  
+                  return (
+                    <div className="flex justify-start items-start gap-3">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
+                        <Sparkles className="w-4 h-4 text-white" />
+                      </div>
+                      <div className="max-w-[85%] space-y-3">
+                        {hasQuestions ? (
+                          parts.map((part, idx) => {
+                            if (part.type === 'question') {
+                              return (
+                                <div
+                                  key={idx}
+                                  className="rounded-xl px-4 py-3 bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 text-foreground"
+                                >
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <div className="w-6 h-6 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0">
+                                      <span className="text-xs font-semibold text-white">{part.questionNumber}</span>
+                                    </div>
+                                    <p className="text-sm font-medium text-foreground flex-1">
+                                      Question {part.questionNumber}:
+                                    </p>
+                                  </div>
+                                  <p className="text-sm leading-relaxed text-foreground ml-8">
+                                    {part.content}
+                                  </p>
+                                </div>
+                              );
+                            } else {
+                              return part.content ? (
+                                <div
+                                  key={idx}
+                                  className="rounded-2xl px-4 py-3 bg-card border border-border text-foreground"
+                                >
+                                  <p className="text-sm leading-relaxed whitespace-pre-line">{part.content}</p>
+                                </div>
+                              ) : null;
+                            }
+                          })
+                        ) : (
+                          <div className="rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
+                            <p className="text-sm leading-relaxed whitespace-pre-line">{message.content}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
               {message.type === 'chart-suggestions' && (
                 <div className="space-y-3">
-                  <div className="flex justify-start">
+                  <div className="flex justify-start items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
+                      <Sparkles className="w-4 h-4 text-white" />
+                    </div>
                     <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
                       <p className="text-sm leading-relaxed">{message.content}</p>
                     </div>
@@ -1278,7 +1372,10 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
           </AnimatePresence>
 
           {isGenerating && (
-            <div className="flex justify-start">
+            <div className="flex justify-start items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
+                <Sparkles className="w-4 h-4 text-white" />
+              </div>
               <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
@@ -1287,6 +1384,19 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                   <span className="text-sm text-muted-foreground ml-2">Generating charts...</span>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Welcome Screen - Show "Let's Get Started" button */}
+          {showWelcomeScreen && messages.length > 0 && messages[0].type === 'ai' && (
+            <div className="flex justify-center pt-4 pb-6">
+              <GradientButton
+                onClick={handleGetStarted}
+                className="w-full max-w-md h-12 text-base font-medium gap-2"
+              >
+                <Sparkles className="w-5 h-5" />
+                Let's Get Started
+              </GradientButton>
             </div>
           )}
 
@@ -1313,85 +1423,86 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
           )}
         </div>
 
-        {/* Database Selection (Above Input) */}
-        {showDatabaseSelection && (
-          <div className="px-6 pb-4 border-t border-border bg-background shrink-0">
-            <div className="space-y-2.5 pt-4">
-              <label className="text-xs text-muted-foreground flex items-center gap-2">
-                <Database className="w-3.5 h-3.5" />
-                Select Database
-              </label>
-              {isLoadingDatabases ? (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-                  <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                  <span>Loading databases...</span>
+          {/* Database Selection (Above Input) */}
+          {showDatabaseSelection && (
+            <div className="px-6 pb-4 border-t border-border bg-background shrink-0">
+              <div className="space-y-2.5 pt-4">
+                <label className="text-xs text-muted-foreground flex items-center gap-2">
+                  <Database className="w-3.5 h-3.5" />
+                  Select Database
+                </label>
+                {isLoadingDatabases ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                    <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <span>Loading databases...</span>
+                  </div>
+                ) : availableDatabases.length === 0 ? (
+                  <div className="text-xs text-muted-foreground py-2">
+                    No database connections available. Please add a database connection to get started.
+                  </div>
+                ) : (
+                <div className="flex flex-wrap gap-2">
+                  {availableDatabases.map((db) => (
+                    <button
+                      key={db.value}
+                      onClick={() => handleDatabaseSelect(db.value)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all ${
+                        selectedDatabase === db.value
+                          ? 'bg-gradient-to-r from-primary to-accent text-white shadow-sm'
+                          : 'bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground border border-border'
+                      }`}
+                    >
+                      {selectedDatabase === db.value && (
+                        <Check className="w-3 h-3" />
+                      )}
+                      <Database className="w-3 h-3" />
+                      {db.label}
+                    </button>
+                  ))}
                 </div>
-              ) : availableDatabases.length === 0 ? (
-                <div className="text-xs text-muted-foreground py-2">
-                  No database connections available. Please add a database connection to get started.
-                </div>
-              ) : (
-              <div className="flex flex-wrap gap-2">
-                {availableDatabases.map((db) => (
-                  <button
-                    key={db.value}
-                    onClick={() => handleDatabaseSelect(db.value)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all ${
-                      selectedDatabase === db.value
-                        ? 'bg-gradient-to-r from-primary to-accent text-white shadow-sm'
-                        : 'bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground border border-border'
-                    }`}
-                  >
-                    {selectedDatabase === db.value && (
-                      <Check className="w-3 h-3" />
-                    )}
-                    <Database className="w-3 h-3" />
-                    {db.label}
-                  </button>
-                ))}
+                )}
               </div>
-              )}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Input - Only show after database is selected */}
-        {selectedDatabase && (
-          <div className="p-6 border-t border-border bg-card shrink-0">
-            <div className="flex gap-3">
-              <input
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !isGenerating) {
-                    e.preventDefault();
-                    handleSend();
+          {/* Input - Only show after database is selected */}
+          {selectedDatabase && !showWelcomeScreen && (
+            <div className="p-6 border-t border-border bg-background shrink-0">
+              <div className="flex gap-3">
+                <input
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !isGenerating) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Describe the charts you need..."
+                  disabled={isGenerating}
+                  className="flex-1 px-4 py-3 bg-background border border-border rounded-lg outline-none focus:ring-2 focus:ring-accent text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
+                  autoFocus
+                />
+                <GradientButton
+                  onClick={handleSend}
+                  disabled={
+                    !input.trim() ||
+                    isGenerating ||
+                    isConnecting ||
+                    !selectedDatabase ||
+                    !(wsClient && wsClient.isConnected())
                   }
-                }}
-                placeholder="Describe the charts you need..."
-                disabled={isGenerating}
-                className="flex-1 px-4 py-3 bg-input-background border border-border rounded-lg outline-none focus:ring-2 focus:ring-accent text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
-                autoFocus
-              />
-              <GradientButton
-                onClick={handleSend}
-                disabled={
-                  !input.trim() ||
-                  isGenerating ||
-                  isConnecting ||
-                  !selectedDatabase ||
-                  !(wsClient && wsClient.isConnected())
-                }
-                size="icon"
-                className="flex-shrink-0 h-11 w-11"
-              >
-                <Send className="w-5 h-5" />
-              </GradientButton>
+                  size="icon"
+                  className="flex-shrink-0 h-11 w-11"
+                >
+                  <Send className="w-5 h-5" />
+                </GradientButton>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Chart Preview Dialog */}
       <ChartPreviewDialog
