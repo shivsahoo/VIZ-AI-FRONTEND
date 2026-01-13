@@ -342,7 +342,11 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
 
       {/* Create Dashboard Dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-w-5xl border-border p-0" hideCloseButton>
+        <DialogContent 
+          className="!max-w-6xl sm:!max-w-6xl border-border p-0" 
+          style={{ maxWidth: '72rem' }}
+          hideCloseButton
+        >
           <div className="sr-only">
             <DialogTitle>Create New Dashboard</DialogTitle>
             <DialogDescription>

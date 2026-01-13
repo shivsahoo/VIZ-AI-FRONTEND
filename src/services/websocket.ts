@@ -10,9 +10,10 @@
 
 // WebSocket URL - convert HTTPS to WSS
 const getWebSocketUrl = (): string => {
-  // Try to get from environment variable, otherwise use ngrok URL
+  // Try to get from environment variable, otherwise use localhost
   const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
-  const baseUrl = env?.VITE_WEBSOCKET_URL || 'https://mounted-chance-vigilantly.ngrok-free.dev';
+  // Default to localhost:8001 (LLM service port) if no env var is set
+  const baseUrl = env?.VITE_WEBSOCKET_URL || 'http://localhost:8001';
   
   // Convert https:// to wss:// and remove trailing slash if present
   let wsUrl = baseUrl.trim().replace(/\/$/, ''); // Remove trailing slash

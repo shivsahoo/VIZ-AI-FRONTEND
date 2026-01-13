@@ -41,6 +41,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
   const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
   const [questionsAsked, setQuestionsAsked] = useState(0);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [probableAnswers, setProbableAnswers] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -68,6 +69,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
       const question = response.message;
       setCurrentQuestion(question || null);
       setQuestionsAsked(state.questions_asked_count || 0);
+      setProbableAnswers(response.probable_answers || []);
 
       if (question) {
         addBotMessage(question);
@@ -75,6 +77,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
     } else if (response.status === "completed") {
       setIsCompleted(true);
       setCurrentQuestion(null);
+      setProbableAnswers([]);
 
       const name = state.name || "New Dashboard";
       const enhancedDescription = state.enhanced_description || null;
@@ -96,6 +99,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
     } else if (response.status === "error") {
       const errorMessage = response.error || response.message || "Something went wrong while creating the dashboard.";
       setConnectionError(errorMessage);
+      setProbableAnswers([]);
       addBotMessage(`⚠️ ${errorMessage}`);
     }
   }, [onCreate, addBotMessage]);
@@ -119,6 +123,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
       setCurrentQuestion(null);
       setQuestionsAsked(0);
       setIsCompleted(false);
+      setProbableAnswers([]);
     } else {
       setMessages([]);
       setUserInput("");
@@ -127,6 +132,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
       setQuestionsAsked(0);
       setConnectionError(null);
       setIsCompleted(false);
+      setProbableAnswers([]);
     }
   }, [isOpen, projectName]);
 
@@ -246,6 +252,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
     addUserMessage(message);
     setUserInput("");
     setIsTyping(true);
+    setProbableAnswers([]);
 
     try {
       wsClient.dashboardCreation({
@@ -306,6 +313,33 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
       event.preventDefault();
       handleSendMessage();
     }
+  };
+
+  const handleSuggestedAnswer = (answer: string) => {
+    if (!projectId || !wsClient || !wsClient.isConnected() || isTyping || isCompleted) {
+      return;
+    }
+
+    addUserMessage(answer);
+    setUserInput("");
+    setIsTyping(true);
+    setProbableAnswers([]);
+
+    try {
+      wsClient.dashboardCreation({
+        project_id: String(projectId),
+        user_response: answer,
+      });
+    } catch (error: any) {
+      console.error("[DashboardCreationBot] Failed to send suggested answer:", error);
+      setIsTyping(false);
+      toast.error(error?.message || "Failed to send your response. Please try again.");
+    }
+
+    // Refocus input after sending
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 100);
   };
 
   useEffect(() => {
@@ -434,6 +468,23 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
         </div>
 
         <div className="px-6 py-4 border-t border-border bg-card">
+          {probableAnswers.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {probableAnswers.map((answer, index) => (
+                <Button
+                  key={`${answer}-${index}`}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => handleSuggestedAnswer(answer)}
+                  disabled={!wsClient || !wsClient.isConnected() || isTyping || isCompleted || !!connectionError}
+                >
+                  {answer}
+                </Button>
+              ))}
+            </div>
+          )}
           {!hasStarted ? (
             <Button
               onClick={handleStart}
