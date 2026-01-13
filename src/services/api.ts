@@ -2759,3 +2759,162 @@ const api = {
 };
 
 export default api;
+
+// ============================================================================
+// HOME INSIGHTS
+// ============================================================================
+
+export interface HomeInsight {
+  id: string;
+  user_id: string;
+  project_id: string;
+  title: string;
+  description: string;
+  insight_type: 'positive' | 'negative' | 'opportunity';
+  category: string;
+  impact: 'High' | 'Medium' | 'Low';
+  source?: string;
+  created_at: string;
+}
+
+export interface SaveHomeInsightRequest {
+  project_id: string;
+  title: string;
+  description: string;
+  insight_type: 'positive' | 'negative' | 'opportunity';
+  category: string;
+  impact: 'High' | 'Medium' | 'Low';
+  source?: string;
+}
+
+/**
+ * Save an insight to the user's home page
+ */
+export const saveHomeInsight = async (data: SaveHomeInsightRequest): Promise<ApiResponse<HomeInsight>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      insight: {
+        id: string;
+        user_id: string;
+        project_id: string;
+        title: string;
+        description: string;
+        insight_type: string;
+        category: string;
+        impact: string;
+        source?: string;
+        created_at: string;
+      };
+    }>('/api/v1/backend/home-insights', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+
+    return {
+      success: true,
+      data: {
+        id: response.insight.id,
+        user_id: response.insight.user_id,
+        project_id: response.insight.project_id,
+        title: response.insight.title,
+        description: response.insight.description,
+        insight_type: response.insight.insight_type as 'positive' | 'negative' | 'opportunity',
+        category: response.insight.category,
+        impact: response.insight.impact as 'High' | 'Medium' | 'Low',
+        source: response.insight.source,
+        created_at: response.insight.created_at,
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'SAVE_HOME_INSIGHT_FAILED',
+        message: error.message || 'Failed to save insight to home',
+      },
+    };
+  }
+};
+
+/**
+ * Get all home insights for the current user
+ */
+export const getHomeInsights = async (projectId?: string, limit: number = 10): Promise<ApiResponse<HomeInsight[]>> => {
+  try {
+    const queryParams = new URLSearchParams();
+    if (projectId) {
+      queryParams.append('project_id', projectId);
+    }
+    queryParams.append('limit', String(limit));
+
+    const response = await apiRequest<{
+      message: string;
+      insights: Array<{
+        id: string;
+        user_id: string;
+        project_id: string;
+        title: string;
+        description: string;
+        insight_type: string;
+        category: string;
+        impact: string;
+        source?: string;
+        created_at: string;
+      }>;
+      total_count: number;
+    }>(`/api/v1/backend/home-insights?${queryParams.toString()}`);
+
+    return {
+      success: true,
+      data: response.insights.map(insight => ({
+        id: insight.id,
+        user_id: insight.user_id,
+        project_id: insight.project_id,
+        title: insight.title,
+        description: insight.description,
+        insight_type: insight.insight_type as 'positive' | 'negative' | 'opportunity',
+        category: insight.category,
+        impact: insight.impact as 'High' | 'Medium' | 'Low',
+        source: insight.source,
+        created_at: insight.created_at,
+      })),
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GET_HOME_INSIGHTS_FAILED',
+        message: error.message || 'Failed to fetch home insights',
+      },
+    };
+  }
+};
+
+/**
+ * Delete a home insight
+ */
+export const deleteHomeInsight = async (insightId: string): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+    }>(`/api/v1/backend/home-insights/${insightId}`, {
+      method: 'DELETE',
+    });
+
+    return {
+      success: true,
+      data: {
+        message: response.message || 'Insight removed from home successfully',
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'DELETE_HOME_INSIGHT_FAILED',
+        message: error.message || 'Failed to delete home insight',
+      },
+    };
+  }
+};

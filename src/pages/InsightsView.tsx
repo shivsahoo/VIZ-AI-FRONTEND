@@ -25,6 +25,7 @@ import {
   generateProjectInsights, 
   generateBusinessInsights,
   getDatabases,
+  saveHomeInsight,
   type ProjectInsightsResponse,
   type BusinessInsightsResponse,
   type Database as ApiDatabase,
@@ -839,6 +840,34 @@ export function InsightsView({ projectId }: InsightsViewProps) {
     }
   };
 
+  const handleAddToHome = async (insight: Insight) => {
+    if (!projectId) {
+      toast.error("Project ID is required to save insight");
+      return;
+    }
+
+    try {
+      const response = await saveHomeInsight({
+        project_id: String(projectId),
+        title: insight.title,
+        description: insight.description,
+        insight_type: insight.type,
+        category: insight.category,
+        impact: insight.impact,
+        source: insight.source,
+      });
+
+      if (response.success) {
+        toast.success("Insight added to home successfully!");
+      } else {
+        toast.error(response.error?.message || "Failed to add insight to home");
+      }
+    } catch (error) {
+      console.error("Failed to add insight to home:", error);
+      toast.error("Failed to add insight to home");
+    }
+  };
+
   // Calculate stats
   const totalInsights = insightStats.total;
   const positiveTrends = insightStats.positive;
@@ -1101,9 +1130,9 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                             variant="outline"
                             size="sm"
                             className="whitespace-nowrap"
-                            onClick={() => toast.info("Adding insights to dashboards coming soon.")}
+                            onClick={() => handleAddToHome(insight)}
                           >
-                            + Add to Dashboard
+                            + Add to Homepage
                           </Button>
                         </div>
                       </div>

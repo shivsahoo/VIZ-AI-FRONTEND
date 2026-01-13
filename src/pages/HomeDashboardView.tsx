@@ -9,7 +9,7 @@ import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDi
 import { toast } from "sonner";
 import { PinnedChartData } from "../context/PinnedChartsContext";
 import { ChartCard } from "../components/features/charts/ChartCard";
-import { getFavoriteCharts, updateFavoriteChart, getFavorites, getChartData, type ChartData as ApiChartData } from "../services/api";
+import { getFavoriteCharts, updateFavoriteChart, getFavorites, getChartData, getHomeInsights, type ChartData as ApiChartData, type HomeInsight } from "../services/api";
 import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../utils/chartData";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 
@@ -18,35 +18,7 @@ interface HomeDashboardViewProps {
   onOpenAIAssistant?: () => void;
 }
 
-const recentInsights = [
-  {
-    id: 1,
-    title: "Revenue Spike Detected",
-    description: "Revenue increased by 34% in the last week, driven primarily by enterprise customers.",
-    type: "positive",
-    category: "Revenue",
-    timestamp: "2 hours ago",
-    impact: "High"
-  },
-  {
-    id: 2,
-    title: "Customer Churn Rate Increasing",
-    description: "Monthly churn rate has risen to 5.2%, up from the average of 3.8%.",
-    type: "negative",
-    category: "Retention",
-    timestamp: "5 hours ago",
-    impact: "High"
-  },
-  {
-    id: 3,
-    title: "New Market Opportunity",
-    description: "Analysis shows 23% of traffic comes from Southeast Asia, but only 8% convert.",
-    type: "opportunity",
-    category: "Growth",
-    timestamp: "1 day ago",
-    impact: "Medium"
-  }
-];
+// Removed hardcoded insights - now fetched from API
 
 const chartTypeIcons = {
   line: TrendingUp,
@@ -89,8 +61,10 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
   const [isLoadingDashboards, setIsLoadingDashboards] = useState(true);
   const [selectedChart, setSelectedChart] = useState<FavoriteChartData | null>(null);
-  const [pinnedInsightIds, setPinnedInsightIds] = useState<number[]>(recentInsights.map(i => i.id));
+  const [homeInsights, setHomeInsights] = useState<HomeInsight[]>([]);
+  const [isLoadingInsights, setIsLoadingInsights] = useState(true);
   const [favoriteChartDataStatus, setFavoriteChartDataStatus] = useState<Record<string, FavoriteChartDataStatus>>({});
+  const [expandedInsights, setExpandedInsights] = useState<Set<string>>(new Set());
 
   // Helper to format time ago
   const formatTimeAgo = useCallback((dateString: string): string => {
@@ -287,11 +261,44 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     }
   }, []);
 
-  // Load favorite charts and dashboards on mount
+  // Fetch home insights from API
+  const fetchHomeInsights = useCallback(async () => {
+    setIsLoadingInsights(true);
+    try {
+      const response = await getHomeInsights(undefined, 10);
+      
+      if (response.success && response.data) {
+        setHomeInsights(response.data);
+      } else {
+        console.error("Failed to fetch home insights:", response.error);
+        toast.error("Failed to load home insights");
+      }
+    } catch (error) {
+      console.error("Error fetching home insights:", error);
+    } finally {
+      setIsLoadingInsights(false);
+    }
+  }, []);
+
+  const toggleInsightExpansion = (insightId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card click navigation
+    setExpandedInsights((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(insightId)) {
+        newSet.delete(insightId);
+      } else {
+        newSet.add(insightId);
+      }
+      return newSet;
+    });
+  };
+
+  // Load favorite charts, dashboards, and home insights on mount
   useEffect(() => {
     fetchFavoriteCharts();
     fetchFavoriteDashboards();
-  }, [fetchFavoriteCharts, fetchFavoriteDashboards]);
+    fetchHomeInsights();
+  }, [fetchFavoriteCharts, fetchFavoriteDashboards, fetchHomeInsights]);
 
   const handleUnpinChart = async (chartId: number, chartName: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -317,13 +324,8 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     }
   };
 
-  const handleUnpinInsight = (insightId: number, insightTitle: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setPinnedInsightIds(prev => prev.filter(id => id !== insightId));
-    toast.success(`"${insightTitle}" unpinned from Home Dashboard`);
-  };
-
-  const displayedInsights = recentInsights.filter(insight => pinnedInsightIds.includes(insight.id));
+  // Display home insights from API
+  const displayedInsights = homeInsights;
   const selectedChartStatus = selectedChart ? favoriteChartDataStatus[selectedChart.originalId] : undefined;
 
   const renderFavoriteChartPreview = useCallback((chart: FavoriteChartData) => {
@@ -681,15 +683,31 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
             </Button>
           </div>
 
-          {displayedInsights.length === 0 ? (
+          {isLoadingInsights ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {[1, 2, 3].map((i) => (
+                <Card key={i} className="p-6 border-2 border-border card-shadow">
+                  <div className="space-y-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-muted/50 animate-pulse" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-4 bg-muted/50 rounded animate-pulse w-3/4" />
+                        <div className="h-3 bg-muted/30 rounded animate-pulse w-1/2" />
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : displayedInsights.length === 0 ? (
             <Card className="p-12 border-2 border-dashed border-border card-shadow">
               <div className="flex flex-col items-center justify-center text-center">
                 <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center mb-5">
                   <Lightbulb className="w-10 h-10 text-muted-foreground" />
                 </div>
-                <h3 className="text-foreground mb-2">No pinned insights yet</h3>
+                <h3 className="text-foreground mb-2">No saved insights yet</h3>
                 <p className="text-muted-foreground mb-6 max-w-md">
-                  Pin important insights here for quick access and monitoring
+                  Save important insights from the Insights page to see them here for quick access
                 </p>
                 <Button 
                   onClick={() => onNavigate?.('insights')}
@@ -724,8 +742,13 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
                   }
                 };
 
-                const config = typeConfig[insight.type as keyof typeof typeConfig];
+                const config = typeConfig[insight.insight_type as keyof typeof typeConfig];
                 const Icon = config.icon;
+                
+                // Format the created_at timestamp as time ago
+                const timeAgo = formatTimeAgo(insight.created_at);
+                
+                const isExpanded = expandedInsights.has(insight.id);
 
                 return (
                   <Card 
@@ -738,20 +761,33 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
                         <Icon className="w-6 h-6" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-foreground group-hover:text-primary transition-colors mb-2">
+                        <div className="mb-2">
+                          <h3 className={`text-foreground font-semibold group-hover:text-primary transition-colors ${!isExpanded ? 'line-clamp-1' : ''}`}>
                           {insight.title}
                         </h3>
-                        <p className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">
+                          {!isExpanded && insight.title.length > 60 && (
+                            <button
+                              onClick={(e) => toggleInsightExpansion(insight.id, e)}
+                              className="text-xs text-primary hover:underline mt-0.5"
+                            >
+                              View more
+                            </button>
+                          )}
+                        </div>
+                        <div>
+                          <p className={`text-sm text-muted-foreground leading-relaxed ${!isExpanded ? 'line-clamp-2' : ''}`}>
                           {insight.description}
                         </p>
+                          {insight.description.length > 120 && (
+                            <button
+                              onClick={(e) => toggleInsightExpansion(insight.id, e)}
+                              className="text-xs text-primary hover:underline mt-0.5"
+                            >
+                              {isExpanded ? 'View less' : 'View more'}
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <button
-                        onClick={(e) => handleUnpinInsight(insight.id, insight.title, e)}
-                        className="flex-shrink-0 p-1 -m-1 rounded-lg hover:bg-primary/10 transition-smooth group/pin"
-                        title="Unpin insight"
-                      >
-                        <Pin className="w-4 h-4 text-primary fill-primary/20 rotate-45 group-hover/pin:fill-primary/40 transition-smooth" />
-                      </button>
                     </div>
 
                     <div className="flex items-center justify-between pt-4 border-t border-border">
@@ -765,8 +801,13 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
                         >
                           {insight.impact}
                         </Badge>
+                        {insight.source && (
+                          <Badge variant="outline" className="text-xs">
+                            {insight.source}
+                          </Badge>
+                        )}
                       </div>
-                      <span className="text-xs text-muted-foreground">{insight.timestamp}</span>
+                      <span className="text-xs text-muted-foreground">{timeAgo}</span>
                     </div>
                   </Card>
                 );
