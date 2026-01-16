@@ -173,6 +173,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
   const chartWorkflowStateRef = useRef<Record<string, any> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(false);
+  const [isSettingUp, setIsSettingUp] = useState(false);
 
   // Track if we're restoring from store to avoid sync loops
   const isRestoringRef = useRef(false);
@@ -766,32 +767,20 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     // Push user selection to the chat
     setMessages(prev => [...prev, userMessage]);
     setShowDatabaseSelection(false);
-
-    // Kick off chart_creation workflow immediately after DB selection per contract
-    const dbId = selectedDb?.id;
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const isRealDatabase = dbId && uuidRegex.test(String(dbId));
-
-    if (wsClient && wsClient.isConnected() && isRealDatabase) {
-      // Show analyzing message and send request
-      setIsGenerating(true);
-      setMessages(prev => ([
+    
+    // Show animated loader briefly, then show informational message
+    setIsSettingUp(true);
+    setTimeout(() => {
+      setIsSettingUp(false);
+      setMessages(prev => [
         ...prev,
-        { id: prev.length + 1, type: 'ai', content: 'Analyzing your request and generating chart suggestions...' }
-      ]));
-
-      wsClient.send({
-        event_type: 'chart_creation',
-        user_id: userId!,
-        payload: {
-          data_connection_id: String(dbId),
-          role: 'Analyst',
-          domain: 'admin',
-          project_id: projectId || undefined,
-          suggestion_count: 3,
-        },
-      });
-    }
+        {
+          id: prev.length + 1,
+          type: 'ai',
+          content: "Now you can generate charts by giving prompts or click the button below to auto-generate charts using AI."
+        }
+      ]);
+    }, 800); // 800ms delay for a natural feel
   };
 
   const handleSend = () => {
@@ -935,22 +924,41 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       return;
     }
 
+    // Check if this is initial generation or regeneration
+    const hasExistingCharts = messages.some(m => m.type === 'chart-suggestions');
+    
     setIsGenerating(true);
     setMessages(prev => [
       ...prev,
-      { id: prev.length + 1, type: 'ai', content: 'Generating more chart suggestions...' }
+      { id: prev.length + 1, type: 'ai', content: hasExistingCharts ? 'Generating more chart suggestions...' : 'Analyzing your request and generating chart suggestions...' }
     ]);
 
     try {
-      wsClient.regenerate({
-        data_connection_id: String(selectedDb.id),
-        role: 'Analyst',
-        domain: 'admin',
-      });
+      if (hasExistingCharts) {
+        // Use regenerate for subsequent generations
+        wsClient.regenerate({
+          data_connection_id: String(selectedDb.id),
+          role: 'Analyst',
+          domain: 'admin',
+        });
+      } else {
+        // Use chart_creation for initial generation
+        wsClient.send({
+          event_type: 'chart_creation',
+          user_id: userId!,
+          payload: {
+            data_connection_id: String(selectedDb.id),
+            role: 'Analyst',
+            domain: 'admin',
+            project_id: projectId || undefined,
+            suggestion_count: 3,
+          },
+        });
+      }
     } catch (error: any) {
-      console.error('[AIAssistant] Failed to regenerate charts:', error);
+      console.error('[AIAssistant] Failed to generate charts:', error);
       setIsGenerating(false);
-      toast.error(error?.message || 'Failed to regenerate charts. Please try again.');
+      toast.error(error?.message || 'Failed to generate charts. Please try again.');
     }
   };
 
@@ -1350,7 +1358,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                         );
                       })}
                       
-                      {/* Generate More Charts Button */}
+                      {/* Let AI Generate Charts Button */}
                       <div className="flex justify-center pt-2">
                         <Button
                           onClick={handleRegenerateCharts}
@@ -1359,7 +1367,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                           className="gap-2 bg-gradient-to-r from-accent to-primary hover:opacity-90 text-white shadow-md transition-all disabled:opacity-50"
                         >
                           <RotateCcw className="w-4 h-4" />
-                          Generate More Charts
+                          Let AI Generate Charts
                         </Button>
                       </div>
                     </div>
@@ -1386,6 +1394,21 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
             </div>
           )}
 
+          {isSettingUp && (
+            <div className="flex justify-start items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
+                <Sparkles className="w-4 h-4 text-white" />
+              </div>
+              <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
+                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Welcome Screen - Show "Let's Get Started" button */}
           {showWelcomeScreen && messages.length > 0 && messages[0].type === 'ai' && (
             <div className="flex justify-center pt-4 pb-6">
@@ -1396,6 +1419,20 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                 <Sparkles className="w-5 h-5" />
                 Let's Get Started
               </GradientButton>
+            </div>
+          )}
+
+          {/* Show "Let AI Generate Charts" button after database selection when no charts exist */}
+          {selectedDatabase && !showWelcomeScreen && !showDatabaseSelection && !messages.some(m => m.type === 'chart-suggestions') && !isGenerating && (
+            <div className="flex justify-center pt-4 pb-6">
+              <Button
+                onClick={handleRegenerateCharts}
+                disabled={isGenerating || !wsClient || !wsClient.isConnected()}
+                className="gap-2 bg-gradient-to-r from-accent to-primary hover:opacity-90 text-white shadow-md transition-all disabled:opacity-50"
+              >
+                <Sparkles className="w-5 h-5" />
+                Let AI Generate Charts
+              </Button>
             </div>
           )}
 
