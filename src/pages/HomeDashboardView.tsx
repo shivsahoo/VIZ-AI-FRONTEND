@@ -9,7 +9,7 @@ import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDi
 import { toast } from "sonner";
 import { PinnedChartData } from "../context/PinnedChartsContext";
 import { ChartCard } from "../components/features/charts/ChartCard";
-import { getFavoriteCharts, updateFavoriteChart, getFavorites, getChartData, getHomeInsights, type ChartData as ApiChartData, type HomeInsight } from "../services/api";
+import { getFavoriteCharts, updateFavoriteChart, getFavorites, getChartData, getHomeInsights, deleteHomeInsight, type ChartData as ApiChartData, type HomeInsight } from "../services/api";
 import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../utils/chartData";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 
@@ -155,7 +155,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
           ...prev,
           [chartKey]: {
             config,
-            metadata: response.data.metadata,
+            metadata: response.data?.metadata,
             loading: false,
             error: undefined,
           },
@@ -321,6 +321,23 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
       }
     } catch (error: any) {
       toast.error(error.message || "An error occurred while unpinning chart");
+    }
+  };
+
+  const handleUnpinInsight = async (insightId: string, insightTitle: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    try {
+      const deleteResponse = await deleteHomeInsight(insightId);
+      if (deleteResponse.success) {
+        // Refresh the home insights list
+        await fetchHomeInsights();
+        toast.success(`"${insightTitle}" removed from Saved Insights`);
+      } else {
+        toast.error(deleteResponse.error?.message || "Failed to remove insight");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while removing insight");
     }
   };
 
@@ -672,7 +689,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
         {/* AI Insights Preview */}
         <div className="space-y-5">
           <div className="flex items-center justify-between">
-            <h2 className="text-foreground">Recent Insights</h2>
+            <h2 className="text-foreground">Saved Insights</h2>
             <Button 
               variant="ghost" 
               size="sm"
@@ -761,18 +778,27 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
                         <Icon className="w-6 h-6" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="mb-2">
-                          <h3 className={`text-foreground font-semibold group-hover:text-primary transition-colors ${!isExpanded ? 'line-clamp-1' : ''}`}>
-                          {insight.title}
-                        </h3>
-                          {!isExpanded && insight.title.length > 60 && (
-                            <button
-                              onClick={(e) => toggleInsightExpansion(insight.id, e)}
-                              className="text-xs text-primary hover:underline mt-0.5"
-                            >
-                              View more
-                            </button>
-                          )}
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="flex-1 min-w-0">
+                            <h3 className={`text-foreground font-semibold group-hover:text-primary transition-colors ${!isExpanded ? 'line-clamp-1' : ''}`}>
+                              {insight.title}
+                            </h3>
+                            {!isExpanded && insight.title.length > 60 && (
+                              <button
+                                onClick={(e) => toggleInsightExpansion(insight.id, e)}
+                                className="text-xs text-primary hover:underline mt-0.5"
+                              >
+                                View more
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            onClick={(e) => handleUnpinInsight(insight.id, insight.title, e)}
+                            className="flex-shrink-0 mt-0.5 p-1 -m-1 rounded-lg hover:bg-primary/10 transition-smooth group/pin"
+                            title="Remove from Saved Insights"
+                          >
+                            <Pin className="w-4 h-4 text-primary fill-primary/20 rotate-45 group-hover/pin:fill-primary/40 transition-smooth" />
+                          </button>
                         </div>
                         <div>
                           <p className={`text-sm text-muted-foreground leading-relaxed ${!isExpanded ? 'line-clamp-2' : ''}`}>

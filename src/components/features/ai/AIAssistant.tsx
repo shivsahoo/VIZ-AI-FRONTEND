@@ -174,6 +174,15 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
   const inputRef = useRef<HTMLInputElement>(null);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(false);
   const [isSettingUp, setIsSettingUp] = useState(false);
+  
+  // Helper function to check if a message starts with "Question X" pattern
+  const isFollowUpQuestion = (messageText: string): boolean => {
+    if (!messageText) return false;
+    const trimmed = messageText.trim();
+    // Check if message starts with "Question" followed by a number and colon
+    const questionPattern = /^Question\s+\d+:/i;
+    return questionPattern.test(trimmed);
+  };
 
   // Track if we're restoring from store to avoid sync loops
   const isRestoringRef = useRef(false);
@@ -466,7 +475,13 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
 
       if (response.status === 'collecting') {
         setIsGenerating(false);
-        setIsAwaitingClarification(true);
+        
+        // Check if the message starts with "Question X" pattern
+        const messageText = response.message || '';
+        const hasQuestionPattern = isFollowUpQuestion(messageText);
+        
+        // Set awaiting clarification if message contains Question X pattern
+        setIsAwaitingClarification(hasQuestionPattern);
         setChartWorkflowState(response.state ?? null);
         
         // Check if chart_specs are provided even when status is 'collecting'
@@ -822,7 +837,24 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       toast.warning("Schema details for this database are unavailable. Chart quality may be limited.");
     }
 
-    const isClarificationResponse = isAwaitingClarification && chartRequestRef.current !== null;
+    // Check if the last AI message starts with "Question X" pattern
+    const lastAIMessage = messages
+      .slice()
+      .reverse()
+      .find(msg => msg.type === 'ai' || msg.type === 'database-prompt');
+    const isFollowUpQuestionDetected = lastAIMessage 
+      ? isFollowUpQuestion(lastAIMessage.content)
+      : false;
+
+    // Determine if this is a follow-up response or a new question
+    // Only treat as follow-up if:
+    // 1. We're actively awaiting clarification (isAwaitingClarification is true)
+    // 2. The last AI message has "Question X" pattern
+    // 3. We have a previous chart request stored
+    // This ensures new questions aren't incorrectly treated as follow-ups
+    const isFollowUpResponse = isAwaitingClarification 
+      && isFollowUpQuestionDetected 
+      && chartRequestRef.current !== null;
 
     const userMessage: Message = {
       id: messages.length + 1,
@@ -840,7 +872,9 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     setInput("");
     setIsGenerating(true);
     setConnectionError(null);
-    if (!isClarificationResponse) {
+    
+    // Reset follow-up state if this is a new question
+    if (!isFollowUpResponse) {
       setIsAwaitingClarification(false);
       setChartWorkflowState(null);
     }
@@ -857,41 +891,54 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       databaseName: selectedDb.name
     });
 
-    // Always use the current selected database's type, even for clarification responses
-    // This ensures that if the database was changed, the new type is used
-    const payload: ChartCreationRequestPayload = isClarificationResponse && chartRequestRef.current
-      ? { 
-          ...chartRequestRef.current,
-          // Override with current database info to ensure correct db_type
-          data_connection_id: String(selectedDb.id),
-          db_schema: schemaString,
-          db_type: dbType,
-        }
-      : {
-          nlq_query: trimmedInput,
-          data_connection_id: String(selectedDb.id),
-          db_schema: schemaString,
-          db_type: dbType,
-          role: 'Analyst',
-        };
-
-    if (!isClarificationResponse) {
+    // Prepare payload based on whether this is a follow-up or new question
+    let payload: ChartCreationRequestPayload;
+    
+    if (isFollowUpResponse && chartRequestRef.current) {
+      // Follow-up response: Keep existing nlq_query, send user_response
+      console.log('[AIAssistant] Detected follow-up response. Keeping nlq_query:', chartRequestRef.current.nlq_query);
+      payload = {
+        ...chartRequestRef.current,
+        // Override with current database info to ensure correct db_type
+        data_connection_id: String(selectedDb.id),
+        db_schema: schemaString,
+        db_type: dbType,
+      };
+    } else {
+      // New question: Update nlq_query, reset user_response
+      console.log('[AIAssistant] Detected new question. Setting nlq_query:', trimmedInput);
+      payload = {
+        nlq_query: trimmedInput,
+        data_connection_id: String(selectedDb.id),
+        db_schema: schemaString,
+        db_type: dbType,
+        role: 'Analyst',
+      };
+      // Store the new request for potential follow-ups
       chartRequestRef.current = { ...payload };
+      // Ensure we're not in follow-up mode for new questions
+      setIsAwaitingClarification(false);
     }
 
     try {
-      wsClient.chartCreation({
-        ...payload,
-        ...(isClarificationResponse
-          ? {
-              user_response: trimmedInput,
-              existing_state: chartWorkflowState ?? undefined,
-              continue_workflow: true,
-            }
-          : {}),
-      });
-      if (isClarificationResponse) {
+      // Send WebSocket message
+      if (isFollowUpResponse) {
+        // Follow-up: Send user_response, keep nlq_query unchanged
+        console.log('[AIAssistant] Sending follow-up response with user_response:', trimmedInput);
+        wsClient.chartCreation({
+          ...payload,
+          user_response: trimmedInput,
+          existing_state: chartWorkflowState ?? undefined,
+          continue_workflow: true,
+        });
         setIsAwaitingClarification(false);
+      } else {
+        // New question: Send only nlq_query, explicitly no user_response
+        console.log('[AIAssistant] Sending new question with nlq_query only (no user_response):', trimmedInput);
+        wsClient.chartCreation({
+          ...payload,
+          // Explicitly ensure user_response is not included
+        });
       }
     } catch (error: any) {
       console.error('[AIAssistant] Failed to send chart creation request:', error);
