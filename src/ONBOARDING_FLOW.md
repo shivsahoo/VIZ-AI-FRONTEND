@@ -19,7 +19,7 @@ A simple, straightforward form for creating your project:
 1. **Project Name**: Enter a descriptive name for your analytics project (3-100 characters)
 
 **Optional Fields**:
-2. **Project Description**: Provide details about what this project is about (up to 500 characters)
+2. **Project Description**: Provide details about what this project is about (up to 2000 characters)
 
 **Features**:
 - Quick and efficient - no LLM/WebSocket dependency

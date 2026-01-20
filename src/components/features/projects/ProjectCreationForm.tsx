@@ -49,8 +49,8 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
       newErrors.description = "Project description is required";
     } else if (projectDescription.trim().length < 10) {
       newErrors.description = "Project description must be at least 10 characters";
-    } else if (projectDescription.trim().length > 500) {
-      newErrors.description = "Description must be less than 500 characters";
+    } else if (projectDescription.trim().length > 2000) {
+      newErrors.description = "Description must be less than 2000 characters";
     }
 
     setErrors(newErrors);
@@ -139,8 +139,8 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
       const data = await response.json();
       
       if (data.enhanced_text) {
-        // Truncate to 500 characters if needed
-        const enhanced = data.enhanced_text.slice(0, 500);
+        // Truncate to 2000 characters if needed
+        const enhanced = data.enhanced_text.slice(0, 2000);
         setProjectDescription(enhanced);
         toast.success("Description enhanced successfully! ✨");
       } else {
@@ -285,7 +285,7 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
                   "ring-0 focus:ring-2 focus:ring-purple-400/20"
                 )}
                 disabled={isCreating || isEnhancing}
-                maxLength={500}
+                maxLength={2000}
               />
               {errors.description && (
                 <motion.p 
@@ -302,13 +302,13 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
                 </p>
                 <p className={cn(
                   "text-xs font-medium transition-colors",
-                  projectDescription.length > 480 
+                  projectDescription.length > 1980 
                     ? "text-destructive" 
-                    : projectDescription.length > 450 
+                    : projectDescription.length > 1900 
                     ? "text-orange-500 dark:text-orange-400" 
                     : "text-muted-foreground"
                 )}>
-                  {projectDescription.length}/500
+                  {projectDescription.length}/2000
                 </p>
               </div>
             </div>
@@ -346,7 +346,7 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
             ) : (
               <>
                 <Sparkles className="w-5 h-5 mr-2" />
-                Create Project & Continue
+                Create Product & Continue
               </>
             )}
           </Button>
