@@ -133,7 +133,7 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
 
     try {
       const llmServiceUrl = getLLMServiceUrl();
-      const response = await fetch(`${llmServiceUrl}/api/v1/enhance-text`, {
+      const response = await fetch(`http://170.187.237.181:8001/api/v1/enhance-text`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
