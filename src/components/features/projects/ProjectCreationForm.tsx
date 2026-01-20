@@ -248,7 +248,7 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
                 <Label htmlFor="projectDescription" className="text-sm font-semibold text-foreground">
                   Product Description <span className="text-destructive">*</span>
                 </Label>
-                <Button
+                {/* <Button
                   type="button"
                   size="sm"
                   onClick={handleEnhanceWithAI}
@@ -280,7 +280,7 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
                       <span className="text-white">Enhance with AI</span>
                     </>
                   )}
-                </Button>
+                </Button> */}
               </div>
               <Textarea
                 id="projectDescription"
