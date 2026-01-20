@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, Plus, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw } from "lucide-react";
+import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { Badge } from "../../ui/badge";
@@ -1325,8 +1325,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                                   size="sm"
                                   className="gap-2"
                                 >
-                                  <Plus className="w-4 h-4" />
-                                  Create
+                                  Preview
                                 </GradientButton>
                               </div>
 

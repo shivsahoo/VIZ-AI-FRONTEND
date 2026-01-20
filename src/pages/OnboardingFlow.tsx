@@ -1,12 +1,12 @@
 /**
  * OnboardingFlow Component
  * 
- * A streamlined 3-step conversational onboarding experience for VizAI:
+ * A streamlined 3-step onboarding experience for VizAI:
  * 
- * Step 1: Conversational Project Creation
- *   - AI assistant conversationally asks for project name and description
- *   - Then gathers contextual information about industry, goals, team, and data sources
- *   - All done through natural conversation
+ * Step 1: Form-Based Project Creation
+ *   - Simple form with project name (required) and description (optional)
+ *   - Quick and straightforward project setup
+ *   - No LLM/WebSocket dependency
  * 
  * Step 2: Database Connection Setup
  *   - Required step to connect the first database
@@ -26,7 +26,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Sparkles, CheckCircle2, Database, ArrowLeft } from "lucide-react";
-import { ProjectContextBot } from "../components/features/ai/ProjectContextBot";
+import { ProjectCreationForm } from "../components/features/projects/ProjectCreationForm";
 import { DatabaseSetupGuided } from "../components/features/databases/DatabaseSetupGuided";
 import { DatabaseContextBot } from "../components/features/databases/DatabaseContextBot";
 import { Button } from "../components/ui/button";
@@ -66,17 +66,16 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
   const handleProjectSetupComplete = (data: {
     name: string;
     description: string;
-    context: Record<string, string>;
-    enhancedDescription?: string;
-    domain?: string;
-    projectId?: string;
+    projectId: string;
   }) => {
     setProjectName(data.name);
     setProjectDescription(data.description);
-    setEnhancedDescription(data.enhancedDescription);
-    setProjectDomain(data.domain);
-    setProjectContext(data.context);
     setProjectId(data.projectId);
+    // Set basic context
+    setProjectContext({
+      project_name: data.name,
+      project_description: data.description,
+    });
     setCurrentStep(2);
   };
 
@@ -164,7 +163,7 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
         <div className="mb-8 md:mb-12">
           <div className="flex items-center justify-center gap-2 md:gap-3">
             {[
-              { number: 1, label: "Product Setup", icon: Sparkles },
+              { number: 1, label: "Create Project", icon: Sparkles },
               { number: 2, label: "Connect Database", icon: Database },
               { number: 3, label: "Understand Data", icon: Sparkles }
             ].map((step, index) => {
@@ -214,7 +213,7 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.3 }}
             >
-              <ProjectContextBot
+              <ProjectCreationForm
                 onComplete={handleProjectSetupComplete}
                 onCancel={onCancel}
               />
