@@ -22,9 +22,21 @@ interface ProjectCreationFormProps {
 // Get LLM service URL
 const getLLMServiceUrl = (): string => {
   const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
-  const baseUrl = env?.VITE_WEBSOCKET_URL || 'http://localhost:8001';
-  // Convert to HTTP if it's WebSocket URL
-  return baseUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+  
+  // Priority 1: Use dedicated LLM service URL if set
+  if (env?.VITE_LLM_SERVICE_URL) {
+    return env.VITE_LLM_SERVICE_URL.replace(/\/$/, ''); // Remove trailing slash
+  }
+  
+  // Priority 2: Convert WebSocket URL to HTTP if available
+  if (env?.VITE_WEBSOCKET_URL) {
+    const baseUrl = env.VITE_WEBSOCKET_URL;
+    // Convert to HTTP if it's WebSocket URL
+    return baseUrl.replace('wss://', 'https://').replace('ws://', 'http://').replace(/\/$/, '');
+  }
+  
+  // Priority 3: Default to localhost for local development
+  return 'http://localhost:8001';
 };
 
 export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFormProps) {
