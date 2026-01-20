@@ -32,7 +32,7 @@ import {
 } from "../components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { toast } from "sonner";
-import { getTeamMembers, getRoles, getPermissions, createRole, inviteUser, type Permission as ApiPermission } from "../services/api";
+import { getTeamMembers, getRoles, getPermissions, createRole, inviteUser, getDatabases, getDatabaseSchema, type Permission as ApiPermission } from "../services/api";
 import { Skeleton } from "../components/ui/skeleton";
 
 interface Permission {
@@ -145,24 +145,12 @@ const defaultRoles: Role[] = [
   },
 ];
 
-// Mock databases and their tables
-const mockDatabases = [
-  {
-    id: "db-1",
-    name: "prod-analytics-db",
-    tables: ["users", "orders", "products", "payments", "reviews"]
-  },
-  {
-    id: "db-2",
-    name: "sales-mysql-db",
-    tables: ["customers", "transactions", "invoices", "campaigns"]
-  },
-  {
-    id: "db-3",
-    name: "customer-data-warehouse",
-    tables: ["dim_customers", "fact_sales", "dim_products", "dim_time"]
-  }
-];
+// Database interface for role access
+interface DatabaseWithTables {
+  id: string;
+  name: string;
+  tables: string[];
+}
 
 const mockUsers: User[] = [
   { id: 1, name: "Sarah Johnson", email: "sarah.j@company.com", roleId: 1, status: "active", avatar: "SJ" },
@@ -214,6 +202,8 @@ export function UsersView({ projectId }: UsersViewProps) {
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
   const [selectedDatabaseAccess, setSelectedDatabaseAccess] = useState<DatabaseAccess[]>([]);
   const [expandedDatabases, setExpandedDatabases] = useState<Set<string>>(new Set());
+  const [databases, setDatabases] = useState<DatabaseWithTables[]>([]);
+  const [isLoadingDatabases, setIsLoadingDatabases] = useState(false);
 
   // Store API role IDs mapping
   const [roleIdMap, setRoleIdMap] = useState<Map<string, string>>(new Map()); // UI ID -> API ID
@@ -229,6 +219,7 @@ export function UsersView({ projectId }: UsersViewProps) {
       if (currentProjectId !== lastFetchedProjectIdRef.current) {
         setUsers([]);
         setRoles([]);
+        setDatabases([]);
         setIsLoadingUsers(true); // Set loading state when project changes
         setIsLoadingRoles(true);
         lastFetchedProjectIdRef.current = currentProjectId;
@@ -237,12 +228,14 @@ export function UsersView({ projectId }: UsersViewProps) {
         fetchPermissions();
         fetchRoles();
         fetchUsers(); // Fetch users immediately, don't wait for roles
+        fetchDatabases(); // Fetch connected databases
       }
     } else {
       setIsLoadingUsers(false);
       setIsLoadingRoles(false);
       setUsers([]);
       setRoles([]);
+      setDatabases([]);
       lastFetchedProjectIdRef.current = null;
     }
   }, [projectId]);
@@ -386,6 +379,48 @@ export function UsersView({ projectId }: UsersViewProps) {
     } catch (err: any) {
       console.error("Failed to fetch permissions:", err);
       // Don't show error toast for permissions as it's not critical
+    }
+  };
+
+  const fetchDatabases = async () => {
+    if (!projectId) return;
+    
+    setIsLoadingDatabases(true);
+    try {
+      const response = await getDatabases(String(projectId));
+      if (response.success && response.data) {
+        // Map databases to the format needed for role access
+        const databasesWithTables: DatabaseWithTables[] = await Promise.all(
+          response.data.map(async (db) => {
+            // Try to fetch schema for tables, but don't fail if it doesn't work
+            let tables: string[] = [];
+            try {
+              const schemaResponse = await getDatabaseSchema(db.id);
+              if (schemaResponse.success && schemaResponse.data?.tables) {
+                tables = schemaResponse.data.tables.map(t => t.name);
+              }
+            } catch (err) {
+              // Schema fetch failed, will show empty tables list
+              console.warn(`Failed to fetch schema for database ${db.id}:`, err);
+            }
+            
+            return {
+              id: db.id,
+              name: db.name,
+              tables: tables,
+            };
+          })
+        );
+        setDatabases(databasesWithTables);
+      } else {
+        console.warn("Failed to fetch databases:", response.error);
+        setDatabases([]);
+      }
+    } catch (err: any) {
+      console.error("Error fetching databases:", err);
+      setDatabases([]);
+    } finally {
+      setIsLoadingDatabases(false);
     }
   };
 
@@ -675,7 +710,7 @@ export function UsersView({ projectId }: UsersViewProps) {
     return selectedDatabaseAccess.some(db => db.databaseId === databaseId);
   };
 
-  const toggleDatabase = (database: typeof mockDatabases[0]) => {
+  const toggleDatabase = (database: DatabaseWithTables) => {
     if (isDatabaseSelected(database.id)) {
       // Remove database
       setSelectedDatabaseAccess(selectedDatabaseAccess.filter(db => db.databaseId !== database.id));
@@ -695,8 +730,9 @@ export function UsersView({ projectId }: UsersViewProps) {
   const toggleTable = (databaseId: string, tableName: string) => {
     setSelectedDatabaseAccess(selectedDatabaseAccess.map(db => {
       if (db.databaseId === databaseId) {
+        const database = databases.find(d => d.id === databaseId);
         const tables = db.tables.length === 0 
-          ? mockDatabases.find(d => d.id === databaseId)?.tables.filter(t => t !== tableName) || []
+          ? database?.tables.filter(t => t !== tableName) || []
           : db.tables.includes(tableName)
           ? db.tables.filter(t => t !== tableName)
           : [...db.tables, tableName];
@@ -1327,86 +1363,107 @@ export function UsersView({ projectId }: UsersViewProps) {
                     </p>
                   </div>
                   <Card className="border border-border">
-                    <div className="divide-y divide-border">
-                      {mockDatabases.map((database) => {
-                        const isSelected = isDatabaseSelected(database.id);
-                        const isExpanded = expandedDatabases.has(database.id);
-                        const dbAccess = selectedDatabaseAccess.find(db => db.databaseId === database.id);
-                        const allTablesSelected = dbAccess?.tables.length === 0;
-                        const someTablesSelected = dbAccess && dbAccess.tables.length > 0;
+                    {isLoadingDatabases ? (
+                      <div className="p-4">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                          <span className="text-sm text-muted-foreground">Loading databases...</span>
+                        </div>
+                      </div>
+                    ) : databases.length === 0 ? (
+                      <div className="p-4 text-center">
+                        <p className="text-sm text-muted-foreground">
+                          No database connections found. Please add a database connection first.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-border">
+                        {databases.map((database) => {
+                          const isSelected = isDatabaseSelected(database.id);
+                          const isExpanded = expandedDatabases.has(database.id);
+                          const dbAccess = selectedDatabaseAccess.find(db => db.databaseId === database.id);
+                          const allTablesSelected = dbAccess?.tables.length === 0;
+                          const someTablesSelected = dbAccess && dbAccess.tables.length > 0;
 
-                        return (
-                          <div key={database.id} className="p-4">
-                            <div className="flex items-center gap-3">
-                              <Checkbox
-                                checked={isSelected}
-                                onCheckedChange={() => toggleDatabase(database)}
-                                className="mt-0.5"
-                              />
-                              <button
-                                onClick={() => toggleDatabaseExpanded(database.id)}
-                                className="flex items-center gap-2 flex-1 text-left hover:text-foreground transition-colors cursor-pointer"
-                              >
-                                {isExpanded ? (
-                                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                                ) : (
-                                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                                )}
-                                <Database className="w-4 h-4 text-primary" />
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm text-foreground">{database.name}</span>
-                                    {isSelected && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {allTablesSelected ? "All tables" : `${dbAccess.tables.length} tables`}
-                                      </Badge>
-                                    )}
+                          return (
+                            <div key={database.id} className="p-4">
+                              <div className="flex items-center gap-3">
+                                <Checkbox
+                                  checked={isSelected}
+                                  onCheckedChange={() => toggleDatabase(database)}
+                                  className="mt-0.5"
+                                />
+                                <button
+                                  onClick={() => toggleDatabaseExpanded(database.id)}
+                                  className="flex items-center gap-2 flex-1 text-left hover:text-foreground transition-colors cursor-pointer"
+                                >
+                                  {isExpanded ? (
+                                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                                  ) : (
+                                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                                  )}
+                                  <Database className="w-4 h-4 text-primary" />
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm text-foreground">{database.name}</span>
+                                      {isSelected && (
+                                        <Badge variant="outline" className="text-xs">
+                                          {allTablesSelected ? "All tables" : `${dbAccess?.tables.length || 0} tables`}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                      {database.tables.length} {database.tables.length === 1 ? 'table' : 'tables'} available
+                                    </p>
                                   </div>
-                                  <p className="text-xs text-muted-foreground">
-                                    {database.tables.length} tables available
-                                  </p>
-                                </div>
-                              </button>
-                            </div>
-
-                            {/* Tables List */}
-                            {isExpanded && (
-                              <div className="ml-11 mt-3 space-y-2 pl-4 border-l-2 border-border">
-                                {isSelected && (
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <Checkbox
-                                      checked={allTablesSelected}
-                                      onCheckedChange={() => {
-                                        setSelectedDatabaseAccess(selectedDatabaseAccess.map(db => 
-                                          db.databaseId === database.id 
-                                            ? { ...db, tables: allTablesSelected ? database.tables : [] }
-                                            : db
-                                        ));
-                                      }}
-                                    />
-                                    <span className="text-xs text-muted-foreground">
-                                      {allTablesSelected ? "Deselect all tables" : "Select all tables"}
-                                    </span>
-                                  </div>
-                                )}
-                                {database.tables.map((table) => (
-                                  <div key={table} className="flex items-center gap-2">
-                                    <Checkbox
-                                      checked={isTableSelected(database.id, table)}
-                                      onCheckedChange={() => toggleTable(database.id, table)}
-                                      disabled={!isSelected}
-                                    />
-                                    <Label className={`text-sm cursor-pointer ${isSelected ? 'text-muted-foreground hover:text-foreground' : 'text-muted-foreground/50'}`}>
-                                      {table}
-                                    </Label>
-                                  </div>
-                                ))}
+                                </button>
                               </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+
+                              {/* Tables List */}
+                              {isExpanded && (
+                                <div className="ml-11 mt-3 space-y-2 pl-4 border-l-2 border-border">
+                                  {database.tables.length === 0 ? (
+                                    <p className="text-xs text-muted-foreground">No tables found</p>
+                                  ) : (
+                                    <>
+                                      {isSelected && (
+                                        <div className="flex items-center gap-2 mb-2">
+                                          <Checkbox
+                                            checked={allTablesSelected}
+                                            onCheckedChange={() => {
+                                              setSelectedDatabaseAccess(selectedDatabaseAccess.map(db => 
+                                                db.databaseId === database.id 
+                                                  ? { ...db, tables: allTablesSelected ? database.tables : [] }
+                                                  : db
+                                              ));
+                                            }}
+                                          />
+                                          <span className="text-xs text-muted-foreground">
+                                            {allTablesSelected ? "Deselect all tables" : "Select all tables"}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {database.tables.map((table) => (
+                                        <div key={table} className="flex items-center gap-2">
+                                          <Checkbox
+                                            checked={isTableSelected(database.id, table)}
+                                            onCheckedChange={() => toggleTable(database.id, table)}
+                                            disabled={!isSelected}
+                                          />
+                                          <Label className={`text-sm cursor-pointer ${isSelected ? 'text-muted-foreground hover:text-foreground' : 'text-muted-foreground/50'}`}>
+                                            {table}
+                                          </Label>
+                                        </div>
+                                      ))}
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </Card>
                 </div>
               </>

@@ -1807,6 +1807,73 @@ export const createDatabase = async (
 };
 
 /**
+ * Delete database connection
+ */
+export const deleteConnection = async (connectionId: string): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{ message: string }>(
+      `/api/v1/backend/connections/${connectionId}`,
+      {
+        method: 'DELETE',
+      }
+    );
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'DELETE_CONNECTION_FAILED',
+        message: error.message || 'Failed to delete database connection',
+      },
+    };
+  }
+};
+
+/**
+ * Update database connection
+ */
+export const updateConnection = async (
+  connectionId: string,
+  data: {
+    connection_name?: string;
+    db_connection_string?: string;
+    db_schema?: string;
+    db_username?: string;
+    db_password?: string;
+    db_host_link?: string;
+    db_name?: string;
+    db_type?: string;
+  }
+): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{ message: string }>(
+      `/api/v1/backend/connections/${connectionId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
+    );
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'UPDATE_CONNECTION_FAILED',
+        message: error.message || 'Failed to update database connection',
+      },
+    };
+  }
+};
+
+/**
  * Test database connection
  */
 export const testDatabaseConnection = async (config: Partial<Database>): Promise<ApiResponse<{ connected: boolean; latency: number; version: string }>> => {
@@ -2738,6 +2805,7 @@ const api = {
   createDatabase,
   testDatabaseConnection,
   getDatabaseSchema,
+  updateConnection,
   
   // AI/Insights
   naturalLanguageQuery,

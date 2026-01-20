@@ -33,13 +33,14 @@ import {
 } from "../components/ui/table";
 import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
-import { getDatabases } from "../services/api";
+import { getDatabases, deleteConnection, updateConnection } from "../services/api";
 import { storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 
 interface DatabaseConnection {
   id: string;
   name: string;
   type: string;
+  rawType?: string;
   host: string;
   status: string;
   lastChecked: string;
@@ -61,6 +62,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   const [connectionName, setConnectionName] = useState("");
   const [dbType, setDbType] = useState("postgresql");
   const [host, setHost] = useState("");
+  const [isUpdatingConnection, setIsUpdatingConnection] = useState(false);
 
   // Helper function to format time ago
   const formatTimeAgo = (dateString: string): string => {
@@ -94,14 +96,27 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
         storeDatabaseMetadata(String(projectId), metadataEntries);
 
         // Map API Database format to DatabaseConnection format
-        const mappedDatabases: DatabaseConnection[] = response.data.map((db) => ({
-          id: db.id,
-          name: db.name,
-          type: db.type === 'postgresql' ? 'PostgreSQL' : db.type === 'mysql' ? 'MySQL' : db.type,
-          host: db.host || 'N/A',
-          status: db.status,
-          lastChecked: formatTimeAgo(db.lastChecked),
-        }));
+        const mappedDatabases: DatabaseConnection[] = response.data.map((db) => {
+          const rawType = (db.type || '').toLowerCase();
+          let displayType = db.type;
+          if (rawType === 'postgresql' || rawType === 'postgres') {
+            displayType = 'PostgreSQL';
+          } else if (rawType === 'mysql') {
+            displayType = 'MySQL';
+          } else if (rawType === 'oracledb' || rawType === 'oracle') {
+            displayType = 'Oracle';
+          }
+
+          return {
+            id: db.id,
+            name: db.name,
+            type: displayType,
+            rawType,
+            host: db.host || 'N/A',
+            status: db.status,
+            lastChecked: formatTimeAgo(db.lastChecked),
+          };
+        });
         setDatabases(mappedDatabases);
       } else {
         toast.error(response.error?.message || "Failed to load databases");
@@ -147,36 +162,89 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   const handleEditConnection = (db: DatabaseConnection) => {
     setSelectedDatabase(db);
     setConnectionName(db.name);
-    setDbType(db.type.toLowerCase());
+    const normalizedType = (db.rawType || db.type || '').toLowerCase();
+    if (normalizedType === 'postgres' || normalizedType === 'postgresql') {
+      setDbType('postgresql');
+    } else if (normalizedType === 'mysql') {
+      setDbType('mysql');
+    } else if (normalizedType === 'oracledb' || normalizedType === 'oracle') {
+      setDbType('oracledb');
+    } else {
+      setDbType(normalizedType || 'postgresql');
+    }
     setHost(db.host);
     setEditDialogOpen(true);
   };
 
-  const handleUpdateConnection = () => {
+  const handleUpdateConnection = async () => {
     if (!connectionName.trim() || !host.trim()) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    setDatabases(databases.map(db => 
-      db.id === selectedDatabase?.id 
-        ? { ...db, name: connectionName, host: host, type: dbType === "postgresql" ? "PostgreSQL" : "MySQL" }
-        : db
-    ));
+    if (!selectedDatabase) {
+      toast.error("No connection selected");
+      return;
+    }
 
-    toast.success("Database connection updated successfully");
-    
-    // Reset form
-    setConnectionName("");
-    setHost("");
-    setSelectedDatabase(null);
-    setEditDialogOpen(false);
+    setIsUpdatingConnection(true);
+    try {
+      const normalizedType =
+        dbType === "postgresql"
+          ? "postgres"
+          : dbType === "oracle"
+          ? "oracledb"
+          : dbType === "oracledb"
+          ? "oracledb"
+          : dbType === "mysql"
+          ? "mysql"
+          : dbType;
+
+      const response = await updateConnection(selectedDatabase.id, {
+        connection_name: connectionName,
+        db_type: normalizedType,
+        db_host_link: host,
+      });
+
+      if (response.success) {
+        toast.success("Database connection updated successfully");
+        if (projectId) {
+          await fetchDatabases();
+        }
+        setEditDialogOpen(false);
+      } else {
+        toast.error(response.error?.message || "Failed to update connection");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "An error occurred while updating the connection");
+    } finally {
+      setIsUpdatingConnection(false);
+      // Reset form
+      setConnectionName("");
+      setHost("");
+      setSelectedDatabase(null);
+    }
   };
 
-  const handleDeleteConnection = (db: DatabaseConnection) => {
-    // TODO: Implement delete API call when available
-    setDatabases(databases.filter(d => d.id !== db.id));
-    toast.success(`Connection "${db.name}" deleted successfully`);
+  const handleDeleteConnection = async (db: DatabaseConnection) => {
+    try {
+      const response = await deleteConnection(db.id);
+      
+      if (response.success) {
+        // Remove from local state
+        setDatabases(databases.filter(d => d.id !== db.id));
+        toast.success(`Connection "${db.name}" deleted successfully`);
+        
+        // Refresh the database list to ensure consistency
+        if (projectId) {
+          fetchDatabases();
+        }
+      } else {
+        toast.error(response.error?.message || `Failed to delete connection "${db.name}"`);
+      }
+    } catch (error: any) {
+      toast.error(error.message || `An error occurred while deleting connection "${db.name}"`);
+    }
   };
 
   const handleConnectionFlowCancel = () => {
@@ -446,6 +514,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                     <SelectContent>
                       <SelectItem value="postgresql">PostgreSQL</SelectItem>
                       <SelectItem value="mysql">MySQL</SelectItem>
+                    <SelectItem value="oracledb">Oracle</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -470,9 +539,10 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
               </Button>
               <GradientButton 
                 onClick={handleUpdateConnection}
+                disabled={isUpdatingConnection}
               >
                 <Database className="w-4 h-4 mr-2" />
-                Update Connection
+                {isUpdatingConnection ? "Updating..." : "Update Connection"}
               </GradientButton>
             </DialogFooter>
           </DialogContent>
