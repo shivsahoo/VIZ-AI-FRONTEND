@@ -15,6 +15,7 @@
   --secondary-foreground: #FFFFFF;
   --muted: #F5F7FA;
   --muted-foreground: #64748B;
+  --chart-axis-color: #64748B;
   --accent: #06B6D4;
   --accent-foreground: #FFFFFF;
   --destructive: #EF4444;
@@ -61,6 +62,7 @@
   --secondary-foreground: #FFFFFF;
   --muted: #1F2937;
   --muted-foreground: #94A3B8;
+  --chart-axis-color: #F8FAFC;
   --accent: #22D3EE;
   --accent-foreground: #FFFFFF;
   --destructive: #F87171;
@@ -374,4 +376,61 @@ html {
 
 .animate-float {
   animation: float 3s ease-in-out infinite;
+}
+
+/* Chart axis colors - white in dark mode */
+/* Use maximum specificity to override Recharts inline styles */
+.dark svg.recharts-surface .recharts-cartesian-axis-tick text,
+.dark .recharts-wrapper svg .recharts-cartesian-axis-tick text,
+.dark .recharts-cartesian-axis-tick text,
+.dark .recharts-cartesian-axis-tick-value,
+.dark .recharts-cartesian-axis-tick text tspan,
+.dark .recharts-cartesian-axis-tick text[fill],
+.dark .recharts-cartesian-axis-tick text[fill*="muted"],
+.dark .recharts-cartesian-axis-tick text[fill*="64748B"],
+.dark .recharts-cartesian-axis-tick text[fill*="94A3B8"],
+.dark .recharts-cartesian-axis-tick text[fill*="chart-axis"] {
+  fill: #F8FAFC !important;
+  color: #F8FAFC !important;
+}
+
+.dark svg.recharts-surface .recharts-cartesian-axis line,
+.dark .recharts-wrapper svg .recharts-cartesian-axis line,
+.dark .recharts-cartesian-axis line,
+.dark .recharts-cartesian-axis-line,
+.dark .recharts-cartesian-axis line[stroke],
+.dark .recharts-cartesian-axis line[stroke*="border"],
+.dark .recharts-cartesian-axis line[stroke*="muted"],
+.dark .recharts-cartesian-axis line[stroke*="chart-axis"] {
+  stroke: #F8FAFC !important;
+}
+
+.dark .recharts-cartesian-axis-tick-line {
+  stroke: #F8FAFC !important;
+}
+
+/* Override any inline styles set via props - more specific selectors */
+.dark [data-chart] svg .recharts-cartesian-axis-tick text,
+.dark [data-slot="chart"] svg .recharts-cartesian-axis-tick text,
+.dark .recharts-responsive-container svg .recharts-cartesian-axis-tick text,
+.dark [data-chart] .recharts-cartesian-axis-tick text,
+.dark [data-slot="chart"] .recharts-cartesian-axis-tick text {
+  fill: #F8FAFC !important;
+}
+
+.dark [data-chart] svg .recharts-cartesian-axis line,
+.dark [data-slot="chart"] svg .recharts-cartesian-axis line,
+.dark .recharts-responsive-container svg .recharts-cartesian-axis line,
+.dark [data-chart] .recharts-cartesian-axis line,
+.dark [data-slot="chart"] .recharts-cartesian-axis line {
+  stroke: #F8FAFC !important;
+}
+
+/* Target all Recharts axis elements in dark mode with maximum specificity */
+.dark .recharts-wrapper svg .recharts-cartesian-axis-tick text,
+.dark .recharts-wrapper svg .recharts-cartesian-axis line,
+.dark .recharts-cartesian-grid + .recharts-cartesian-axis-tick text,
+.dark .recharts-cartesian-grid + .recharts-cartesian-axis line {
+  fill: #F8FAFC !important;
+  stroke: #F8FAFC !important;
 }
