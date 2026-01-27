@@ -153,10 +153,12 @@ export function ChartCard({
   /**
    * Common styling for X and Y axes across all chart types
    * Uses design system color tokens for consistency
+   * --foreground: dark in light mode, white in dark mode
+   * CSS rules will ensure white in dark mode even if inline styles try to override
    */
   const commonAxisStyle = {
-    stroke: "hsl(var(--muted-foreground))",
-    tick: { fill: "hsl(var(--muted-foreground))" }
+    stroke: "var(--foreground)",
+    tick: { fill: "var(--foreground)" }
   };
 
   // Render appropriate chart type based on props
@@ -224,13 +226,13 @@ export function ChartCard({
               angle={needsRotatedLabels ? -45 : 0}
               textAnchor={needsRotatedLabels ? "end" : "middle"}
               height={needsRotatedLabels ? 50 : undefined}
-              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-              axisLine={{ stroke: "hsl(var(--border))" }}
+              tick={{ fontSize: 11, fill: "var(--foreground)" }}
+              axisLine={{ stroke: "var(--foreground)" }}
             />
             <YAxis 
               {...commonAxisStyle}
-              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-              axisLine={{ stroke: "hsl(var(--border))" }}
+              tick={{ fontSize: 11, fill: "var(--foreground)" }}
+              axisLine={{ stroke: "var(--foreground)" }}
             />
             <Tooltip 
               content={<CustomChartTooltip />}
@@ -399,8 +401,8 @@ export function ChartCard({
             <XAxis 
               dataKey={finalXAxisKey} 
               {...commonAxisStyle}
-              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-              axisLine={{ stroke: "hsl(var(--border))" }}
+              tick={{ fontSize: 11, fill: "var(--foreground)" }}
+              axisLine={{ stroke: "var(--foreground)" }}
               angle={shouldRotateLabels ? -45 : 0}
               textAnchor={shouldRotateLabels ? "end" : "middle"}
               height={shouldRotateLabels ? 60 : undefined}
@@ -408,8 +410,8 @@ export function ChartCard({
             <YAxis 
               {...commonAxisStyle}
               domain={finalDomain}
-              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-              axisLine={{ stroke: "hsl(var(--border))" }}
+              tick={{ fontSize: 11, fill: "var(--foreground)" }}
+              axisLine={{ stroke: "var(--foreground)" }}
               allowDecimals={false}
               hide={!hasNumericData}
             />
@@ -578,13 +580,13 @@ export function ChartCard({
             <XAxis 
               dataKey={finalXAxisKey} 
               {...commonAxisStyle}
-              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-              axisLine={{ stroke: "hsl(var(--border))" }}
+              tick={{ fontSize: 11, fill: "var(--foreground)" }}
+              axisLine={{ stroke: "var(--foreground)" }}
             />
             <YAxis 
               {...commonAxisStyle}
-              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
-              axisLine={{ stroke: "hsl(var(--border))" }}
+              tick={{ fontSize: 11, fill: "var(--foreground)" }}
+              axisLine={{ stroke: "var(--foreground)" }}
             />
             <Tooltip 
               content={<CustomChartTooltip />}
