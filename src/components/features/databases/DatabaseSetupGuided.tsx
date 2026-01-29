@@ -36,6 +36,10 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
   const [password, setPassword] = useState("");
   const [useSSL, setUseSSL] = useState(false);
   const [additionalParams, setAdditionalParams] = useState("");
+  
+  // Salesforce OAuth2 fields (session-based authentication only)
+  const [sessionId, setSessionId] = useState("");
+  const [instanceUrl, setInstanceUrl] = useState("");
 
   // Progress Overlay State
   const [showProgressOverlay, setShowProgressOverlay] = useState(false);
@@ -275,14 +279,37 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
         return;
       }
     } else {
-      if (
-        !normalizedConnectionName ||
-        !host.trim() ||
-        !database.trim() ||
-        !username.trim()
-      ) {
-        toast.error("Please fill in all required fields");
-        return;
+      // Validation for Salesforce (OAuth2 only)
+      if (dbType === "salesforce") {
+        if (!normalizedConnectionName) {
+          toast.error("Please provide a connection name");
+          return;
+        }
+        if (!sessionId.trim()) {
+          toast.error("Session ID (OAuth access token) is required");
+          return;
+        }
+        if (!instanceUrl.trim()) {
+          toast.error("Instance URL is required");
+          return;
+        }
+        // Validate instance URL is not a login URL
+        const instanceUrlLower = instanceUrl.toLowerCase();
+        if (instanceUrlLower.includes("login.salesforce.com") || instanceUrlLower.includes("test.salesforce.com")) {
+          toast.error("Instance URL must be your Salesforce instance (e.g., https://na45.salesforce.com), not a login URL");
+          return;
+        }
+      } else {
+        // Validation for traditional databases
+        if (
+          !normalizedConnectionName ||
+          !host.trim() ||
+          !database.trim() ||
+          !username.trim()
+        ) {
+          toast.error("Please fill in all required fields");
+          return;
+        }
       }
     }
 
@@ -302,18 +329,30 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
           consentGiven: true,
         };
       } else {
-        const portValue = port && port.trim() ? port.trim() : undefined;
-        
-        requestData = {
-          connectionName: normalizedConnectionName,
-          dbType: dbType,
-          host: host.trim(),
-          ...(portValue && { port: portValue }),
-          database: database.trim(),
-          username: username.trim(),
-          password: password || "",
-          consentGiven: true,
-        };
+        if (dbType === "salesforce") {
+          // Salesforce OAuth2 request data (session-based authentication only)
+          requestData = {
+            connectionName: normalizedConnectionName,
+            dbType: dbType,
+            sessionId: sessionId.trim(),
+            instanceUrl: instanceUrl.trim(),
+            consentGiven: true,
+          };
+        } else {
+          // Traditional database request data
+          const portValue = port && port.trim() ? port.trim() : undefined;
+          
+          requestData = {
+            connectionName: normalizedConnectionName,
+            dbType: dbType,
+            host: host.trim(),
+            ...(portValue && { port: portValue }),
+            database: database.trim(),
+            username: username.trim(),
+            password: password || "",
+            consentGiven: true,
+          };
+        }
       }
 
       const response = await createDatabase(projectId, requestData);
@@ -473,103 +512,154 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                     <SelectItem value="postgresql">PostgreSQL</SelectItem>
                     <SelectItem value="mysql">MySQL</SelectItem>
                     <SelectItem value="oracle">Oracle</SelectItem>
+                    <SelectItem value="salesforce">Salesforce</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="host">
-                  Host <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="host"
-                  placeholder="localhost or db.example.com"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  className="h-12"
-                />
-              </div>
+              {/* Salesforce OAuth2 fields */}
+              {dbType === "salesforce" && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="sessionId">
+                      Session ID (Access Token) <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="sessionId"
+                      type="password"
+                      placeholder="OAuth2 access token from your Salesforce session"
+                      value={sessionId}
+                      onChange={(e) => setSessionId(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      The OAuth access token from your Salesforce Connected App
+                    </p>
+                  </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="port">Port</Label>
-                <Input
-                  id="port"
-                  placeholder={
-                    dbType === "postgresql" 
-                      ? "5432" 
-                      : dbType === "mysql" 
-                      ? "3306" 
-                      : dbType === "oracle"
-                      ? "1521"
-                      : ""
-                  }
-                  value={port}
-                  onChange={(e) => setPort(e.target.value)}
-                  className="h-12"
-                />
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="instanceUrl">
+                      Instance URL <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="instanceUrl"
+                      placeholder="https://yourinstance.salesforce.com"
+                      value={instanceUrl}
+                      onChange={(e) => setInstanceUrl(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Your Salesforce instance URL (e.g., https://na45.salesforce.com). Do not use login.salesforce.com.
+                    </p>
+                  </div>
+                </>
+              )}
 
-              <div className="space-y-2">
-                <Label htmlFor="database">
-                  Database Name {dbType === "oracle" && <span className="text-muted-foreground">(service name)</span>} <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="database"
-                  placeholder="my_database"
-                  value={database}
-                  onChange={(e) => setDatabase(e.target.value)}
-                  className="h-12"
-                />
-              </div>
+              {/* Traditional database fields (shown when NOT Salesforce) */}
+              {dbType !== "salesforce" && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="host">
+                      Host <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="host"
+                      placeholder="localhost or db.example.com"
+                      value={host}
+                      onChange={(e) => setHost(e.target.value)}
+                      className="h-12"
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="username">
-                  Username <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="username"
-                  placeholder="database_user"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="h-12"
-                  autoComplete="off"
-                />
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="port">Port</Label>
+                    <Input
+                      id="port"
+                      placeholder={
+                        dbType === "postgresql" 
+                          ? "5432" 
+                          : dbType === "mysql" 
+                          ? "3306" 
+                          : dbType === "oracle"
+                          ? "1521"
+                          : ""
+                      }
+                      value={port}
+                      onChange={(e) => setPort(e.target.value)}
+                      className="h-12"
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="h-12"
-                  autoComplete="new-password"
-                />
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="database">
+                      Database Name {dbType === "oracle" && <span className="text-muted-foreground">(service name)</span>} <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="database"
+                      placeholder="my_database"
+                      value={database}
+                      onChange={(e) => setDatabase(e.target.value)}
+                      className="h-12"
+                    />
+                  </div>
 
-              <div className="col-span-2 flex items-center space-x-2">
-                <Checkbox
-                  id="useSSL"
-                  checked={useSSL}
-                  onCheckedChange={(checked) => setUseSSL(checked as boolean)}
-                />
-                <Label htmlFor="useSSL" className="cursor-pointer">
-                  Use SSL/TLS Connection
-                </Label>
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="username">
+                      Username <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="username"
+                      placeholder="database_user"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                  </div>
 
-              <div className="col-span-2 space-y-2">
-                <Label htmlFor="additionalParams">Additional Parameters (Optional)</Label>
-                <Textarea
-                  id="additionalParams"
-                  placeholder="sslmode=require&connect_timeout=10"
-                  value={additionalParams}
-                  onChange={(e) => setAdditionalParams(e.target.value)}
-                  className="min-h-[80px] font-mono text-sm"
-                />
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="password">Password</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="h-12"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* SSL and Additional Parameters - only for non-Salesforce databases */}
+              {dbType !== "salesforce" && (
+                <>
+                  <div className="col-span-2 flex items-center space-x-2">
+                    <Checkbox
+                      id="useSSL"
+                      checked={useSSL}
+                      onCheckedChange={(checked) => setUseSSL(checked as boolean)}
+                    />
+                    <Label htmlFor="useSSL" className="cursor-pointer">
+                      Use SSL/TLS Connection
+                    </Label>
+                  </div>
+
+                  <div className="col-span-2 space-y-2">
+                    <Label htmlFor="additionalParams">Additional Parameters (Optional)</Label>
+                    <Textarea
+                      id="additionalParams"
+                      placeholder="sslmode=require&connect_timeout=10"
+                      value={additionalParams}
+                      onChange={(e) => setAdditionalParams(e.target.value)}
+                      className="min-h-[80px] font-mono text-sm"
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="pt-4">

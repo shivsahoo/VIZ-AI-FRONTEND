@@ -49,7 +49,7 @@ type ChartCreationRequestPayload = {
   nlq_query: string;
   data_connection_id: string;
   db_schema: string;
-  db_type: 'postgres' | 'mysql' | 'sqlite' | 'oracledb';
+  db_type: 'postgres' | 'mysql' | 'sqlite' | 'oracledb' | 'salesforce';
   role: string;
   kpi_info?: string;
   dashboard_kpi_info?: string;
@@ -110,9 +110,11 @@ const normalizeChartType = (type?: string): 'line' | 'bar' | 'pie' | 'area' => {
   return 'line';
 };
 
-const normalizeDbType = (type?: string): 'postgres' | 'mysql' | 'sqlite' | 'oracledb' => {
+const normalizeDbType = (type?: string): 'postgres' | 'mysql' | 'sqlite' | 'oracledb' | 'salesforce' => {
   if (!type) return 'postgres';
   const lower = type.toLowerCase();
+  // Handle Salesforce
+  if (lower.includes('salesforce')) return 'salesforce';
   // Handle Oracle database types
   if (lower.includes('oracle')) return 'oracledb';
   // Handle MySQL

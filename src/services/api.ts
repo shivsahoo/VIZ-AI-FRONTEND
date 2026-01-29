@@ -1704,14 +1704,15 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
 
 /**
  * Create database connection
- * 
+ *
  * @param projectId - The project ID
  * @param data - Database connection data. Can include:
  *   - connectionString: Full connection string (e.g., "postgresql://user:pass@host:port/db")
  *   - OR form fields: connectionName, dbType, host, port, database, username, password
+ *   - Salesforce OAuth2 fields: sessionId, instanceUrl
  */
 export const createDatabase = async (
-  projectId: string, 
+  projectId: string,
   data: {
     connectionString?: string;
     connectionName?: string;
@@ -1722,6 +1723,9 @@ export const createDatabase = async (
     username?: string;
     password?: string;
     consentGiven?: boolean;
+    // Salesforce OAuth2 fields (session-based authentication only)
+    sessionId?: string;
+    instanceUrl?: string;
   }
 ): Promise<ApiResponse<DatabaseCreationTask>> => {
   try {
@@ -1741,39 +1745,53 @@ export const createDatabase = async (
       }
     } else {
       // Use form fields method
-      // Backend expects "postgres" not "postgresql", and "oracledb" not "oracle"
+      // Backend expects "postgres" not "postgresql", "oracledb" not "oracle", and "salesforce" as-is
       let dbType = data.dbType?.toLowerCase() || 'postgres';
       if (dbType === 'postgresql') {
         dbType = 'postgres';
       } else if (dbType === 'oracle') {
         dbType = 'oracledb';
+      } else if (dbType === 'salesforce') {
+        dbType = 'salesforce';
       }
       
       requestBody.connection_name = data.connectionName || '';
       requestBody.db_type = dbType;
       
-      // Construct host with port if port is provided and different from default
-      let hostWithPort = data.host || '';
-      if (data.port) {
-        const portStr = String(data.port).trim();
-        if (portStr) {
-          const portNum = parseInt(portStr);
-          if (!isNaN(portNum)) {
-            const defaultPort = dbType === 'postgres' ? 5432 : dbType === 'mysql' ? 3306 : 1521;
-            
-            // Only append port if it's different from default and not already in host
-            if (portNum !== defaultPort && !hostWithPort.includes(':')) {
-              hostWithPort = `${hostWithPort}:${portNum}`;
+      // Handle Salesforce connections (OAuth2 session-based authentication only)
+      if (dbType === 'salesforce') {
+        // Salesforce uses session_id (OAuth access_token) and instance_url
+        if (data.sessionId) {
+          requestBody.session_id = data.sessionId;
+        }
+        if (data.instanceUrl) {
+          requestBody.instance_url = data.instanceUrl;
+        }
+      } else {
+        // Traditional database fields
+        // Construct host with port if port is provided and different from default
+        let hostWithPort = data.host || '';
+        if (data.port) {
+          const portStr = String(data.port).trim();
+          if (portStr) {
+            const portNum = parseInt(portStr);
+            if (!isNaN(portNum)) {
+              const defaultPort = dbType === 'postgres' ? 5432 : dbType === 'mysql' ? 3306 : 1521;
+              
+              // Only append port if it's different from default and not already in host
+              if (portNum !== defaultPort && !hostWithPort.includes(':')) {
+                hostWithPort = `${hostWithPort}:${portNum}`;
+              }
             }
           }
         }
+        
+        requestBody.host = hostWithPort;
+        requestBody.db_name = data.database || '';
+        // Backend accepts both 'username' and 'name', send 'username' to match expected payload format
+        requestBody.username = data.username || '';
+        requestBody.password = data.password || '';
       }
-      
-      requestBody.host = hostWithPort;
-      requestBody.db_name = data.database || '';
-      // Backend accepts both 'username' and 'name', send 'username' to match expected payload format
-      requestBody.username = data.username || '';
-      requestBody.password = data.password || '';
     }
 
     if (data.consentGiven !== undefined) {

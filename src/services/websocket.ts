@@ -397,7 +397,7 @@ export class VizAIWebSocket {
     nlq_query: string;
     data_connection_id: string;
     db_schema: string; // JSON string of database schema
-    db_type: "mysql" | "postgres" | "sqlite" | "oracledb";
+    db_type: "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce";
     role: string;
     domain?: string;
     kpi_info?: string; // Project-level KPIs

@@ -32,7 +32,7 @@ export default function App() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
-  const [isDark, setIsDark] = useState(false);
+  const [isDark, setIsDark] = useState(true);
   const [workspaceTab, setWorkspaceTab] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('vizai_workspace_tab') || 'home';
