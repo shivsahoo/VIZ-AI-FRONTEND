@@ -105,6 +105,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
             displayType = 'MySQL';
           } else if (rawType === 'oracledb' || rawType === 'oracle') {
             displayType = 'Oracle';
+          } else if (rawType === 'salesforce') {
+            displayType = 'Salesforce';
           }
 
           return {
@@ -169,6 +171,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
       setDbType('mysql');
     } else if (normalizedType === 'oracledb' || normalizedType === 'oracle') {
       setDbType('oracledb');
+    } else if (normalizedType === 'salesforce') {
+      setDbType('salesforce');
     } else {
       setDbType(normalizedType || 'postgresql');
     }

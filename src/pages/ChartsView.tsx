@@ -1153,8 +1153,18 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     setIsGeneratingCharts(true);
     try {
       const selectedDb = databases.find(db => db.id === selectedDatabaseForGenerate);
+      // Normalize database type for backend (backend expects lowercase: postgres, mysql, oracledb, salesforce)
+      const normalizeDbType = (type?: string): string => {
+        if (!type) return 'postgres';
+        const lower = type.toLowerCase();
+        if (lower === 'postgresql' || lower === 'postgres') return 'postgres';
+        if (lower === 'mysql') return 'mysql';
+        if (lower === 'oracle' || lower === 'oracledb') return 'oracledb';
+        if (lower === 'salesforce') return 'salesforce';
+        return lower;
+      };
       const response = await generateCharts(String(projectId), selectedDatabaseForGenerate, {
-        db_type: selectedDb?.type || 'postgresql',
+        db_type: normalizeDbType(selectedDb?.type) || 'postgres',
         role: 'admin',
       });
 
