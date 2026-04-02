@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
-import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw } from "lucide-react";
+import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw, Microscope } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { Badge } from "../../ui/badge";
 import { GradientButton } from "../../shared/GradientButton";
 import { ChartPreviewDialog } from "../charts/ChartPreviewDialog";
+import { ProbeModeDialog } from "../charts/ProbeModeDialog";
 import { getDashboards, getDatabases, getCurrentUser, type Chart as SavedChart } from "../../../services/api";
 import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../../../utils/databaseMetadata";
 import { VizAIWebSocket, WebSocketResponse, type ChartSpec } from "../../../services/websocket";
@@ -153,6 +154,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
   const [expandedSuggestion, setExpandedSuggestion] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(storeIsGenerating);
   const [previewChart, setPreviewChart] = useState<ChartSuggestion | null>(null);
+  const [probeModeChart, setProbeModeChart] = useState<ChartSuggestion | null>(null);
   const [showDatabaseSelection, setShowDatabaseSelection] = useState(!storeSelectedDatabase);
   const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
   const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string; schema?: string | null }>>([]);
@@ -915,6 +917,25 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     }
   };
 
+  const handleOpenProbeMode = (suggestion: ChartSuggestion) => {
+    const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
+    if (!selectedDb?.id) {
+      toast.error("Please select a valid database connection first.");
+      return;
+    }
+    const schemaString = ensureSchemaString(selectedDb.schema);
+    const dbType = normalizeDbType(selectedDb.type);
+    // Cast to `any` to carry db_schema / db_type alongside the standard ChartSuggestion fields.
+    // ProbeModeDialog reads these extra fields when building the first-turn context block.
+    setProbeModeChart({
+      ...suggestion,
+      dataConnectionId: suggestion.dataConnectionId || selectedDb.id,
+      databaseId: suggestion.dataConnectionId || selectedDb.id,
+      db_schema: schemaString,
+      db_type: dbType,
+    } as any);
+  };
+
   const handleCreateChart = (suggestion: ChartSuggestion) => {
     const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
 
@@ -1242,27 +1263,40 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                                     </div>
                                   </div>
 
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() => toggleSuggestionExpand(suggestion.id)}
-                                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors border border-border rounded-lg hover:bg-muted/50"
-                                    >
-                                      <Code className="w-3.5 h-3.5" />
-                                      {isExpanded ? 'Hide' : 'View'} Details
-                                      {isExpanded ? (
-                                        <ChevronUp className="w-3.5 h-3.5" />
-                                      ) : (
-                                        <ChevronDown className="w-3.5 h-3.5" />
-                                      )}
-                                    </button>
+                                  <div className="flex flex-col gap-2">
+                                    <div className="flex gap-2">
+                                      <button
+                                        onClick={() => toggleSuggestionExpand(suggestion.id)}
+                                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors border border-border rounded-lg hover:bg-muted/50"
+                                      >
+                                        <Code className="w-3.5 h-3.5" />
+                                        {isExpanded ? 'Hide' : 'View'} Details
+                                        {isExpanded ? (
+                                          <ChevronUp className="w-3.5 h-3.5" />
+                                        ) : (
+                                          <ChevronDown className="w-3.5 h-3.5" />
+                                        )}
+                                      </button>
 
-                                    <GradientButton
-                                      onClick={() => handleCreateChart(suggestion)}
-                                      size="sm"
-                                      className="gap-2"
-                                    >
-                                      Preview
-                                    </GradientButton>
+                                      <GradientButton
+                                        onClick={() => handleCreateChart(suggestion)}
+                                        size="sm"
+                                        className="gap-2"
+                                      >
+                                        Preview
+                                      </GradientButton>
+
+                                      {suggestion.query && (
+                                        <GradientButton
+                                          onClick={() => handleOpenProbeMode(suggestion)}
+                                          size="sm"
+                                          className="gap-2"
+                                        >
+                                          <Microscope className="w-3.5 h-3.5" />
+                                          Probe Mode
+                                        </GradientButton>
+                                      )}
+                                    </div>
                                   </div>
 
                                   {isExpanded && (
@@ -1469,6 +1503,20 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         onAddToDashboard={handleAddChartToDashboard}
         onSaveAsDraft={handleSaveAsDraft}
       />
+
+      {/* Probe Mode — opens directly from the chart card, no preview step needed */}
+      {!!probeModeChart && (
+        <ProbeModeDialog
+          isOpen={!!probeModeChart}
+          onClose={() => setProbeModeChart(null)}
+          chart={probeModeChart as any}
+          onApplyChanges={() => {
+            // Probe Mode in AIAssistant is exploratory — no preview to update.
+            // The user can always hit Preview after probing to see the final chart.
+            setProbeModeChart(null);
+          }}
+        />
+      )}
 
     </>
   );

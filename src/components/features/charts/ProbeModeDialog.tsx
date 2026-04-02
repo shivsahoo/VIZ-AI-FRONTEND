@@ -9,7 +9,6 @@ import {
 import { Button } from "../../ui/button";
 import { GradientButton } from "../../shared/GradientButton";
 import { Badge } from "../../ui/badge";
-import { ScrollArea } from "../../ui/scroll-area";
 import { ChartCard } from "./ChartCard";
 import { toast } from "sonner";
 import { getChartData } from "../../../services/api";
@@ -25,8 +24,10 @@ interface ProbeMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
-  /** Present when the assistant returned a modified SQL query */
+  /** Present when the assistant returned a modified SQL query or chart-type change */
   modifiedSql?: string;
+  /** New chart type if the agent suggested a type conversion */
+  modifiedChartType?: string;
   /** Pre-fetched chart data for the modified query */
   chartPreview?: {
     config: ChartDataConfig;
@@ -128,18 +129,25 @@ export function ProbeModeDialog({
           const responseType: string = state.response_type ?? "conversational";
           const explanation: string = state.explanation || response.message || "";
           const modifiedSql: string | undefined = state.modified_sql ?? undefined;
+          const modifiedChartType: string | undefined = state.modified_chart_type ?? undefined;
           const modifiedSpec: Partial<ChartSpec> | undefined =
             state.modified_chart_spec ?? undefined;
+
+          // Show a visual preview when SQL changed OR when chart type changed
+          const hasVisualChange =
+            (responseType === "modify_query" && modifiedSql) ||
+            (responseType === "modify_chart_type" && modifiedChartType);
 
           const newMsg: ProbeMessage = {
             id: nextId(),
             role: "assistant",
             content: explanation,
-            modifiedSql: responseType === "modify_query" ? modifiedSql : undefined,
+            modifiedSql: hasVisualChange ? (modifiedSql ?? chart.query) : undefined,
+            modifiedChartType: hasVisualChange ? modifiedChartType : undefined,
           };
 
-          if (responseType === "modify_query" && modifiedSql) {
-            // Set loading placeholder then fetch data
+          if (hasVisualChange) {
+            const sqlToRun = modifiedSql ?? chart.query ?? "";
             newMsg.chartPreview = {
               config: getDefaultChartDataConfig(),
               spec: modifiedSpec ?? {},
@@ -148,18 +156,16 @@ export function ProbeModeDialog({
 
             setMessages((prev) => [...prev, newMsg]);
 
-            const connectionId =
-              chart.dataConnectionId || chart.databaseId || "";
+            const connectionId = chart.dataConnectionId || chart.databaseId || "";
 
-            getChartData("probe-preview", connectionId, modifiedSql)
+            getChartData("probe-preview", connectionId, sqlToRun)
               .then((res) => {
                 if (cancelled) return;
+                const resolvedType = (modifiedChartType ?? chart.type ?? "bar") as
+                  "bar" | "line" | "pie" | "area";
                 const config =
                   res.success && res.data
-                    ? inferChartDataConfig(
-                        res.data.data,
-                        (chart.type ?? "bar") as "bar" | "line" | "pie" | "area"
-                      )
+                    ? inferChartDataConfig(res.data.data, resolvedType)
                     : getDefaultChartDataConfig();
 
                 setMessages((prev) =>
@@ -296,7 +302,7 @@ export function ProbeModeDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="!w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] sm:!w-[90vw] sm:!max-w-[90vw] md:!max-w-2xl lg:!max-w-3xl max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
+      <DialogContent className="!w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] sm:!w-[90vw] sm:!max-w-[90vw] md:!max-w-2xl lg:!max-w-3xl h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
 
         {/* Header */}
         <DialogHeader className="px-4 pt-4 pb-3 border-b border-border flex-shrink-0">
@@ -318,8 +324,8 @@ export function ProbeModeDialog({
           </div>
         </DialogHeader>
 
-        {/* Messages */}
-        <ScrollArea className="flex-1 min-h-0">
+        {/* Messages — plain overflow div so the input stays pinned */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="px-4 py-3 space-y-4">
 
             {isConnecting && (
@@ -396,7 +402,7 @@ export function ProbeModeDialog({
                           </div>
                         ) : (
                           <ChartCard
-                            type={(chart.type ?? "bar") as any}
+                            type={(msg.modifiedChartType ?? chart.type ?? "bar") as any}
                             data={msg.chartPreview!.config.data}
                             dataKeys={msg.chartPreview!.config.dataKeys}
                             xAxisKey={msg.chartPreview!.config.xAxisKey}
@@ -463,7 +469,7 @@ export function ProbeModeDialog({
 
             <div ref={messagesEndRef} />
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Input */}
         <div className="flex-shrink-0 border-t border-border px-4 py-3 bg-background">
