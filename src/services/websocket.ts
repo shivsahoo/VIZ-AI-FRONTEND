@@ -85,9 +85,14 @@ export class VizAIWebSocket {
     onOpen: [],
     onClose: [],
   };
+  // Unique ID for this connection instance — used as LangGraph thread_id on the backend.
+  // Generated once per VizAIWebSocket instance so each connection (including Probe Mode
+  // sessions) gets its own isolated memory thread.
+  readonly connectionId: string = crypto.randomUUID();
 
   constructor(userId: string) {
     this.userId = userId;
+    console.log('[WebSocket] Connection ID (thread_id):', this.connectionId);
   }
 
   /**
@@ -221,8 +226,14 @@ export class VizAIWebSocket {
       return;
     }
 
-    // Prepare payload with auth token inside payload
-    const payload: Record<string, any> = { domain: 'admin', ...message.payload };
+    // Prepare payload with auth token and connection ID inside payload.
+    // connectionId is included in every message so the backend can use it as the
+    // LangGraph thread_id, scoping memory to this specific connection instance.
+    const payload: Record<string, any> = {
+      domain: 'admin',
+      ...message.payload,
+      websocket_id: this.connectionId,
+    };
     
     // Include auth token in payload (default behavior)
     if (includeAuthToken) {
@@ -424,7 +435,36 @@ export class VizAIWebSocket {
   }
 
   /**
-   * 5. Chart Regeneration - Append 3 new chart suggestions based on prior context
+   * 5. Probe Mode - Deep-dive conversational agent anchored to a single chart.
+   *
+   * Each probe session uses its own VizAIWebSocket instance, so its connectionId
+   * becomes an isolated LangGraph thread_id — no conversation history needs to be
+   * sent from the frontend; the backend manages memory via MemorySaver.
+   *
+   * @param payload.is_first_message  Must be true on the very first turn so the
+   *   backend can embed chart context into the agent's memory thread.
+   */
+  probeMode(payload: {
+    user_message: string;
+    is_first_message: boolean;
+    // Required only on the first turn:
+    original_query?: string;
+    original_chart_title?: string;
+    original_chart_type?: string;
+    original_chart_spec?: ChartSpec;
+    data_connection_id?: string;
+    db_schema?: string;
+    db_type?: 'mysql' | 'postgres' | 'sqlite' | 'oracledb' | 'salesforce';
+  }): void {
+    this.send({
+      event_type: 'probe_mode',
+      user_id: this.userId,
+      payload,
+    });
+  }
+
+  /**
+   * 6. Chart Regeneration - Append 3 new chart suggestions based on prior context
    */
   regenerate(payload: {
     data_connection_id: string;

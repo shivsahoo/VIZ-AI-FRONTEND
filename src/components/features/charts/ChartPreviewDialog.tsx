@@ -1,4 +1,4 @@
-import { Plus, ChevronDown, LayoutDashboard, Clock, Loader2, MessageSquare, Sparkles } from "lucide-react";
+import { Plus, ChevronDown, LayoutDashboard, Clock, Loader2, MessageSquare, Sparkles, Microscope } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,7 @@ import { addChartToDashboard, createChart, getChartData, type Chart as SavedChar
 import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../../../utils/chartData";
 import * as React from "react";
 import type { ChartSpec } from "../../../services/websocket";
+import { ProbeModeDialog } from "./ProbeModeDialog";
 
 interface PreviewChart {
   id?: string;
@@ -49,6 +50,9 @@ interface PreviewChart {
   xAxisField?: string | null;
   yAxisField?: string | null;
   minMaxDates?: [string, string] | null;
+  /** Passed through so ProbeModeDialog can include schema context on first message */
+  db_schema?: string;
+  db_type?: string;
 }
 
 interface ChartPreviewDialogProps {
@@ -79,6 +83,7 @@ export function ChartPreviewDialog({
   const [isSavingDraft, setIsSavingDraft] = React.useState(false);
   const isSavingDraftRef = React.useRef(false);
   const [isAddingToDashboard, setIsAddingToDashboard] = React.useState(false);
+  const [isProbeModeOpen, setIsProbeModeOpen] = React.useState(false);
   const [addingToDashboardId, setAddingToDashboardId] = React.useState<number | string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
   const isAddingToDashboardRef = React.useRef(false);
@@ -119,6 +124,7 @@ export function ChartPreviewDialog({
       setIsDropdownOpen(false);
       setIsAddingToDashboard(false);
       setAddingToDashboardId(null);
+      setIsProbeModeOpen(false);
       isAddingToDashboardRef.current = false;
       pendingDashboardCallbackRef.current = null;
       
@@ -433,6 +439,34 @@ export function ChartPreviewDialog({
     }
   };
 
+  const handleApplyProbeChanges = (modifiedSql: string, modifiedSpec?: Partial<ChartSpec>) => {
+    if (!chart) return;
+    // Re-run the query execution effect by updating chart.query via toast + triggering
+    // a state refresh in the parent.  Since ChartPreviewDialog owns its own query state
+    // locally we force a re-fetch by mutating chartDataConfig and re-triggering the effect.
+    setChartDataConfig(getDefaultChartDataConfig());
+    setChartDataError(undefined);
+    setIsExecutingQuery(true);
+
+    const databaseId = chart.databaseId || chart.dataConnectionId || extractDatabaseId();
+    getChartData(chart.id ?? "probe-apply", databaseId ?? "", modifiedSql)
+      .then((response) => {
+        if (response.success && response.data) {
+          const config = inferChartDataConfig(
+            response.data.data,
+            (modifiedSpec?.chart_type ?? chart.type) as any
+          );
+          setChartDataConfig(config);
+          setChartDataMetadata(response.data.metadata);
+          setChartDataError(undefined);
+        } else {
+          setChartDataError(response.error?.message || "Failed to fetch updated chart data");
+        }
+      })
+      .catch((err) => setChartDataError(err?.message || "Failed to fetch updated chart data"))
+      .finally(() => setIsExecutingQuery(false));
+  };
+
   const handleOpenChange = (open: boolean) => {
     if (!open) {
       setIsDropdownOpen(false);
@@ -477,6 +511,7 @@ export function ChartPreviewDialog({
   };
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="!w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] sm:!w-[85vw] sm:!max-w-[85vw] md:!max-w-xl lg:!max-w-2xl xl:!max-w-3xl max-h-[90vh] sm:max-h-[85vh] overflow-hidden flex flex-col p-0">
         
@@ -649,6 +684,18 @@ export function ChartPreviewDialog({
                 {isSavingDraft ? "Saving..." : "Save for later"}
               </Button>
             )}
+
+            {/* Probe Mode button — only for real charts with a SQL query */}
+            {!isConversational && hasQuery && (
+              <Button
+                variant="outline"
+                onClick={() => setIsProbeModeOpen(true)}
+                className="flex-1 text-xs sm:text-sm h-8 sm:h-9 gap-1.5"
+              >
+                <Microscope className="w-3.5 h-3.5" />
+                Probe Mode
+              </Button>
+            )}
             
             <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
               <DropdownMenuTrigger asChild>
@@ -714,5 +761,25 @@ export function ChartPreviewDialog({
         )}
       </DialogContent>
     </Dialog>
+
+    {/* Probe Mode — separate dialog with its own isolated WS connection */}
+    {chart && (
+      <ProbeModeDialog
+        isOpen={isProbeModeOpen}
+        onClose={() => setIsProbeModeOpen(false)}
+        chart={{
+          name: chart.name,
+          type: chart.type,
+          query: chart.query,
+          spec: chart.spec,
+          dataConnectionId: chart.dataConnectionId,
+          databaseId: chart.databaseId,
+          db_schema: chart.db_schema,
+          db_type: chart.db_type,
+        }}
+        onApplyChanges={handleApplyProbeChanges}
+      />
+    )}
+  </>
   );
 }
