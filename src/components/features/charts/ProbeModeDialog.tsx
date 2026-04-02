@@ -1,17 +1,25 @@
 import * as React from "react";
-import { Send, Loader2, Bot, User, CheckCircle2, X, Microscope } from "lucide-react";
+import { Send, Loader2, Bot, User, CheckCircle2, X, Microscope, LayoutDashboard, ChevronDown } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "../../ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../ui/dropdown-menu";
 import { Button } from "../../ui/button";
 import { GradientButton } from "../../shared/GradientButton";
 import { Badge } from "../../ui/badge";
 import { ChartCard } from "./ChartCard";
 import { toast } from "sonner";
-import { getChartData } from "../../../services/api";
+import { getChartData, addChartToDashboard } from "../../../services/api";
 import { inferChartDataConfig, getDefaultChartDataConfig, type ChartDataConfig } from "../../../utils/chartData";
 import { VizAIWebSocket, type ChartSpec } from "../../../services/websocket";
 import { getCurrentUser } from "../../../services/api";
@@ -35,8 +43,8 @@ interface ProbeMessage {
     isLoading: boolean;
     error?: string;
   };
-  /** Whether the user has already applied this suggestion */
-  applied?: boolean;
+  /** Name of dashboard this was saved to */
+  savedToDashboard?: string;
 }
 
 interface ProbeModeDialogProps {
@@ -53,8 +61,39 @@ interface ProbeModeDialogProps {
     db_schema?: string;
     db_type?: string;
   } | null;
-  /** Called when the user applies a modified SQL so the preview can refresh */
-  onApplyChanges: (modifiedSql: string, modifiedSpec?: Partial<ChartSpec>) => void;
+  /** Available dashboards for "Save to Dashboard" */
+  dashboards?: Array<{ id: string | number; name: string }>;
+  projectId?: string | number;
+  onApplyChanges?: (modifiedSql: string, modifiedSpec?: Partial<ChartSpec>) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Lightweight inline-markdown renderer
+// Handles: **bold**, *italic*, `code`
+// ---------------------------------------------------------------------------
+
+function renderMarkdown(text: string): React.ReactNode[] {
+  // Split on **bold**, *italic*, `code` — order matters (bold before italic)
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return <em key={i}>{part.slice(1, -1)}</em>;
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code
+          key={i}
+          className="bg-muted/70 rounded px-1 py-0.5 text-[0.8em] font-mono"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return part;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -65,12 +104,16 @@ export function ProbeModeDialog({
   isOpen,
   onClose,
   chart,
-  onApplyChanges,
+  dashboards = [],
+  projectId: _projectId,
+  onApplyChanges: _onApplyChanges,
 }: ProbeModeDialogProps) {
   const [messages, setMessages] = React.useState<ProbeMessage[]>([]);
   const [input, setInput] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(false);
   const [isConnecting, setIsConnecting] = React.useState(false);
+  // Tracks which message is currently being saved (msgId → true)
+  const [savingMap, setSavingMap] = React.useState<Record<number, boolean>>({});
 
   // Each probe session gets its own WS connection → its own LangGraph thread_id
   const wsRef = React.useRef<VizAIWebSocket | null>(null);
@@ -283,13 +326,50 @@ export function ProbeModeDialog({
     }
   };
 
-  const handleApply = (msg: ProbeMessage) => {
-    if (!msg.modifiedSql) return;
-    onApplyChanges(msg.modifiedSql, msg.chartPreview?.spec);
-    setMessages((prev) =>
-      prev.map((m) => (m.id === msg.id ? { ...m, applied: true } : m))
-    );
-    toast.success("Changes applied to chart preview!");
+  const handleSaveToDashboard = async (
+    msg: ProbeMessage,
+    dashboardId: string | number,
+    dashboardName: string,
+  ) => {
+    if (!chart || !msg.modifiedSql) return;
+
+    const connectionId = chart.dataConnectionId || chart.databaseId || "";
+    if (!connectionId) {
+      toast.error("No database connection found for this chart.");
+      return;
+    }
+
+    setSavingMap((prev) => ({ ...prev, [msg.id]: true }));
+
+    try {
+      const chartType = (msg.modifiedChartType ?? chart.type ?? "bar") as
+        "line" | "bar" | "pie" | "area";
+
+      const response = await addChartToDashboard({
+        title: chart.name,
+        query: msg.modifiedSql,
+        chart_type: chartType,
+        type: chartType,
+        dashboard_id: String(dashboardId),
+        data_connection_id: connectionId,
+        report: msg.content,
+      });
+
+      if (response.success) {
+        toast.success(`Chart saved to "${dashboardName}"!`);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msg.id ? { ...m, savedToDashboard: dashboardName } : m
+          )
+        );
+      } else {
+        toast.error("Failed to save chart to dashboard.");
+      }
+    } catch {
+      toast.error("An error occurred while saving the chart.");
+    } finally {
+      setSavingMap((prev) => ({ ...prev, [msg.id]: false }));
+    }
   };
 
   if (!chart) return null;
@@ -302,10 +382,20 @@ export function ProbeModeDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="!w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] sm:!w-[90vw] sm:!max-w-[90vw] md:!max-w-2xl lg:!max-w-3xl h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
-
-        {/* Header */}
-        <DialogHeader className="px-4 pt-4 pb-3 border-b border-border flex-shrink-0">
+      <DialogContent
+        className="!w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] sm:!w-[90vw] sm:!max-w-[90vw] md:!max-w-2xl lg:!max-w-3xl p-0 gap-0"
+        style={{
+          height: "90vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* ── Header ─────────────────────────────────────────────────────── */}
+        <DialogHeader
+          className="px-4 pt-4 pb-3 border-b border-border"
+          style={{ flexShrink: 0 }}
+        >
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
               <Microscope className="w-4 h-4 text-primary" />
@@ -315,7 +405,8 @@ export function ProbeModeDialog({
                 Probe Mode
               </DialogTitle>
               <p className="text-xs text-muted-foreground truncate mt-0.5">
-                Exploring: <span className="font-medium text-foreground">{chart.name}</span>
+                Exploring:{" "}
+                <span className="font-medium text-foreground">{chart.name}</span>
               </p>
             </div>
             <Badge variant="outline" className="text-xs capitalize flex-shrink-0">
@@ -324,8 +415,15 @@ export function ProbeModeDialog({
           </div>
         </DialogHeader>
 
-        {/* Messages — plain overflow div so the input stays pinned */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        {/* ── Messages (scrollable) ──────────────────────────────────────── */}
+        <div
+          style={{
+            flex: "1 1 0px",
+            minHeight: 0,
+            overflowY: "auto",
+            overflowX: "hidden",
+          }}
+        >
           <div className="px-4 py-3 space-y-4">
 
             {isConnecting && (
@@ -357,25 +455,34 @@ export function ProbeModeDialog({
 
                 {/* Bubble */}
                 <div
-                  className={`flex-1 max-w-[85%] space-y-2 ${
+                  className={`flex-1 max-w-[85%] space-y-2 flex flex-col ${
                     msg.role === "user" ? "items-end" : "items-start"
-                  } flex flex-col`}
+                  }`}
                 >
                   <div
-                    className={`rounded-xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words ${
+                    className={`rounded-xl px-3 py-2 text-sm leading-relaxed break-words ${
                       msg.role === "user"
                         ? "bg-primary text-primary-foreground rounded-tr-none"
                         : "bg-muted text-foreground rounded-tl-none"
                     }`}
                   >
-                    {msg.content}
+                    {msg.role === "user"
+                      ? msg.content
+                      : msg.content.split("\n").map((line, li) => (
+                          <React.Fragment key={li}>
+                            {li > 0 && <br />}
+                            {renderMarkdown(line)}
+                          </React.Fragment>
+                        ))}
                   </div>
 
-                  {/* Chart preview (when AI modified the SQL) */}
+                  {/* Chart preview */}
                   {msg.role === "assistant" && msg.modifiedSql && (
                     <div className="w-full rounded-xl border border-border bg-background/60 overflow-hidden">
                       <div className="px-3 py-2 border-b border-border bg-muted/40">
-                        <p className="text-xs font-medium text-muted-foreground">Modified Query Preview</p>
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Modified Query Preview
+                        </p>
                       </div>
 
                       {/* SQL pill */}
@@ -385,50 +492,88 @@ export function ProbeModeDialog({
                         </pre>
                       </div>
 
-                      {/* Chart */}
+                      {/* Chart — use bar for modified SQL previews unless an explicit
+                          chart-type was requested; pie with 50+ slices is unreadable */}
                       <div className="p-3">
                         {msg.chartPreview?.isLoading ? (
-                          <div className="flex items-center justify-center gap-2 h-32 text-muted-foreground text-xs">
+                          <div className="flex items-center justify-center gap-2 h-36 text-muted-foreground text-xs">
                             <Loader2 className="w-4 h-4 animate-spin" />
                             Fetching data…
                           </div>
                         ) : msg.chartPreview?.error ? (
-                          <div className="flex items-center justify-center h-32 text-xs text-muted-foreground text-center px-4">
+                          <div className="flex items-center justify-center h-36 text-xs text-muted-foreground text-center px-4">
                             <span>{msg.chartPreview.error}</span>
                           </div>
                         ) : (msg.chartPreview?.config.data.length ?? 0) === 0 ? (
-                          <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">
+                          <div className="flex items-center justify-center h-36 text-xs text-muted-foreground">
                             No data returned for this query.
                           </div>
                         ) : (
                           <ChartCard
-                            type={(msg.modifiedChartType ?? chart.type ?? "bar") as any}
+                            type={(msg.modifiedChartType ?? (chart.type === "pie" ? "bar" : chart.type) ?? "bar") as any}
                             data={msg.chartPreview!.config.data}
                             dataKeys={msg.chartPreview!.config.dataKeys}
                             xAxisKey={msg.chartPreview!.config.xAxisKey}
-                            showLegend={false}
-                            height={180}
+                            showLegend
+                            height={200}
                           />
                         )}
                       </div>
 
-                      {/* Apply / Applied */}
+                      {/* Save to Dashboard */}
                       <div className="px-3 pb-3 pt-1">
-                        {msg.applied ? (
+                        {msg.savedToDashboard ? (
                           <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Applied to preview
+                            Saved to &ldquo;{msg.savedToDashboard}&rdquo;
                           </div>
                         ) : (
                           <div className="flex gap-2">
-                            <GradientButton
-                              size="sm"
-                              className="text-xs h-7"
-                              onClick={() => handleApply(msg)}
-                              disabled={!!msg.chartPreview?.isLoading || !!msg.chartPreview?.error}
-                            >
-                              Apply to Preview
-                            </GradientButton>
+                            {dashboards.length > 0 ? (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <GradientButton
+                                    size="sm"
+                                    className="text-xs h-7 gap-1.5"
+                                    disabled={
+                                      !!msg.chartPreview?.isLoading ||
+                                      !!msg.chartPreview?.error ||
+                                      !!savingMap[msg.id]
+                                    }
+                                  >
+                                    {savingMap[msg.id] ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <LayoutDashboard className="w-3 h-3" />
+                                    )}
+                                    Save to Dashboard
+                                    <ChevronDown className="w-3 h-3" />
+                                  </GradientButton>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start" className="w-52">
+                                  <DropdownMenuLabel className="text-xs">
+                                    Choose a dashboard
+                                  </DropdownMenuLabel>
+                                  <DropdownMenuSeparator />
+                                  {dashboards.map((db) => (
+                                    <DropdownMenuItem
+                                      key={db.id}
+                                      className="text-xs cursor-pointer"
+                                      onClick={() =>
+                                        handleSaveToDashboard(msg, db.id, db.name)
+                                      }
+                                    >
+                                      <LayoutDashboard className="w-3.5 h-3.5 mr-2 opacity-60" />
+                                      {db.name}
+                                    </DropdownMenuItem>
+                                  ))}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">
+                                No dashboards available
+                              </span>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"
@@ -436,7 +581,9 @@ export function ProbeModeDialog({
                               onClick={() =>
                                 setMessages((prev) =>
                                   prev.map((m) =>
-                                    m.id === msg.id ? { ...m, modifiedSql: undefined, chartPreview: undefined } : m
+                                    m.id === msg.id
+                                      ? { ...m, modifiedSql: undefined, chartPreview: undefined }
+                                      : m
                                   )
                                 )
                               }
@@ -471,8 +618,11 @@ export function ProbeModeDialog({
           </div>
         </div>
 
-        {/* Input */}
-        <div className="flex-shrink-0 border-t border-border px-4 py-3 bg-background">
+        {/* ── Input (always pinned to bottom) ───────────────────────────── */}
+        <div
+          className="border-t border-border px-4 py-3 bg-background"
+          style={{ flexShrink: 0 }}
+        >
           <div className="flex items-end gap-2">
             <textarea
               ref={inputRef}
@@ -487,11 +637,11 @@ export function ProbeModeDialog({
               disabled={isConnecting || isLoading}
               rows={1}
               className="flex-1 resize-none rounded-xl border border-border bg-muted/40 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 min-h-[38px] max-h-[120px] leading-snug"
-              style={{ height: "auto" }}
+              style={{ height: "38px" }}
               onInput={(e) => {
-                const target = e.target as HTMLTextAreaElement;
-                target.style.height = "auto";
-                target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
+                const t = e.target as HTMLTextAreaElement;
+                t.style.height = "38px";
+                t.style.height = `${Math.min(t.scrollHeight, 120)}px`;
               }}
             />
             <GradientButton
@@ -507,7 +657,6 @@ export function ProbeModeDialog({
             Shift + Enter for new line
           </p>
         </div>
-
       </DialogContent>
     </Dialog>
   );

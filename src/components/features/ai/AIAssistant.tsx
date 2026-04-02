@@ -1510,11 +1510,8 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
           isOpen={!!probeModeChart}
           onClose={() => setProbeModeChart(null)}
           chart={probeModeChart as any}
-          onApplyChanges={() => {
-            // Probe Mode in AIAssistant is exploratory — no preview to update.
-            // The user can always hit Preview after probing to see the final chart.
-            setProbeModeChart(null);
-          }}
+          dashboards={dashboards}
+          projectId={projectId}
         />
       )}
 
