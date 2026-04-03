@@ -14,13 +14,6 @@ const mockChartData = [
   { month: 'Jun', revenue: 67000, customers: 195 },
 ];
 
-const suggestedQuestions = [
-  "What was our revenue growth last quarter?",
-  "Show me customer acquisition trends",
-  "Compare sales performance by region",
-  "Which products have highest margins?",
-];
-
 export function AskVizAIView() {
   const [query, setQuery] = useState("");
   const [hasResults, setHasResults] = useState(false);
@@ -105,28 +98,6 @@ export function AskVizAIView() {
                 </Button>
               </div>
             </Card>
-
-            {/* Suggested Questions */}
-            <div className="mt-8">
-              <p className="text-sm text-muted-foreground mb-4 text-center">Try asking:</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {suggestedQuestions.map((question, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      setQuery(question);
-                      // Refocus input after selecting suggested question
-                      setTimeout(() => {
-                        inputRef.current?.focus();
-                      }, 100);
-                    }}
-                    className="p-4 rounded-xl border border-border hover:border-accent hover:bg-accent/5 transition-all text-left text-sm text-foreground"
-                  >
-                    {question}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       ) : (
