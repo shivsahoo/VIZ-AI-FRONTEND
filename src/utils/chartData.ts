@@ -7,6 +7,12 @@ export interface ChartDataConfig {
   xAxisKey: string;
 }
 
+/** Optional axis column names from execute-query metadata or saved chart config. */
+export interface InferChartDataOptions {
+  xAxisHint?: string | null;
+  yAxisHint?: string | null;
+}
+
 export const getDefaultChartDataConfig = (): ChartDataConfig => ({
   data: [],
   dataKeys: { primary: "value" },
@@ -15,7 +21,8 @@ export const getDefaultChartDataConfig = (): ChartDataConfig => ({
 
 export const inferChartDataConfig = (
   rawData: any[] | undefined,
-  chartType: "line" | "bar" | "pie" | "area"
+  chartType: "line" | "bar" | "pie" | "area",
+  options?: InferChartDataOptions
 ): ChartDataConfig => {
   if (!rawData || rawData.length === 0) {
     return getDefaultChartDataConfig();
@@ -168,6 +175,16 @@ export const inferChartDataConfig = (
 
   if (!potentialXAxisKey) {
     potentialXAxisKey = "index";
+  }
+
+  const hintX = options?.xAxisHint?.trim();
+  const hintY = options?.yAxisHint?.trim();
+  if (hintY && keys.includes(hintY)) {
+    primaryKey = hintY;
+  }
+  secondaryKey = numericKeys.find((key) => key !== primaryKey);
+  if (hintX && keys.includes(hintX)) {
+    potentialXAxisKey = hintX;
   }
 
   // Handle case where there are NO numeric columns at all

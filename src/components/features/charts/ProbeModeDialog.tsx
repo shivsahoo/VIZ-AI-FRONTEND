@@ -208,7 +208,10 @@ export function ProbeModeDialog({
                   "bar" | "line" | "pie" | "area";
                 const config =
                   res.success && res.data
-                    ? inferChartDataConfig(res.data.data, resolvedType)
+                    ? inferChartDataConfig(res.data.data, resolvedType, {
+                        xAxisHint: res.data.metadata?.xAxis ?? null,
+                        yAxisHint: res.data.metadata?.yAxis ?? null,
+                      })
                     : getDefaultChartDataConfig();
 
                 setMessages((prev) =>

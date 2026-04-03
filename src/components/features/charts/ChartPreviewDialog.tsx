@@ -233,12 +233,34 @@ export function ChartPreviewDialog({
       setChartDataError(undefined);
 
       try {
-        const response = await getChartData(chart.id ?? "preview", databaseId, chart.query!);
+        const response = await getChartData(
+          chart.id ?? "preview",
+          databaseId,
+          chart.query!,
+          undefined,
+          undefined,
+          false,
+          {
+            xAxis: chart.xAxisField ?? chart.spec?.x_axis ?? null,
+            yAxis: chart.yAxisField ?? chart.spec?.y_axis ?? null,
+          }
+        );
 
         if (cancelled) return;
 
         if (response.success && response.data) {
-          const config = inferChartDataConfig(response.data.data, chart.type as any);
+          const config = inferChartDataConfig(response.data.data, chart.type as any, {
+            xAxisHint:
+              response.data.metadata?.xAxis ??
+              chart.xAxisField ??
+              chart.spec?.x_axis ??
+              null,
+            yAxisHint:
+              response.data.metadata?.yAxis ??
+              chart.yAxisField ??
+              chart.spec?.y_axis ??
+              null,
+          });
           setChartDataConfig(config);
           setChartDataMetadata(response.data.metadata);
           setChartDataError(undefined);
