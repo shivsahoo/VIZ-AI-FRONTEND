@@ -257,7 +257,11 @@ const getDefaultChartDataConfig = (): ChartDataConfig => ({
   xAxisKey: 'label',
 });
 
-const inferChartDataConfig = (rawData: any[] | undefined, chartType: Chart['type']): ChartDataConfig => {
+const inferChartDataConfig = (
+  rawData: any[] | undefined,
+  chartType: Chart['type'],
+  options?: { xAxisHint?: string | null; yAxisHint?: string | null }
+): ChartDataConfig => {
   if (!rawData || rawData.length === 0) {
     return getDefaultChartDataConfig();
   }
@@ -293,6 +297,16 @@ const inferChartDataConfig = (rawData: any[] | undefined, chartType: Chart['type
 
   if (!potentialXAxisKey) {
     potentialXAxisKey = 'index';
+  }
+
+  const hintX = options?.xAxisHint?.trim();
+  const hintY = options?.yAxisHint?.trim();
+  if (hintY && keys.includes(hintY)) {
+    primaryKey = hintY;
+  }
+  secondaryKey = numericKeys.find((key) => key !== primaryKey);
+  if (hintX && keys.includes(hintX)) {
+    potentialXAxisKey = hintX;
   }
 
   // Handle case where there are NO numeric columns at all (backend sends string data)
@@ -1065,7 +1079,12 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       fetchChartDataForChart(chart);
     }
 
-    const preparedData = status?.data ? inferChartDataConfig(status.data, chart.type) : undefined;
+    const preparedData = status?.data
+      ? inferChartDataConfig(status.data, chart.type, {
+          xAxisHint: status.metadata?.xAxis ?? null,
+          yAxisHint: status.metadata?.yAxis ?? null,
+        })
+      : undefined;
 
     // Find which dashboards this chart belongs to - use current dashboards state
     const chartDashboards = chart.dashboardId 
@@ -1315,7 +1334,12 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     const chartKey = String(chart.id);
     const status = chartDataStatus[chartKey];
     const hasQueryAndConnection = Boolean(chart.query && chart.databaseId);
-    const preparedData = status?.data ? inferChartDataConfig(status.data, chart.type) : getDefaultChartDataConfig();
+    const preparedData = status?.data
+      ? inferChartDataConfig(status.data, chart.type, {
+          xAxisHint: status.metadata?.xAxis ?? null,
+          yAxisHint: status.metadata?.yAxis ?? null,
+        })
+      : getDefaultChartDataConfig();
     const isLoading = status ? status.loading : hasQueryAndConnection;
     const error = status?.error;
 

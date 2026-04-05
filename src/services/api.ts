@@ -1035,6 +1035,12 @@ export interface ChartData {
   };
 }
 
+/** Pass-through to execute-query so the backend returns full tabular rows with optional axis hints. */
+export interface ChartDataAxisHints {
+  xAxis?: string | null;
+  yAxis?: string | null;
+}
+
 /**
  * Get charts for a project
  */
@@ -1329,7 +1335,8 @@ export const getChartData = async (
   query: string,
   fromDate?: string,
   toDate?: string,
-  bypassCache: boolean = false
+  bypassCache: boolean = false,
+  axisHints?: ChartDataAxisHints | null
 ): Promise<ApiResponse<ChartData>> => {
   // Import cache utilities
   const { getCachedChartData, setCachedChartData, clearChartCache } = await import('../utils/chartDataCache');
@@ -1349,8 +1356,16 @@ export const getChartData = async (
   }
   
   try {
-    const requestBody: { query: string; from_date?: string; to_date?: string } = {
+    const requestBody: {
+      query: string;
+      from_date?: string;
+      to_date?: string;
+      response_format: 'tabular' | 'legacy';
+      x_axis?: string | null;
+      y_axis?: string | null;
+    } = {
       query: query,
+      response_format: 'tabular',
     };
     
     if (fromDate) {
@@ -1358,6 +1373,14 @@ export const getChartData = async (
     }
     if (toDate) {
       requestBody.to_date = toDate;
+    }
+    const xHint = axisHints?.xAxis?.trim();
+    const yHint = axisHints?.yAxis?.trim();
+    if (xHint) {
+      requestBody.x_axis = xHint;
+    }
+    if (yHint) {
+      requestBody.y_axis = yHint;
     }
     
     const response = await apiRequest<{

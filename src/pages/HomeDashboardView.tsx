@@ -150,7 +150,10 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     try {
       const response = await getChartData(chartKey, chart.databaseId!, chart.query!);
       if (response.success && response.data) {
-        const config = inferChartDataConfig(response.data.data, chart.chartType);
+        const config = inferChartDataConfig(response.data.data, chart.chartType, {
+          xAxisHint: response.data.metadata?.xAxis ?? null,
+          yAxisHint: response.data.metadata?.yAxis ?? null,
+        });
         setFavoriteChartDataStatus((prev) => ({
           ...prev,
           [chartKey]: {

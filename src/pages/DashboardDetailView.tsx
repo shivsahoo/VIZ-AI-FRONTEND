@@ -177,7 +177,9 @@ export function DashboardDetailView({
         chart.databaseConnectionId, 
         chart.query,
         fromDate,
-        toDate
+        toDate,
+        false,
+        { xAxis: chart.xAxis ?? null, yAxis: chart.yAxis ?? null }
       );
       if (response.success && response.data) {
         setCharts(prev => prev.map(c => 
@@ -508,7 +510,10 @@ export function DashboardDetailView({
 
     // Use inferChartDataConfig to properly identify data keys and x-axis
     // This ensures consistent behavior with ChartsView
-    const inferredConfig = inferChartDataConfig(chart.chartData.data, chart.type);
+    const inferredConfig = inferChartDataConfig(chart.chartData.data, chart.type, {
+      xAxisHint: chart.chartData?.metadata?.xAxis ?? chart.xAxis ?? null,
+      yAxisHint: chart.chartData?.metadata?.yAxis ?? chart.yAxis ?? null,
+    });
 
     // Override with explicit x_axis and y_axis from API if available (like DashboardDetailView used to do)
     const metadataYAxis = chart.chartData?.metadata?.yAxis;
