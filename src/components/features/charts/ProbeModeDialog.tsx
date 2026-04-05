@@ -175,6 +175,11 @@ export function ProbeModeDialog({
           const modifiedChartType: string | undefined = state.modified_chart_type ?? undefined;
           const modifiedSpec: Partial<ChartSpec> | undefined =
             state.modified_chart_spec ?? undefined;
+          // Rows executed by the LLM service — same as NL2SQL flow
+          const queryData: any[] | undefined =
+            Array.isArray(state.query_data) && state.query_data.length > 0
+              ? state.query_data
+              : undefined;
 
           // Show a visual preview when SQL changed OR when chart type changed
           const hasVisualChange =
@@ -190,60 +195,69 @@ export function ProbeModeDialog({
           };
 
           if (hasVisualChange) {
-            const sqlToRun = modifiedSql ?? chart.query ?? "";
-            newMsg.chartPreview = {
-              config: getDefaultChartDataConfig(),
-              spec: modifiedSpec ?? {},
-              isLoading: true,
-            };
+            const resolvedType = (modifiedChartType ?? (chart.type === "pie" ? "bar" : chart.type) ?? "bar") as
+              "bar" | "line" | "pie" | "area";
 
-            setMessages((prev) => [...prev, newMsg]);
+            if (queryData) {
+              // ── Fast path: LLM service already executed the query ──────────
+              newMsg.chartPreview = {
+                config: inferChartDataConfig(queryData, resolvedType),
+                spec: modifiedSpec ?? {},
+                isLoading: false,
+              };
+              setMessages((prev) => [...prev, newMsg]);
+            } else {
+              // ── Fallback: frontend fetches data (e.g. data_connection_id missing) ──
+              const sqlToRun = modifiedSql ?? chart.query ?? "";
+              newMsg.chartPreview = {
+                config: getDefaultChartDataConfig(),
+                spec: modifiedSpec ?? {},
+                isLoading: true,
+              };
+              setMessages((prev) => [...prev, newMsg]);
 
-            const connectionId = chart.dataConnectionId || chart.databaseId || "";
-
-            getChartData("probe-preview", connectionId, sqlToRun)
-              .then((res) => {
-                if (cancelled) return;
-                const resolvedType = (modifiedChartType ?? chart.type ?? "bar") as
-                  "bar" | "line" | "pie" | "area";
-                const config =
-                  res.success && res.data
-                    ? inferChartDataConfig(res.data.data, resolvedType)
-                    : getDefaultChartDataConfig();
-
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === newMsg.id
-                      ? {
-                          ...m,
-                          chartPreview: {
-                            config,
-                            spec: modifiedSpec ?? {},
-                            isLoading: false,
-                            error: res.success ? undefined : res.error?.message,
-                          },
-                        }
-                      : m
-                  )
-                );
-              })
-              .catch(() => {
-                if (cancelled) return;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === newMsg.id
-                      ? {
-                          ...m,
-                          chartPreview: {
-                            ...m.chartPreview!,
-                            isLoading: false,
-                            error: "Could not fetch preview data.",
-                          },
-                        }
-                      : m
-                  )
-                );
-              });
+              const connectionId = chart.dataConnectionId || chart.databaseId || "";
+              getChartData("probe-preview", connectionId, sqlToRun)
+                .then((res) => {
+                  if (cancelled) return;
+                  const config =
+                    res.success && res.data
+                      ? inferChartDataConfig(res.data.data, resolvedType)
+                      : getDefaultChartDataConfig();
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === newMsg.id
+                        ? {
+                            ...m,
+                            chartPreview: {
+                              config,
+                              spec: modifiedSpec ?? {},
+                              isLoading: false,
+                              error: res.success ? undefined : res.error?.message,
+                            },
+                          }
+                        : m
+                    )
+                  );
+                })
+                .catch(() => {
+                  if (cancelled) return;
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === newMsg.id
+                        ? {
+                            ...m,
+                            chartPreview: {
+                              ...m.chartPreview!,
+                              isLoading: false,
+                              error: "Could not fetch preview data.",
+                            },
+                          }
+                        : m
+                    )
+                  );
+                });
+            }
           } else {
             setMessages((prev) => [...prev, newMsg]);
           }
@@ -297,24 +311,28 @@ export function ProbeModeDialog({
     setInput("");
     setIsLoading(true);
 
+    const connectionId = chart?.dataConnectionId || chart?.databaseId || "";
+
     if (isFirstMessageRef.current) {
       isFirstMessageRef.current = false;
       wsRef.current.probeMode({
         user_message: trimmed,
         is_first_message: true,
+        data_connection_id: connectionId,
         original_query: chart?.query ?? "",
         original_chart_title: chart?.name ?? "",
         original_chart_type: chart?.type ?? "bar",
         original_chart_spec: chart?.spec,
-        data_connection_id: chart?.dataConnectionId || chart?.databaseId || "",
         db_schema: chart?.db_schema ?? "",
         db_type: (chart?.db_type ?? "postgres") as
           | "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce",
       });
     } else {
+      // Always send data_connection_id so the backend can execute the query
       wsRef.current.probeMode({
         user_message: trimmed,
         is_first_message: false,
+        data_connection_id: connectionId,
       });
     }
   };

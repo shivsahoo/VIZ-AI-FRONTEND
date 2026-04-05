@@ -447,12 +447,13 @@ export class VizAIWebSocket {
   probeMode(payload: {
     user_message: string;
     is_first_message: boolean;
+    /** Always send so the backend can execute the query on every turn */
+    data_connection_id?: string;
     // Required only on the first turn:
     original_query?: string;
     original_chart_title?: string;
     original_chart_type?: string;
     original_chart_spec?: ChartSpec;
-    data_connection_id?: string;
     db_schema?: string;
     db_type?: 'mysql' | 'postgres' | 'sqlite' | 'oracledb' | 'salesforce';
   }): void {
