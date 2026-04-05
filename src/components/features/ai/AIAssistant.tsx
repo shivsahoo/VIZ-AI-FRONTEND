@@ -163,7 +163,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
   const [userId, setUserId] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [dynamicSuggestions, setDynamicSuggestions] = useState<string[]>([]);
   const chartRequestRef = useRef<ChartCreationRequestPayload | null>(null);
   const [isAwaitingClarification, setIsAwaitingClarification] = useState(false);
   const [chartWorkflowState, setChartWorkflowState] = useState<Record<string, any> | null>(storeChartWorkflowState);
@@ -403,14 +402,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         };
       });
 
-      if (clarityQs.length === 0 && suggestions.length > 0) {
-        const qs = suggestions
-          .map(s => s.name || s.description || '')
-          .filter(Boolean)
-          .slice(0, 3);
-        if (qs.length > 0) setDynamicSuggestions(qs);
-      }
-
       const contentMessage =
         message ||
         `I've analyzed your request and generated ${suggestions.length} chart suggestion${suggestions.length > 1 ? 's' : ''}.`;
@@ -434,9 +425,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       const clarityQs = Array.isArray(response.state?.clarity_questions)
         ? (response.state?.clarity_questions as string[])
         : [];
-      if (clarityQs.length > 0) {
-        setDynamicSuggestions(clarityQs.slice(0, 3));
-      }
 
       if (response.status === 'collecting') {
         setIsGenerating(false);
@@ -1081,14 +1069,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     return { hasQuestions: true, parts };
   };
 
-  const suggestions = dynamicSuggestions.length > 0
-    ? dynamicSuggestions
-    : [
-      "I want reports on finance data for last financial year",
-      "Show me sales trends for Q4",
-      "Customer demographics breakdown"
-    ];
-
   const handleGetStarted = () => {
     setShowWelcomeScreen(false);
     setShowDatabaseSelection(true);
@@ -1392,26 +1372,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                   <Sparkles className="w-5 h-5" />
                   Let AI Generate Charts
                 </Button>
-              </div>
-            )}
-
-            {messages.length <= 4 && selectedDatabase && !messages.some(m => m.type === 'chart-suggestions') && !editingChart && dynamicSuggestions.length > 0 && (
-              <div className="space-y-2 pt-4">
-                <p className="text-xs text-muted-foreground px-2">Try asking:</p>
-                {suggestions.map((suggestion, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      setInput(suggestion);
-                      setTimeout(() => {
-                        inputRef.current?.focus();
-                      }, 100);
-                    }}
-                    className="w-full text-left px-4 py-3 rounded-lg border border-border hover:border-accent hover:bg-accent/5 transition-all text-sm text-foreground"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
               </div>
             )}
           </div>
