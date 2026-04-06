@@ -175,11 +175,13 @@ export function ProbeModeDialog({
           const modifiedChartType: string | undefined = state.modified_chart_type ?? undefined;
           const modifiedSpec: Partial<ChartSpec> | undefined =
             state.modified_chart_spec ?? undefined;
-          // Rows executed by the LLM service — same as NL2SQL flow
+          // Rows + axis hints from the LLM service (tabular format)
           const queryData: any[] | undefined =
             Array.isArray(state.query_data) && state.query_data.length > 0
               ? state.query_data
               : undefined;
+          const queryXAxis: string | undefined = state.query_x_axis ?? undefined;
+          const queryYAxis: string | undefined = state.query_y_axis ?? undefined;
 
           // Show a visual preview when SQL changed OR when chart type changed
           const hasVisualChange =
@@ -194,6 +196,27 @@ export function ProbeModeDialog({
             modifiedChartType: hasVisualChange ? modifiedChartType : undefined,
           };
 
+          /** Build ChartDataConfig using axis hints when available, auto-detect otherwise */
+          const buildConfig = (rows: any[], type: "bar" | "line" | "pie" | "area", xHint?: string, yHint?: string) => {
+            if (!rows.length) return getDefaultChartDataConfig();
+            if (xHint && yHint) {
+              // Backend already detected the best axes — use them directly
+              if (type === "pie") {
+                return {
+                  data: rows.map((r) => ({ name: r[xHint] ?? "", value: Number(r[yHint]) || 0 })),
+                  dataKeys: { primary: "value" },
+                  xAxisKey: "name",
+                };
+              }
+              return {
+                data: rows,
+                dataKeys: { primary: yHint },
+                xAxisKey: xHint,
+              };
+            }
+            return inferChartDataConfig(rows, type);
+          };
+
           if (hasVisualChange) {
             const resolvedType = (modifiedChartType ?? (chart.type === "pie" ? "bar" : chart.type) ?? "bar") as
               "bar" | "line" | "pie" | "area";
@@ -201,13 +224,12 @@ export function ProbeModeDialog({
             if (queryData) {
               // ── Fast path: LLM service already executed the query ──────────
               newMsg.chartPreview = {
-                config: inferChartDataConfig(queryData, resolvedType),
+                config: buildConfig(queryData, resolvedType, queryXAxis, queryYAxis),
                 spec: modifiedSpec ?? {},
                 isLoading: false,
               };
               setMessages((prev) => [...prev, newMsg]);
             } else {
-              // ── Fallback: frontend fetches data (e.g. data_connection_id missing) ──
               const sqlToRun = modifiedSql ?? chart.query ?? "";
               newMsg.chartPreview = {
                 config: getDefaultChartDataConfig(),
@@ -217,12 +239,18 @@ export function ProbeModeDialog({
               setMessages((prev) => [...prev, newMsg]);
 
               const connectionId = chart.dataConnectionId || chart.databaseId || "";
-              getChartData("probe-preview", connectionId, sqlToRun)
+              // Send response_format=tabular so all columns are returned
+              getChartData("probe-preview", connectionId, sqlToRun, undefined, undefined, false)
                 .then((res) => {
                   if (cancelled) return;
                   const config =
                     res.success && res.data
-                      ? inferChartDataConfig(res.data.data, resolvedType)
+                      ? buildConfig(
+                          res.data.data,
+                          resolvedType,
+                          res.data.metadata?.xAxis ?? undefined,
+                          res.data.metadata?.yAxis ?? undefined,
+                        )
                       : getDefaultChartDataConfig();
                   setMessages((prev) =>
                     prev.map((m) =>
