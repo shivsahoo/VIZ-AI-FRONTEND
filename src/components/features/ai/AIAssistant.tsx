@@ -1471,7 +1471,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
           onClose={() => setProbeModeChart(null)}
           chart={probeModeChart as any}
           dashboards={dashboards}
-          projectId={projectId}
         />
       )}
 

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Send, Loader2, Bot, User, CheckCircle2, X, Microscope, LayoutDashboard, ChevronDown } from "lucide-react";
+import { Send, Loader2, Bot, User, CheckCircle2, X, Microscope, LayoutDashboard, ChevronDown, Code2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,10 +19,9 @@ import { GradientButton } from "../../shared/GradientButton";
 import { Badge } from "../../ui/badge";
 import { ChartCard } from "./ChartCard";
 import { toast } from "sonner";
-import { getChartData, addChartToDashboard } from "../../../services/api";
+import { getChartData, addChartToDashboard, getCurrentUser } from "../../../services/api";
 import { inferChartDataConfig, getDefaultChartDataConfig, type ChartDataConfig } from "../../../utils/chartData";
 import { VizAIWebSocket, type ChartSpec } from "../../../services/websocket";
-import { getCurrentUser } from "../../../services/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,8 +62,47 @@ interface ProbeModeDialogProps {
   } | null;
   /** Available dashboards for "Save to Dashboard" */
   dashboards?: Array<{ id: string | number; name: string }>;
-  projectId?: string | number;
   onApplyChanges?: (modifiedSql: string, modifiedSpec?: Partial<ChartSpec>) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Collapsible SQL preview (collapsed by default per message)
+// ---------------------------------------------------------------------------
+
+function CollapsibleModifiedQuery({ sql }: { sql: string }) {
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <div className="border-b border-border">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-muted/40">
+        <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 min-w-0">
+          <Code2 className="w-3.5 h-3.5 shrink-0 opacity-70" />
+          <span className="truncate">Generated query</span>
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs shrink-0 gap-1 px-2.5"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          {open ? "Hide" : "Expand"}
+          <ChevronDown
+            className={`w-3.5 h-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+            aria-hidden
+          />
+        </Button>
+      </div>
+      {open ? (
+        <div className="px-3 py-2">
+          <pre className="text-xs text-foreground/80 bg-muted/50 rounded-lg p-2 overflow-x-auto overflow-y-auto whitespace-pre-wrap max-h-56 border border-border/60">
+            <code>{sql}</code>
+          </pre>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +143,6 @@ export function ProbeModeDialog({
   onClose,
   chart,
   dashboards = [],
-  projectId: _projectId,
   onApplyChanges: _onApplyChanges,
 }: ProbeModeDialogProps) {
   const [messages, setMessages] = React.useState<ProbeMessage[]>([]);
@@ -429,12 +466,16 @@ export function ProbeModeDialog({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
-        className="!w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] sm:!w-[90vw] sm:!max-w-[90vw] md:!max-w-2xl lg:!max-w-3xl p-0 gap-0"
+        className="!max-w-none border-primary/15 p-0 gap-0 ring-1 ring-primary/25"
         style={{
-          height: "90vh",
+          height: "72vh",
+          width: "min(88vw, 1280px)",
+          maxWidth: "min(88vw, 1280px)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
+          boxShadow:
+            "0 0 0 1px color-mix(in oklab, var(--primary) 22%, transparent), 0 24px 48px -12px rgb(0 0 0 / 0.45), 0 0 56px -8px color-mix(in oklab, var(--primary) 38%, transparent)",
         }}
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
@@ -525,18 +566,7 @@ export function ProbeModeDialog({
                   {/* Chart preview */}
                   {msg.role === "assistant" && msg.modifiedSql && (
                     <div className="w-full rounded-xl border border-border bg-background/60 overflow-hidden">
-                      <div className="px-3 py-2 border-b border-border bg-muted/40">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          Modified Query Preview
-                        </p>
-                      </div>
-
-                      {/* SQL pill */}
-                      <div className="px-3 py-2 border-b border-border">
-                        <pre className="text-xs text-foreground/80 bg-muted/50 rounded-lg p-2 overflow-x-auto whitespace-pre-wrap max-h-24">
-                          <code>{msg.modifiedSql}</code>
-                        </pre>
-                      </div>
+                      <CollapsibleModifiedQuery sql={msg.modifiedSql} />
 
                       {/* Chart — use bar for modified SQL previews unless an explicit
                           chart-type was requested; pie with 50+ slices is unreadable */}
@@ -624,6 +654,7 @@ export function ProbeModeDialog({
                               variant="ghost"
                               size="sm"
                               className="text-xs h-7 text-muted-foreground"
+                              disabled={!!savingMap[msg.id]}
                               onClick={() =>
                                 setMessages((prev) =>
                                   prev.map((m) =>
@@ -666,7 +697,7 @@ export function ProbeModeDialog({
 
         {/* ── Input (always pinned to bottom) ───────────────────────────── */}
         <div
-          className="border-t border-border px-4 py-3 bg-background"
+          className="border-t border-border px-4 py-2 bg-background"
           style={{ flexShrink: 0 }}
         >
           <div className="flex items-end gap-2">
@@ -682,24 +713,25 @@ export function ProbeModeDialog({
               }
               disabled={isConnecting || isLoading}
               rows={1}
-              className="flex-1 resize-none rounded-xl border border-border bg-muted/40 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 min-h-[38px] max-h-[120px] leading-snug"
-              style={{ height: "38px" }}
+              className="flex-1 resize-none rounded-xl border border-border bg-muted/40 px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 min-h-[34px] max-h-[72px] leading-snug"
+              style={{ height: "34px" }}
               onInput={(e) => {
                 const t = e.target as HTMLTextAreaElement;
-                t.style.height = "38px";
-                t.style.height = `${Math.min(t.scrollHeight, 120)}px`;
+                const cap = 72;
+                t.style.height = "34px";
+                t.style.height = `${Math.min(t.scrollHeight, cap)}px`;
               }}
             />
             <GradientButton
               size="sm"
-              className="h-[38px] w-[38px] p-0 flex-shrink-0 rounded-xl"
+              className="h-[34px] w-[34px] p-0 flex-shrink-0 rounded-xl"
               onClick={handleSend}
               disabled={!canSend}
             >
               <Send className="w-4 h-4" />
             </GradientButton>
           </div>
-          <p className="text-xs text-muted-foreground mt-1.5 px-1">
+          <p className="text-xs text-muted-foreground mt-1 px-1">
             Shift + Enter for new line
           </p>
         </div>
