@@ -1,4 +1,4 @@
-import { Plus, ChevronDown, LayoutDashboard, Clock, Loader2, MessageSquare, Sparkles } from "lucide-react";
+import { Plus, ChevronDown, LayoutDashboard, Clock, Loader2, MessageSquare, Sparkles, Microscope } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -60,6 +60,8 @@ interface ChartPreviewDialogProps {
   onAddToDashboard?: (dashboardId: number | string) => void;
   onSaveAsDraft?: (savedChart?: SavedChart) => void;
   onGenerateCharts?: () => void; // <--- NEW PROP for the button
+  /** When set, shows Probe Mode in the preview footer (e.g. AI Assistant) */
+  onOpenProbeMode?: () => void;
   isExistingChart?: boolean;
   chartStatus?: 'draft' | 'published';
 }
@@ -73,6 +75,7 @@ export function ChartPreviewDialog({
   onAddToDashboard, 
   onSaveAsDraft, 
   onGenerateCharts, 
+  onOpenProbeMode,
   isExistingChart = false, 
   chartStatus: _chartStatus 
 }: ChartPreviewDialogProps) {
@@ -660,22 +663,33 @@ export function ChartPreviewDialog({
             </GradientButton>
           </div>
         ) : (
-          <div className="flex flex-row items-stretch gap-2 pt-2 border-t border-border px-3 sm:px-4 md:px-5 pb-3 sm:pb-4 md:pb-5 bg-background flex-shrink-0 sticky bottom-0">
+          <div className="flex flex-row flex-wrap items-stretch gap-2 pt-2 border-t border-border px-3 sm:px-4 md:px-5 pb-3 sm:pb-4 md:pb-5 bg-background flex-shrink-0 sticky bottom-0">
             {!isExistingChart && (
               <Button
                 variant="outline"
                 onClick={handleSaveAsDraft}
                 disabled={isSavingDraft}
-                className="flex-1 text-xs sm:text-sm h-8 sm:h-9"
+                className="flex-1 min-w-[7rem] text-xs sm:text-sm h-8 sm:h-9"
               >
                 {isSavingDraft ? "Saving..." : "Save for later"}
               </Button>
+            )}
+
+            {onOpenProbeMode && hasQuery && (
+              <GradientButton
+                type="button"
+                onClick={() => onOpenProbeMode()}
+                className="gap-1.5 flex-1 min-w-[7rem] text-xs sm:text-sm h-8 sm:h-9 shadow-md glow hover:shadow-xl transition-all"
+              >
+                <Microscope className="w-3.5 h-3.5 shrink-0" />
+                Probe Mode
+              </GradientButton>
             )}
             
             <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
               <DropdownMenuTrigger asChild>
                 <GradientButton 
-                  className="gap-1.5 flex-1 text-xs sm:text-sm h-8 sm:h-9"
+                  className="gap-1.5 flex-1 min-w-[10rem] text-xs sm:text-sm h-8 sm:h-9"
                   disabled={isAddingToDashboard}
                 >
                   {isAddingToDashboard ? (

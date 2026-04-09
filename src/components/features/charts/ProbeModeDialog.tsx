@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Send, Loader2, Bot, User, CheckCircle2, X, Microscope, LayoutDashboard, ChevronDown, Code2 } from "lucide-react";
+import { Send, Loader2, Bot, User, CheckCircle2, Microscope, LayoutDashboard, ChevronDown, Code2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,13 @@ import { GradientButton } from "../../shared/GradientButton";
 import { Badge } from "../../ui/badge";
 import { ChartCard } from "./ChartCard";
 import { toast } from "sonner";
-import { getChartData, addChartToDashboard, getCurrentUser } from "../../../services/api";
+import {
+  getChartData,
+  addChartToDashboard,
+  createChart,
+  getCurrentUser,
+  type Chart as SavedChart,
+} from "../../../services/api";
 import { inferChartDataConfig, getDefaultChartDataConfig, type ChartDataConfig } from "../../../utils/chartData";
 import { VizAIWebSocket, type ChartSpec } from "../../../services/websocket";
 
@@ -46,6 +52,8 @@ interface ProbeMessage {
   previewChartType?: "bar" | "line" | "pie" | "area";
   /** Name of dashboard this was saved to */
   savedToDashboard?: string;
+  /** User saved this variant as a project draft */
+  savedAsDraft?: boolean;
 }
 
 interface ProbeModeDialogProps {
@@ -64,6 +72,9 @@ interface ProbeModeDialogProps {
   } | null;
   /** Available dashboards for "Save to Dashboard" */
   dashboards?: Array<{ id: string | number; name: string }>;
+  /** Required for "Save for later" (same as chart preview flow) */
+  projectId?: string | number;
+  onSaveAsDraft?: (savedChart?: SavedChart) => void;
   onApplyChanges?: (modifiedSql: string, modifiedSpec?: Partial<ChartSpec>) => void;
 }
 
@@ -145,6 +156,8 @@ export function ProbeModeDialog({
   onClose,
   chart,
   dashboards = [],
+  projectId,
+  onSaveAsDraft,
   onApplyChanges: _onApplyChanges,
 }: ProbeModeDialogProps) {
   const [messages, setMessages] = React.useState<ProbeMessage[]>([]);
@@ -153,6 +166,7 @@ export function ProbeModeDialog({
   const [isConnecting, setIsConnecting] = React.useState(false);
   // Tracks which message is currently being saved (msgId → true)
   const [savingMap, setSavingMap] = React.useState<Record<number, boolean>>({});
+  const [draftSavingMap, setDraftSavingMap] = React.useState<Record<number, boolean>>({});
 
   // Each probe session gets its own WS connection → its own LangGraph thread_id
   const wsRef = React.useRef<VizAIWebSocket | null>(null);
@@ -169,10 +183,10 @@ export function ProbeModeDialog({
     return messageIdRef.current;
   };
 
-  // Auto-scroll to latest message
+  // Auto-scroll to latest message or thinking indicator
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, isLoading]);
 
   // Establish a fresh WS connection every time the dialog opens
   React.useEffect(() => {
@@ -198,7 +212,6 @@ export function ProbeModeDialog({
 
         ws.on("probe_mode", (response) => {
           if (cancelled) return;
-          setIsLoading(false);
 
           const priorSql = workingSqlRef.current;
           const priorChartType = workingChartTypeRef.current;
@@ -212,6 +225,7 @@ export function ProbeModeDialog({
                 content: response.error || response.message || "Something went wrong.",
               },
             ]);
+            setIsLoading(false);
             return;
           }
 
@@ -235,10 +249,17 @@ export function ProbeModeDialog({
             (responseType === "modify_query" && modifiedSql) ||
             (responseType === "modify_chart_type" && modifiedChartType);
 
+          const explanationTrimmed = explanation.trim();
+          const assistantText =
+            explanationTrimmed ||
+            (hasVisualChange
+              ? "Here's an updated chart based on your request."
+              : "I've processed your request. Ask a follow-up if you'd like to go deeper.");
+
           const newMsg: ProbeMessage = {
             id: nextId(),
             role: "assistant",
-            content: explanation,
+            content: assistantText,
             modifiedSql: hasVisualChange
               ? (modifiedSql ?? priorSql) || chart.query || ""
               : undefined,
@@ -283,6 +304,7 @@ export function ProbeModeDialog({
                 isLoading: false,
               };
               setMessages((prev) => [...prev, newMsg]);
+              setIsLoading(false);
             } else {
               const sqlToRun = modifiedSql ?? priorSql ?? chart.query ?? "";
               newMsg.chartPreview = {
@@ -291,6 +313,7 @@ export function ProbeModeDialog({
                 isLoading: true,
               };
               setMessages((prev) => [...prev, newMsg]);
+              setIsLoading(false);
 
               const connectionId = chart.dataConnectionId || chart.databaseId || "";
               // Send response_format=tabular so all columns are returned
@@ -342,6 +365,7 @@ export function ProbeModeDialog({
             }
           } else {
             setMessages((prev) => [...prev, newMsg]);
+            setIsLoading(false);
           }
 
           if (response.status !== "error") {
@@ -483,6 +507,77 @@ export function ProbeModeDialog({
     }
   };
 
+  const handleSaveAsDraft = async (msg: ProbeMessage) => {
+    if (!chart || !msg.modifiedSql || !projectId) {
+      toast.error("Chart or project information is missing");
+      return;
+    }
+
+    const connectionId = chart.dataConnectionId || chart.databaseId || "";
+    if (!connectionId) {
+      toast.error("No database connection found for this chart.");
+      return;
+    }
+
+    if (draftSavingMap[msg.id]) return;
+
+    const chartType = (msg.previewChartType ??
+      msg.modifiedChartType ??
+      chart.type ??
+      "bar") as "line" | "bar" | "pie" | "area";
+
+    const xAxis =
+      msg.chartPreview?.config.xAxisKey ??
+      msg.chartPreview?.spec?.x_axis ??
+      undefined;
+    const yAxis =
+      msg.chartPreview?.config.dataKeys?.primary ??
+      msg.chartPreview?.spec?.y_axis ??
+      undefined;
+
+    const isTimeBased =
+      chart.spec?.type === "time_series"
+        ? true
+        : chart.spec?.type === "aggregate"
+          ? false
+          : msg.chartPreview?.spec?.type === "time_series"
+            ? true
+            : msg.chartPreview?.spec?.type === "aggregate"
+              ? false
+              : chart.spec?.is_time_based ?? false;
+
+    setDraftSavingMap((prev) => ({ ...prev, [msg.id]: true }));
+    try {
+      const response = await createChart(String(projectId), {
+        name: chart.name,
+        type: chartType,
+        query: msg.modifiedSql,
+        databaseId: connectionId,
+        is_time_based: isTimeBased,
+        config: {
+          xAxis: xAxis || undefined,
+          yAxis: yAxis || undefined,
+        },
+      });
+
+      if (response.success && response.data) {
+        toast.success(`Chart "${chart.name}" saved as draft!`);
+        onSaveAsDraft?.(response.data);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msg.id ? { ...m, savedAsDraft: true } : m))
+        );
+      } else {
+        toast.error(response.error?.message || "Failed to save chart as draft");
+      }
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "An error occurred while saving the chart.";
+      toast.error(message);
+    } finally {
+      setDraftSavingMap((prev) => ({ ...prev, [msg.id]: false }));
+    }
+  };
+
   if (!chart) return null;
 
   const canSend =
@@ -583,12 +678,18 @@ export function ProbeModeDialog({
                   >
                     {msg.role === "user"
                       ? msg.content
-                      : msg.content.split("\n").map((line, li) => (
-                          <React.Fragment key={li}>
-                            {li > 0 && <br />}
-                            {renderMarkdown(line)}
-                          </React.Fragment>
-                        ))}
+                      : (msg.content.trim()
+                          ? msg.content.split("\n").map((line, li) => (
+                              <React.Fragment key={li}>
+                                {li > 0 && <br />}
+                                {renderMarkdown(line)}
+                              </React.Fragment>
+                            ))
+                          : (
+                              <span className="text-muted-foreground italic text-xs">
+                                (No text reply — see chart or query below if shown.)
+                              </span>
+                            ))}
                   </div>
 
                   {/* Chart preview */}
@@ -627,7 +728,7 @@ export function ProbeModeDialog({
                         )}
                       </div>
 
-                      {/* Save to Dashboard */}
+                      {/* Save for later + Save to Dashboard (same pattern as chart preview) */}
                       <div className="px-3 pb-3 pt-1">
                         {msg.savedToDashboard ? (
                           <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
@@ -635,17 +736,46 @@ export function ProbeModeDialog({
                             Saved to &ldquo;{msg.savedToDashboard}&rdquo;
                           </div>
                         ) : (
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-2 items-center">
+                            {msg.savedAsDraft && (
+                              <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 w-full sm:w-auto">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Saved as draft
+                              </div>
+                            )}
+                            {projectId && !msg.savedAsDraft && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-xs h-7 flex-1 min-w-[7rem] sm:flex-initial"
+                                disabled={
+                                  !!msg.chartPreview?.isLoading ||
+                                  !!savingMap[msg.id] ||
+                                  !!draftSavingMap[msg.id]
+                                }
+                                onClick={() => handleSaveAsDraft(msg)}
+                              >
+                                {draftSavingMap[msg.id] ? (
+                                  <span className="flex items-center gap-1.5">
+                                    <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                                    Saving...
+                                  </span>
+                                ) : (
+                                  "Save for later"
+                                )}
+                              </Button>
+                            )}
                             {dashboards.length > 0 ? (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <GradientButton
                                     size="sm"
-                                    className="text-xs h-7 gap-1.5"
+                                    className="text-xs h-7 gap-1.5 flex-1 min-w-[9rem] sm:flex-initial"
                                     disabled={
                                       !!msg.chartPreview?.isLoading ||
                                       !!msg.chartPreview?.error ||
-                                      !!savingMap[msg.id]
+                                      !!savingMap[msg.id] ||
+                                      !!draftSavingMap[msg.id]
                                     }
                                   >
                                     {savingMap[msg.id] ? (
@@ -681,24 +811,6 @@ export function ProbeModeDialog({
                                 No dashboards available
                               </span>
                             )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-xs h-7 text-muted-foreground"
-                              disabled={!!savingMap[msg.id]}
-                              onClick={() =>
-                                setMessages((prev) =>
-                                  prev.map((m) =>
-                                    m.id === msg.id
-                                      ? { ...m, modifiedSql: undefined, chartPreview: undefined }
-                                      : m
-                                  )
-                                )
-                              }
-                            >
-                              <X className="w-3 h-3 mr-1" />
-                              Discard
-                            </Button>
                           </div>
                         )}
                       </div>
@@ -708,16 +820,37 @@ export function ProbeModeDialog({
               </div>
             ))}
 
-            {/* Typing indicator */}
-            {isLoading && (
-              <div className="flex gap-2.5">
-                <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+            {/* Thinking / typing indicator while the model responds */}
+            {isLoading && !isConnecting && (
+              <div className="flex gap-2.5" aria-live="polite" aria-busy="true">
+                <div className="w-6 h-6 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0 mt-0.5 ring-1 ring-primary/30 shadow-md glow">
                   <Bot className="w-3.5 h-3.5 text-primary" />
                 </div>
-                <div className="bg-muted rounded-xl rounded-tl-none px-3 py-2.5 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:0ms]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:150ms]" />
-                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:300ms]" />
+                <div className="rounded-xl rounded-tl-none border border-primary/30 bg-muted/85 px-3 py-2 shadow-md glow min-w-[6.5rem] transition-shadow duration-300">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="text-xs font-semibold tracking-tight text-foreground"
+                      style={{
+                        textShadow:
+                          "0 0 12px color-mix(in oklab, var(--primary) 55%, transparent), 0 0 20px color-mix(in oklab, var(--primary) 25%, transparent)",
+                      }}
+                    >
+                      Thinking
+                    </span>
+                    <span className="flex items-center gap-1 pl-0.5" aria-hidden>
+                      {[0, 1, 2].map((i) => (
+                        <span
+                          key={i}
+                          className="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--primary)_70%,transparent)] animate-bounce"
+                          style={{ animationDuration: "0.55s", animationDelay: `${i * 140}ms` }}
+                        />
+                      ))}
+                      <span
+                        className="ml-0.5 inline-block h-3 w-0.5 rounded-sm bg-primary shadow-[0_0_10px_color-mix(in_oklab,var(--primary)_80%,transparent)] animate-pulse"
+                        style={{ animationDuration: "0.9s" }}
+                      />
+                    </span>
+                  </div>
                 </div>
               </div>
             )}

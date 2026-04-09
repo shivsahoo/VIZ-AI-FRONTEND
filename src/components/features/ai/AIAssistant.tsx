@@ -997,6 +997,25 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     setPreviewChart(null);
   };
 
+  const handleProbeSaveAsDraft = (savedChart?: SavedChart) => {
+    if (!probeModeChart) return;
+    const selectedDb = availableDatabases.find(
+      (db) => db.value === selectedDatabase || db.id === selectedDatabase
+    );
+    if (!selectedDb?.id) {
+      toast.error("Database connection is required");
+      return;
+    }
+    onChartCreated?.({
+      id: savedChart?.id,
+      name: probeModeChart.name,
+      type: (savedChart?.type ?? probeModeChart.type) as "line" | "bar" | "pie" | "area",
+      dataSource: `Database ${selectedDb.id}`,
+      query: savedChart?.query ?? probeModeChart.query ?? "",
+      status: "draft",
+    });
+  };
+
   const handleAddChartToDashboard = (dashboardId: number | string) => {
     if (!previewChart) return;
 
@@ -1276,7 +1295,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                                         <GradientButton
                                           onClick={() => handleOpenProbeMode(suggestion)}
                                           size="sm"
-                                          className="gap-2"
+                                          className="gap-2 shadow-md glow hover:shadow-xl transition-all"
                                         >
                                           <Microscope className="w-3.5 h-3.5" />
                                           Probe Mode
@@ -1468,6 +1487,16 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         dashboards={dashboards}
         onAddToDashboard={handleAddChartToDashboard}
         onSaveAsDraft={handleSaveAsDraft}
+        onOpenProbeMode={
+          previewChart?.query?.trim()
+            ? () => {
+                const chartForProbe = previewChart;
+                if (!chartForProbe?.query?.trim()) return;
+                setPreviewChart(null);
+                handleOpenProbeMode(chartForProbe as ChartSuggestion);
+              }
+            : undefined
+        }
       />
 
       {/* Probe Mode — opens directly from the chart card, no preview step needed */}
@@ -1477,6 +1506,8 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
           onClose={() => setProbeModeChart(null)}
           chart={probeModeChart as any}
           dashboards={dashboards}
+          projectId={projectId}
+          onSaveAsDraft={handleProbeSaveAsDraft}
         />
       )}
 

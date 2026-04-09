@@ -1211,24 +1211,45 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
     }
 
     const response = await apiRequest<{
-      id: string;
-      title: string;
-      query: string;
-      chart_type: string;
+      id?: string;
+      chart_id?: string;
+      title?: string;
+      query?: string;
+      chart_type?: string;
+      message?: string;
     }>(`/api/v1/backend/projects/${projectId}/save-chart`, {
       method: 'POST',
       body: JSON.stringify(requestBody),
     });
 
+    const savedId = response.id ?? response.chart_id;
+    const savedTitle = response.title ?? (requestBody.title as string) ?? data.name ?? 'New Chart';
+    const savedQuery =
+      response.query !== undefined && response.query !== null
+        ? response.query
+        : (data.query ?? '');
+    const savedChartType = response.chart_type ?? (requestBody.chart_type as string) ?? data.type ?? 'line';
+
+    if (!savedId) {
+      return {
+        success: false,
+        error: {
+          code: 'CREATE_CHART_INVALID_RESPONSE',
+          message:
+            'Chart was saved but the server did not return a chart id. Refresh the page or update the backend.',
+        },
+      };
+    }
+
     return {
       success: true,
       data: {
-        id: response.id,
-        name: response.title,
-        type: mapChartType(response.chart_type),
+        id: savedId,
+        name: savedTitle,
+        type: mapChartType(savedChartType),
         projectId,
         databaseId: data.databaseId,
-        query: response.query,
+        query: savedQuery,
         config: {
           xAxis: data.config?.xAxis,
           yAxis: data.config?.yAxis,

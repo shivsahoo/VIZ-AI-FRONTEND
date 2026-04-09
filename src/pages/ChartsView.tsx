@@ -851,6 +851,13 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         const key = String(chart.id);
         if (combinedChartsMap.has(key)) {
           const existing = combinedChartsMap.get(key)!;
+          const mergedQuery =
+            chart.query?.trim()
+              ? chart.query
+              : existing.query?.trim()
+                ? existing.query
+                : chart.query ?? existing.query;
+          const mergedDatabaseId = chart.databaseId ?? existing.databaseId;
           combinedChartsMap.set(key, {
             ...existing,
             ...chart,
@@ -858,7 +865,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             lastUpdated: chart.lastUpdated || existing.lastUpdated,
             status: chart.status || existing.status,
             dataSource: chart.dataSource || existing.dataSource,
-            query: chart.query ?? existing.query,
+            databaseId: mergedDatabaseId,
+            query: mergedQuery,
             isGenerated: chart.isGenerated ?? existing.isGenerated,
             isFavorite: chart.isFavorite ?? existing.isFavorite,
             is_time_based: chart.is_time_based ?? existing.is_time_based ?? false,
