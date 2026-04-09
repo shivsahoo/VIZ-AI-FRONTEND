@@ -319,10 +319,9 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       return;
     }
 
-    if (wsClient) {
-      return;
-    }
-
+    // New VizAIWebSocket each time the panel opens → new connectionId / LangGraph thread_id.
+    // Same client (and ID) for all chart requests while the panel stays open so memory stays useful.
+    let cancelled = false;
     const client = new VizAIWebSocket(userId);
     setIsConnecting(true);
     setConnectionError(null);
@@ -538,18 +537,25 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
 
     client.connect()
       .then(() => {
-        setWsClient(client);
-        setIsConnecting(false);
+        if (!cancelled) {
+          setWsClient(client);
+          setIsConnecting(false);
+        }
       })
       .catch((error) => {
-        console.error('[AIAssistant] Failed to connect to WebSocket:', error);
-        setIsConnecting(false);
-        setConnectionError(error?.message || 'Failed to connect to AI assistant');
-        toast.error(error?.message || 'Failed to connect to AI assistant');
+        if (!cancelled) {
+          console.error('[AIAssistant] Failed to connect to WebSocket:', error);
+          setIsConnecting(false);
+          setConnectionError(error?.message || 'Failed to connect to AI assistant');
+          toast.error(error?.message || 'Failed to connect to AI assistant');
+        }
       });
 
     return () => {
-      console.log('[AIAssistant] Assistant closed - keeping WebSocket connection alive');
+      cancelled = true;
+      client.disconnect();
+      setWsClient(null);
+      setIsConnecting(false);
     };
   }, [isOpen, userId]);
 

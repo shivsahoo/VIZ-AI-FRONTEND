@@ -85,9 +85,10 @@ export class VizAIWebSocket {
     onOpen: [],
     onClose: [],
   };
-  // Unique ID for this connection instance — used as LangGraph thread_id on the backend.
-  // Generated once per VizAIWebSocket instance so each connection (including Probe Mode
-  // sessions) gets its own isolated memory thread.
+  // Unique ID for this WebSocket client instance — used as LangGraph thread_id on the backend.
+  // AI Assistant creates a new VizAIWebSocket whenever the chat panel opens, so each visit
+  // gets a fresh thread; all chart requests while the panel is open reuse this same ID so
+  // LangGraph memory stays coherent for that session. Probe Mode uses its own client/ID.
   readonly connectionId: string = crypto.randomUUID();
 
   constructor(userId: string) {
@@ -438,8 +439,9 @@ export class VizAIWebSocket {
    * 5. Probe Mode - Deep-dive conversational agent anchored to a single chart.
    *
    * Each probe session uses its own VizAIWebSocket instance, so its connectionId
-   * becomes an isolated LangGraph thread_id — no conversation history needs to be
-   * sent from the frontend; the backend manages memory via MemorySaver.
+   * becomes an isolated LangGraph thread_id. The backend still keeps chat memory,
+   * but you must send `current_working_sql` and `current_chart_type` on every turn
+   * so edits (e.g. sort) apply to the latest query/type, not a summarized old state.
    *
    * @param payload.is_first_message  Must be true on the very first turn so the
    *   backend can embed chart context into the agent's memory thread.
@@ -456,6 +458,12 @@ export class VizAIWebSocket {
     original_chart_spec?: ChartSpec;
     db_schema?: string;
     db_type?: 'mysql' | 'postgres' | 'sqlite' | 'oracledb' | 'salesforce';
+    /**
+     * Every turn: last executed SQL and chart type so the agent does not rely on
+     * summarized memory (fixes e.g. sort applied to an old line-chart query after a bar conversion).
+     */
+    current_working_sql?: string;
+    current_chart_type?: string;
   }): void {
     this.send({
       event_type: 'probe_mode',

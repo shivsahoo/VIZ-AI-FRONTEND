@@ -42,6 +42,8 @@ interface ProbeMessage {
     isLoading: boolean;
     error?: string;
   };
+  /** Resolved visualization type for this preview (kept when only SQL changes after a type switch) */
+  previewChartType?: "bar" | "line" | "pie" | "area";
   /** Name of dashboard this was saved to */
   savedToDashboard?: string;
 }
@@ -155,6 +157,9 @@ export function ProbeModeDialog({
   // Each probe session gets its own WS connection → its own LangGraph thread_id
   const wsRef = React.useRef<VizAIWebSocket | null>(null);
   const isFirstMessageRef = React.useRef(true);
+  /** Synced with the last successful probe result so follow-up turns send authoritative SQL/type to the backend */
+  const workingSqlRef = React.useRef("");
+  const workingChartTypeRef = React.useRef("bar");
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const messageIdRef = React.useRef(0);
@@ -180,6 +185,8 @@ export function ProbeModeDialog({
       setMessages([]);
       isFirstMessageRef.current = true;
       messageIdRef.current = 0;
+      workingSqlRef.current = chart?.query ?? "";
+      workingChartTypeRef.current = chart?.type ?? "bar";
 
       try {
         const userResp = await getCurrentUser();
@@ -192,6 +199,9 @@ export function ProbeModeDialog({
         ws.on("probe_mode", (response) => {
           if (cancelled) return;
           setIsLoading(false);
+
+          const priorSql = workingSqlRef.current;
+          const priorChartType = workingChartTypeRef.current;
 
           if (response.status === "error") {
             setMessages((prev) => [
@@ -229,7 +239,9 @@ export function ProbeModeDialog({
             id: nextId(),
             role: "assistant",
             content: explanation,
-            modifiedSql: hasVisualChange ? (modifiedSql ?? chart.query) : undefined,
+            modifiedSql: hasVisualChange
+              ? (modifiedSql ?? priorSql) || chart.query || ""
+              : undefined,
             modifiedChartType: hasVisualChange ? modifiedChartType : undefined,
           };
 
@@ -255,8 +267,13 @@ export function ProbeModeDialog({
           };
 
           if (hasVisualChange) {
-            const resolvedType = (modifiedChartType ?? (chart.type === "pie" ? "bar" : chart.type) ?? "bar") as
-              "bar" | "line" | "pie" | "area";
+            const resolvedType = (
+              modifiedChartType ??
+              (priorChartType === "pie" ? "bar" : priorChartType) ??
+              (chart.type === "pie" ? "bar" : chart.type) ??
+              "bar"
+            ) as "bar" | "line" | "pie" | "area";
+            newMsg.previewChartType = resolvedType;
 
             if (queryData) {
               // ── Fast path: LLM service already executed the query ──────────
@@ -267,7 +284,7 @@ export function ProbeModeDialog({
               };
               setMessages((prev) => [...prev, newMsg]);
             } else {
-              const sqlToRun = modifiedSql ?? chart.query ?? "";
+              const sqlToRun = modifiedSql ?? priorSql ?? chart.query ?? "";
               newMsg.chartPreview = {
                 config: getDefaultChartDataConfig(),
                 spec: modifiedSpec ?? {},
@@ -325,6 +342,11 @@ export function ProbeModeDialog({
             }
           } else {
             setMessages((prev) => [...prev, newMsg]);
+          }
+
+          if (response.status !== "error") {
+            if (modifiedSql) workingSqlRef.current = modifiedSql;
+            if (modifiedChartType) workingChartTypeRef.current = modifiedChartType;
           }
         });
 
@@ -391,6 +413,8 @@ export function ProbeModeDialog({
         db_schema: chart?.db_schema ?? "",
         db_type: (chart?.db_type ?? "postgres") as
           | "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce",
+        current_working_sql: workingSqlRef.current,
+        current_chart_type: workingChartTypeRef.current,
       });
     } else {
       // Always send data_connection_id so the backend can execute the query
@@ -398,6 +422,8 @@ export function ProbeModeDialog({
         user_message: trimmed,
         is_first_message: false,
         data_connection_id: connectionId,
+        current_working_sql: workingSqlRef.current,
+        current_chart_type: workingChartTypeRef.current,
       });
     }
   };
@@ -425,8 +451,10 @@ export function ProbeModeDialog({
     setSavingMap((prev) => ({ ...prev, [msg.id]: true }));
 
     try {
-      const chartType = (msg.modifiedChartType ?? chart.type ?? "bar") as
-        "line" | "bar" | "pie" | "area";
+      const chartType = (msg.previewChartType ??
+        msg.modifiedChartType ??
+        chart.type ??
+        "bar") as "line" | "bar" | "pie" | "area";
 
       const response = await addChartToDashboard({
         title: chart.name,
@@ -586,7 +614,10 @@ export function ProbeModeDialog({
                           </div>
                         ) : (
                           <ChartCard
-                            type={(msg.modifiedChartType ?? (chart.type === "pie" ? "bar" : chart.type) ?? "bar") as any}
+                            type={(msg.previewChartType ??
+                              msg.modifiedChartType ??
+                              (chart.type === "pie" ? "bar" : chart.type) ??
+                              "bar") as any}
                             data={msg.chartPreview!.config.data}
                             dataKeys={msg.chartPreview!.config.dataKeys}
                             xAxisKey={msg.chartPreview!.config.xAxisKey}
