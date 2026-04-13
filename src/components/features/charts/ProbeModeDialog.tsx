@@ -232,22 +232,27 @@ export function ProbeModeDialog({
           const state = response.state ?? {};
           const responseType: string = state.response_type ?? "conversational";
           const explanation: string = state.explanation || response.message || "";
-          const modifiedSql: string | undefined = state.modified_sql ?? undefined;
-          const modifiedChartType: string | undefined = state.modified_chart_type ?? undefined;
+          const modifiedSql: string | undefined =
+            (state.modified_sql ?? state.modifiedSql) ?? undefined;
+          const modifiedChartType: string | undefined =
+            (state.modified_chart_type ?? state.modifiedChartType) ?? undefined;
           const modifiedSpec: Partial<ChartSpec> | undefined =
-            state.modified_chart_spec ?? undefined;
+            (state.modified_chart_spec ?? state.modifiedChartSpec) ?? undefined;
           // Rows + axis hints from the LLM service (tabular format)
+          const rawRows = state.query_data ?? state.queryData;
           const queryData: any[] | undefined =
-            Array.isArray(state.query_data) && state.query_data.length > 0
-              ? state.query_data
-              : undefined;
-          const queryXAxis: string | undefined = state.query_x_axis ?? undefined;
-          const queryYAxis: string | undefined = state.query_y_axis ?? undefined;
+            Array.isArray(rawRows) && rawRows.length > 0 ? rawRows : undefined;
+          const queryXAxis: string | undefined =
+            (state.query_x_axis ?? state.queryXAxis) ?? undefined;
+          const queryYAxis: string | undefined =
+            (state.query_y_axis ?? state.queryYAxis) ?? undefined;
 
-          // Show a visual preview when SQL changed OR when chart type changed
+          // Show a visual preview when SQL/type changed, or when the server already returned rows
+          const hasQueryRows = Boolean(queryData?.length);
           const hasVisualChange =
             (responseType === "modify_query" && modifiedSql) ||
-            (responseType === "modify_chart_type" && modifiedChartType);
+            (responseType === "modify_chart_type" && modifiedChartType) ||
+            hasQueryRows;
 
           const explanationTrimmed = explanation.trim();
           const assistantText =
@@ -256,13 +261,18 @@ export function ProbeModeDialog({
               ? "Here's an updated chart based on your request."
               : "I've processed your request. Ask a follow-up if you'd like to go deeper.");
 
+          const sqlForPreview =
+            (modifiedSql ??
+              (typeof modifiedSpec?.query === "string" ? modifiedSpec.query : undefined) ??
+              priorSql) ||
+            chart.query ||
+            "";
+
           const newMsg: ProbeMessage = {
             id: nextId(),
             role: "assistant",
             content: assistantText,
-            modifiedSql: hasVisualChange
-              ? (modifiedSql ?? priorSql) || chart.query || ""
-              : undefined,
+            modifiedSql: hasVisualChange ? sqlForPreview : undefined,
             modifiedChartType: hasVisualChange ? modifiedChartType : undefined,
           };
 
@@ -692,10 +702,13 @@ export function ProbeModeDialog({
                             ))}
                   </div>
 
-                  {/* Chart preview */}
-                  {msg.role === "assistant" && msg.modifiedSql && (
+                  {/* Chart preview — key off chartPreview so we still render after row-only responses */}
+                  {msg.role === "assistant" &&
+                    (msg.chartPreview != null || Boolean(msg.modifiedSql?.trim())) && (
                     <div className="w-full rounded-xl border border-border bg-background/60 overflow-hidden">
-                      <CollapsibleModifiedQuery sql={msg.modifiedSql} />
+                      <CollapsibleModifiedQuery
+                        sql={msg.modifiedSql?.trim() ? msg.modifiedSql : chart.query || ""}
+                      />
 
                       {/* Chart — use bar for modified SQL previews unless an explicit
                           chart-type was requested; pie with 50+ slices is unreadable */}
