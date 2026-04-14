@@ -230,14 +230,21 @@ export function ProbeModeDialog({
           }
 
           const state = response.state ?? {};
-          const responseType: string = state.response_type ?? "conversational";
+          const responseType: string = String(
+            state.response_type ?? state.responseType ?? "conversational",
+          )
+            .trim()
+            .toLowerCase();
           const explanation: string = state.explanation || response.message || "";
-          const modifiedSql: string | undefined =
-            (state.modified_sql ?? state.modifiedSql) ?? undefined;
-          const modifiedChartType: string | undefined =
-            (state.modified_chart_type ?? state.modifiedChartType) ?? undefined;
           const modifiedSpec: Partial<ChartSpec> | undefined =
             (state.modified_chart_spec ?? state.modifiedChartSpec) ?? undefined;
+          const sqlFromSpec =
+            typeof modifiedSpec?.query === "string" ? modifiedSpec.query.trim() : "";
+          const modifiedSqlRaw = (state.modified_sql ?? state.modifiedSql) ?? undefined;
+          const modifiedSql: string | undefined =
+            (typeof modifiedSqlRaw === "string" && modifiedSqlRaw.trim()) || sqlFromSpec || undefined;
+          const modifiedChartType: string | undefined =
+            (state.modified_chart_type ?? state.modifiedChartType) ?? undefined;
           // Rows + axis hints from the LLM service (tabular format)
           const rawRows = state.query_data ?? state.queryData;
           const queryData: any[] | undefined =
@@ -249,8 +256,9 @@ export function ProbeModeDialog({
 
           // Show a visual preview when SQL/type changed, or when the server already returned rows
           const hasQueryRows = Boolean(queryData?.length);
+          const hasSqlForPreview = Boolean(modifiedSql?.trim());
           const hasVisualChange =
-            (responseType === "modify_query" && modifiedSql) ||
+            (responseType === "modify_query" && hasSqlForPreview) ||
             (responseType === "modify_chart_type" && modifiedChartType) ||
             hasQueryRows;
 
@@ -451,11 +459,22 @@ export function ProbeModeDialog({
         current_chart_type: workingChartTypeRef.current,
       });
     } else {
-      // Always send data_connection_id so the backend can execute the query
+      // Send the same grounding fields every turn (backend prefixes [CONTEXT] each message).
       wsRef.current.probeMode({
         user_message: trimmed,
         is_first_message: false,
         data_connection_id: connectionId,
+        original_query: workingSqlRef.current || chart?.query || "",
+        original_chart_title: chart?.name ?? "",
+        original_chart_type: workingChartTypeRef.current || chart?.type || "bar",
+        original_chart_spec: chart?.spec,
+        db_schema: chart?.db_schema ?? "",
+        db_type: (chart?.db_type ?? "postgres") as
+          | "mysql"
+          | "postgres"
+          | "sqlite"
+          | "oracledb"
+          | "salesforce",
         current_working_sql: workingSqlRef.current,
         current_chart_type: workingChartTypeRef.current,
       });

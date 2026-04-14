@@ -451,7 +451,7 @@ export class VizAIWebSocket {
     is_first_message: boolean;
     /** Always send so the backend can execute the query on every turn */
     data_connection_id?: string;
-    // Required only on the first turn:
+    /** Send every turn so probe [CONTEXT] stays accurate */
     original_query?: string;
     original_chart_title?: string;
     original_chart_type?: string;
