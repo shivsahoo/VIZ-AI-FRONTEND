@@ -402,7 +402,10 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
           <ChartCard
             type={chart.chartType}
             data={config.data}
-            dataKeys={config.dataKeys}
+            dataKeys={[
+              config.dataKeys.primary,
+              ...(config.dataKeys.secondary ? [config.dataKeys.secondary] : []),
+            ]}
             xAxisKey={config.xAxisKey}
             showLegend={!!config.dataKeys.secondary && chart.chartType !== 'pie'}
             height={260}

@@ -5,6 +5,8 @@
  * Integrated with the FastAPI backend.
  */
 
+import type { ChartType } from "../components/features/charts/core/chartTypes";
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
@@ -1010,7 +1012,7 @@ export const deleteDashboard = async (projectId: string, dashboardId: string): P
 export interface Chart {
   id: string;
   name: string;
-  type: 'line' | 'bar' | 'pie' | 'area';
+  type: ChartType;
   projectId: string;
   databaseId?: string;
   query?: string;
@@ -1175,16 +1177,21 @@ export const getUserDashboardCharts = async (): Promise<ApiResponse<Array<{
 /**
  * Map backend chart type to frontend type
  */
-function mapChartType(backendType?: string | null): 'line' | 'bar' | 'pie' | 'area' {
+function mapChartType(backendType?: string | null): ChartType {
   if (!backendType) {
     return 'line';
   }
   const normalized = backendType.toString().toLowerCase();
-  const typeMap: Record<string, 'line' | 'bar' | 'pie' | 'area'> = {
+  const typeMap: Record<string, ChartType> = {
     line: 'line',
     bar: 'bar',
     pie: 'pie',
     area: 'area',
+    scatter: 'scatter',
+    heatmap: 'heatmap',
+    funnel: 'funnel',
+    map: 'map',
+    donut: 'pie',
   };
   return typeMap[normalized] || 'line';
 }
@@ -1277,7 +1284,7 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
 export const addChartToDashboard = async (data: {
   title: string;
   query: string;
-  chart_type: 'line' | 'bar' | 'pie' | 'area';
+  chart_type: ChartType;
   dashboard_id: string;
   data_connection_id: string; // Required - must be a valid UUID
   report?: string;

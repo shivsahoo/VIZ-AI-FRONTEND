@@ -1,3 +1,5 @@
+import type { ChartAxisConfig, ChartType } from "../components/features/charts/core/chartTypes";
+
 export interface ChartDataConfig {
   data: any[];
   dataKeys: {
@@ -299,4 +301,246 @@ export const inferChartDataConfig = (
     xAxisKey: potentialXAxisKey,
   };
 };
+
+/** Chart kinds that use `inferExtendedChartConfig` instead of `inferChartDataConfig`. */
+export const EXTENDED_CHART_TYPES: ChartType[] = [
+  "scatter",
+  "heatmap",
+  "funnel",
+  "map",
+];
+
+export function isExtendedChartType(
+  t: string | undefined | null,
+): t is ChartType {
+  return !!t && EXTENDED_CHART_TYPES.includes(t as ChartType);
+}
+
+/** Map snake_case API `axis_config` into `ChartAxisConfig`. */
+export function mapApiAxisConfigToChart(raw: unknown): ChartAxisConfig {
+  if (!raw || typeof raw !== "object") return {};
+  const o = raw as Record<string, unknown>;
+  return {
+    xAxisKey: (o.x_axis_key ?? o.xAxisKey) as string | undefined,
+    yAxisKey: (o.y_axis_key ?? o.yAxisKey) as string | undefined,
+    valueKey: (o.value_key ?? o.valueKey) as string | undefined,
+    categoryKey: (o.category_key ?? o.categoryKey) as string | undefined,
+    regionKey: (o.region_key ?? o.regionKey) as string | undefined,
+    metricKey: (o.metric_key ?? o.metricKey) as string | undefined,
+  };
+}
+
+export interface ExtendedChartInferResult {
+  data: Record<string, any>[];
+  dataKeys: string[];
+  xAxisKey: string;
+  axisConfig: ChartAxisConfig;
+  /** When set, callers should render this type instead of the requested extended type (e.g. bar instead of scatter). */
+  fallbackType?: ChartType;
+}
+
+/** Whether most sampled values in a column parse as finite numbers. */
+function isNumeric(rows: Record<string, any>[], key: string): boolean {
+  const sample = rows.slice(0, 10);
+  if (sample.length === 0) return false;
+  const ok = sample.filter((r) => {
+    const v = r[key];
+    return (
+      typeof v === "number" ||
+      (v !== null &&
+        v !== undefined &&
+        v !== "" &&
+        !Number.isNaN(Number(v)))
+    );
+  }).length;
+  return ok > sample.length * 0.7;
+}
+
+/**
+ * Derives tabular series config for scatter, heatmap, funnel, and map.
+ * For line/bar/area/pie delegates to `inferChartDataConfig` unchanged.
+ */
+export function inferExtendedChartConfig(
+  rows: Record<string, any>[] | undefined,
+  chartType: ChartType,
+  axisConfig?: ChartAxisConfig,
+  inferOptions?: InferChartDataOptions,
+): ExtendedChartInferResult {
+  if (!rows || rows.length === 0) {
+    return {
+      data: [],
+      dataKeys: [],
+      xAxisKey: "",
+      axisConfig: axisConfig ?? {},
+    };
+  }
+
+  const columns = Object.keys(rows[0]);
+
+  switch (chartType) {
+    case "scatter": {
+      const allColumns = Object.keys(rows[0]);
+      const numericCols = allColumns.filter((c) => isNumeric(rows, c));
+
+      if (numericCols.length < 2) {
+        const legacy = inferChartDataConfig(
+          rows,
+          "bar",
+          inferOptions,
+        );
+        return {
+          data: legacy.data,
+          dataKeys: [
+            legacy.dataKeys.primary,
+            ...(legacy.dataKeys.secondary
+              ? [legacy.dataKeys.secondary]
+              : []),
+          ],
+          xAxisKey: legacy.xAxisKey,
+          axisConfig: {
+            ...axisConfig,
+            xAxisKey: legacy.xAxisKey,
+            yAxisKey: legacy.dataKeys.primary,
+          },
+          fallbackType: "bar",
+        };
+      }
+
+      let xKey =
+        axisConfig?.xAxisKey ?? numericCols[0];
+      let yKey =
+        axisConfig?.yAxisKey ??
+        numericCols.find((c) => c !== xKey) ??
+        numericCols[1];
+
+      const xDistinct = new Set(rows.map((r) => r[xKey])).size;
+      const yDistinct = new Set(rows.map((r) => r[yKey])).size;
+
+      if (yDistinct > xDistinct * 2) {
+        const t = xKey;
+        xKey = yKey;
+        yKey = t;
+      }
+
+      const xD = new Set(rows.map((r) => r[xKey])).size;
+      const yD = new Set(rows.map((r) => r[yKey])).size;
+
+      if (xD <= 3 && yD <= 3) {
+        const legacy = inferChartDataConfig(rows, "bar", {
+          ...inferOptions,
+          xAxisHint: xKey,
+          yAxisHint: yKey,
+        });
+        return {
+          data: legacy.data,
+          dataKeys: [
+            legacy.dataKeys.primary,
+            ...(legacy.dataKeys.secondary
+              ? [legacy.dataKeys.secondary]
+              : []),
+          ],
+          xAxisKey: legacy.xAxisKey,
+          axisConfig: {
+            ...axisConfig,
+            xAxisKey: legacy.xAxisKey,
+            yAxisKey: legacy.dataKeys.primary,
+          },
+          fallbackType: "bar",
+        };
+      }
+
+      return {
+        data: rows,
+        dataKeys: [yKey],
+        xAxisKey: xKey,
+        axisConfig: { ...axisConfig, xAxisKey: xKey, yAxisKey: yKey },
+      };
+    }
+
+    case "heatmap": {
+      const xKey = axisConfig?.xAxisKey ?? columns[0];
+      const yKey = axisConfig?.categoryKey ?? columns[1];
+      const valKey =
+        axisConfig?.valueKey ??
+        columns.find((c) => isNumeric(rows, c)) ??
+        columns[2] ??
+        columns[0];
+      return {
+        data: rows,
+        dataKeys: [valKey],
+        xAxisKey: xKey,
+        axisConfig: {
+          ...axisConfig,
+          xAxisKey: xKey,
+          categoryKey: yKey,
+          valueKey: valKey,
+        },
+      };
+    }
+
+    case "funnel": {
+      const labelKey = axisConfig?.xAxisKey ?? columns[0];
+      const valKey =
+        axisConfig?.valueKey ??
+        columns.find((c) => isNumeric(rows, c)) ??
+        columns[1] ??
+        columns[0];
+      return {
+        data: rows,
+        dataKeys: [valKey],
+        xAxisKey: labelKey,
+        axisConfig: { ...axisConfig, xAxisKey: labelKey, valueKey: valKey },
+      };
+    }
+
+    case "map": {
+      const regionKey = axisConfig?.regionKey ?? columns[0];
+      const metricKey =
+        axisConfig?.metricKey ??
+        columns.find((c) => isNumeric(rows, c)) ??
+        columns[1] ??
+        columns[0];
+      return {
+        data: rows,
+        dataKeys: [metricKey],
+        xAxisKey: regionKey,
+        axisConfig: { ...axisConfig, regionKey, metricKey },
+      };
+    }
+
+    default: {
+      const legacy = inferChartDataConfig(
+        rows,
+        chartType as "line" | "bar" | "pie" | "area",
+        inferOptions,
+      );
+      return {
+        data: legacy.data,
+        dataKeys: [
+          legacy.dataKeys.primary,
+          ...(legacy.dataKeys.secondary
+            ? [legacy.dataKeys.secondary]
+            : []),
+        ],
+        xAxisKey: legacy.xAxisKey,
+        axisConfig: { ...axisConfig },
+      };
+    }
+  }
+}
+
+/** Convert extended infer result into legacy `ChartDataConfig` shape for existing UI. */
+export function extendedToChartDataConfig(
+  ext: ExtendedChartInferResult,
+): ChartDataConfig {
+  const secondary = ext.dataKeys[1];
+  return {
+    data: ext.data,
+    dataKeys: {
+      primary: ext.dataKeys[0] ?? "value",
+      ...(secondary ? { secondary } : {}),
+    },
+    xAxisKey: ext.xAxisKey,
+  };
+}
 

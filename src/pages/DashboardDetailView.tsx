@@ -856,7 +856,12 @@ export function DashboardDetailView({
                     <ChartCard
                       type={chart.type}
                       data={chartConfig.data}
-                      dataKeys={chartConfig.dataKeys}
+                      dataKeys={[
+                        chartConfig.dataKeys.primary,
+                        ...(chartConfig.dataKeys.secondary
+                          ? [chartConfig.dataKeys.secondary]
+                          : []),
+                      ]}
                       xAxisKey={chartConfig.xAxisKey}
                       height={300}
                       showLegend={!!chartConfig.dataKeys.secondary && chart.type !== 'pie'}
