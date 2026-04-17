@@ -52,7 +52,8 @@ export const inferChartDataConfig = (
     | "area"
     | "stackedlinechart"
     | "stackedhorizontalbar"
-    | "clustering",
+    | "clustering"
+    | "multiyaxischart",
   options?: InferChartDataOptions
 ): ChartDataConfig => {
   if (!rawData || rawData.length === 0) {
@@ -118,7 +119,8 @@ export const inferChartDataConfig = (
       chartType === "area" ||
       chartType === "bar" ||
       chartType === "stackedlinechart" ||
-      chartType === "stackedhorizontalbar")
+      chartType === "stackedhorizontalbar" ||
+      chartType === "multiyaxischart")
   ) {
     // Find the x-axis column (usually date/time related or first string column)
     xAxisColumn = stringKeys.find(key => {
@@ -323,6 +325,7 @@ export const inferChartDataConfig = (
 export const EXTENDED_CHART_TYPES: ChartType[] = [
   "scatter",
   "clustering",
+  "multiyaxischart",
   "heatmap",
   "funnel",
   "map",
@@ -493,6 +496,45 @@ export function inferExtendedChartConfig(
       };
     }
 
+    case "multiyaxischart": {
+      const categoricalColumns = columns.filter((c) => !isNumeric(rows, c));
+      const numericColumns = columns.filter((c) => isNumeric(rows, c));
+      const xKey =
+        axisConfig?.xAxisKey ??
+        categoricalColumns[0] ??
+        columns[0];
+      const metrics = numericColumns.filter((c) => c !== xKey).slice(0, 3);
+
+      if (!xKey || metrics.length < 2) {
+        const legacy = inferChartDataConfig(rows, "bar", inferOptions);
+        return {
+          data: legacy.data,
+          dataKeys: [
+            legacy.dataKeys.primary,
+            ...(legacy.dataKeys.secondary ? [legacy.dataKeys.secondary] : []),
+          ],
+          xAxisKey: legacy.xAxisKey,
+          axisConfig: {
+            ...axisConfig,
+            xAxisKey: legacy.xAxisKey,
+            yAxisKey: legacy.dataKeys.primary,
+          },
+          fallbackType: "bar",
+        };
+      }
+
+      return {
+        data: rows,
+        dataKeys: metrics,
+        xAxisKey: xKey,
+        axisConfig: {
+          ...axisConfig,
+          xAxisKey: xKey,
+          yAxisKey: metrics[0],
+        },
+      };
+    }
+
     case "heatmap": {
       const categoricalColumns = columns.filter((c) => !isNumeric(rows, c));
       const numericColumns = columns.filter((c) => isNumeric(rows, c));
@@ -584,7 +626,8 @@ export function inferExtendedChartConfig(
           | "area"
           | "stackedlinechart"
           | "stackedhorizontalbar"
-          | "clustering",
+          | "clustering"
+          | "multiyaxischart",
         inferOptions,
       );
       return {

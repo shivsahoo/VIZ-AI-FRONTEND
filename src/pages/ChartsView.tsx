@@ -227,6 +227,7 @@ const chartTypeIcons = {
   area: AreaChart,
   scatter: ChartScatter,
   clustering: ChartScatter,
+  multiyaxischart: BarChart3,
   heatmap: Grid3x3,
   funnel: Funnel,
   map: Globe,
@@ -239,6 +240,7 @@ const chartTypeColors = {
   area: "from-orange-500/20 to-orange-600/20 border-orange-500/30",
   scatter: "from-cyan-500/20 to-cyan-600/20 border-cyan-500/30",
   clustering: "from-sky-500/20 to-sky-600/20 border-sky-500/30",
+  multiyaxischart: "from-indigo-500/20 to-indigo-600/20 border-indigo-500/30",
   heatmap: "from-pink-500/20 to-pink-600/20 border-pink-500/30",
   funnel: "from-violet-500/20 to-violet-600/20 border-violet-500/30",
   map: "from-emerald-500/20 to-emerald-600/20 border-emerald-500/30",
@@ -1098,6 +1100,9 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       clustering: 'clustering',
       cluster: 'clustering',
       clustering_chart: 'clustering',
+      multiyaxischart: 'multiyaxischart',
+      multi_y_axis_chart: 'multiyaxischart',
+      multiyaxis: 'multiyaxischart',
       donut: 'donut',
     };
     return typeMap[normalized] || 'line';
@@ -1468,6 +1473,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       area: 'text-[#F59E0B] bg-[#F59E0B]/10',
       scatter: 'text-[#06B6D4] bg-[#06B6D4]/10',
       clustering: 'text-[#0EA5E9] bg-[#0EA5E9]/10',
+      multiyaxischart: 'text-[#6366F1] bg-[#6366F1]/10',
       heatmap: 'text-[#EC4899] bg-[#EC4899]/10',
       funnel: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
       map: 'text-[#10B981] bg-[#10B981]/10',

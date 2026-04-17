@@ -160,6 +160,7 @@ const chartTypeIcons = {
   stackedlinechart: LineChart,
   stackedhorizontalbar: BarChart3,
   clustering: ChartScatter,
+  multiyaxischart: BarChart3,
 };
 
 const chartTypeColors = {
@@ -175,6 +176,7 @@ const chartTypeColors = {
   stackedlinechart: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
   stackedhorizontalbar: "bg-amber-500/10 text-amber-500 border-amber-500/20",
   clustering: "bg-sky-500/10 text-sky-500 border-sky-500/20",
+  multiyaxischart: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
 };
 
 const mapDatabaseMetadataToAssistantState = (entry: DatabaseMetadataEntry) => ({
@@ -195,6 +197,12 @@ const normalizeChartType = (type?: string): ChartType => {
   if (lower.includes("stackedhorizontalbar") || lower.includes("stacked_horizontal_bar"))
     return "stackedhorizontalbar";
   if (lower.includes("clustering") || lower.includes("cluster")) return "clustering";
+  if (
+    lower.includes("multiyaxischart") ||
+    lower.includes("multi_y_axis_chart") ||
+    lower.includes("multiyaxis")
+  )
+    return "multiyaxischart";
   if (lower.includes("bar")) return "bar";
   if (lower.includes("donut")) return "donut";
   if (lower.includes("pie")) return "pie";

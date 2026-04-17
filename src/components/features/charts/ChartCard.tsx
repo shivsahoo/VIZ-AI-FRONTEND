@@ -20,6 +20,7 @@ import { buildMapOption } from "./renderers/MapChartRenderer";
 import { buildStackedLineChartOption } from "./renderers/StackedLineChart";
 import { buildStackedHorizontalBarOption } from "./renderers/StackedHorizontalBarChart";
 import { buildClusteringOption } from "./renderers/ClusteringChartRenderer";
+import { buildMultiYAxisOption } from "./renderers/MultiYAxisChartRenderer";
 
 export type { ChartCardProps };
 export type BuildChartOptionProps = ChartCardProps;
@@ -41,6 +42,7 @@ const OPTION_BUILDERS: Record<
   stackedlinechart: buildStackedLineChartOption,
   stackedhorizontalbar: buildStackedHorizontalBarOption,
   clustering: buildClusteringOption,
+  multiyaxischart: buildMultiYAxisOption,
 };
 
 function hasRenderableSeries(option: EChartsOption): boolean {
@@ -239,6 +241,7 @@ export function ChartCard(props: ChartCardProps) {
     type === "map" ||
     type === "scatter" ||
     type === "clustering" ||
+    type === "multiyaxischart" ||
     type === "heatmap" ||
     type === "funnel" ||
     type === "stackedhorizontalbar"

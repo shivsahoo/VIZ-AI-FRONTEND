@@ -56,6 +56,7 @@ function normalizeProbeChartType(t: string | undefined): ChartType {
     "stackedlinechart",
     "stackedhorizontalbar",
     "clustering",
+    "multiyaxischart",
   ];
   return (allowed.includes(s as ChartType) ? s : "bar") as ChartType;
 }

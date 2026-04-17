@@ -71,7 +71,9 @@ export interface ChartSpec {
     | "stackedhorizontalbar"
     | "StackedHorizontalBar"
     | "clustering"
-    | "Clustering";
+    | "Clustering"
+    | "multiyaxischart"
+    | "MultiYAxisChart";
   report?: string;
   relevance: number;
   is_time_based: boolean;

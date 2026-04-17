@@ -13,6 +13,7 @@ const KNOWN_TYPES: ChartType[] = [
   "stackedlinechart",
   "stackedhorizontalbar",
   "clustering",
+  "multiyaxischart",
 ];
 
 export function coerceChartType(raw: string | undefined | null): ChartType {
@@ -26,6 +27,12 @@ export function coerceChartType(raw: string | undefined | null): ChartType {
           ? "clustering"
           : s0 === "clustering_chart"
             ? "clustering"
+          : s0 === "multiyaxis"
+            ? "multiyaxischart"
+          : s0 === "multi_y_axis_chart"
+            ? "multiyaxischart"
+          : s0 === "multiple_y_axes"
+            ? "multiyaxischart"
         : s0;
   return (KNOWN_TYPES.includes(s as ChartType) ? s : "line") as ChartType;
 }
@@ -94,6 +101,7 @@ function buildAxisConfig(
   switch (raw.chart_type) {
     case "scatter":
     case "clustering":
+    case "multiyaxischart":
       return {
         xAxisKey: x,
         yAxisKey: y,

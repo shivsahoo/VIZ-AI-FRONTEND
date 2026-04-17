@@ -13,3 +13,4 @@ export {
 } from "./StackedLineChart";
 export { buildStackedHorizontalBarOption } from "./StackedHorizontalBarChart";
 export { buildClusteringOption } from "./ClusteringChartRenderer";
+export { buildMultiYAxisOption } from "./MultiYAxisChartRenderer";

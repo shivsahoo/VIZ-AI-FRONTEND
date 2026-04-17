@@ -1198,6 +1198,9 @@ function mapChartType(backendType?: string | null): ChartType {
     clustering: 'clustering',
     cluster: 'clustering',
     clustering_chart: 'clustering',
+    multiyaxischart: 'multiyaxischart',
+    multi_y_axis_chart: 'multiyaxischart',
+    multiyaxis: 'multiyaxischart',
     donut: 'donut',
   };
   return typeMap[normalized] || 'line';

@@ -14,7 +14,8 @@ export type ChartType =
   | "map"
   | "stackedlinechart"
   | "stackedhorizontalbar"
-  | "clustering";
+  | "clustering"
+  | "multiyaxischart";
 
 export interface ChartConfig {
   [key: string]: {
