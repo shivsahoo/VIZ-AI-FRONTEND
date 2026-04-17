@@ -75,3 +75,8 @@ Thumbs.db
 # Optional stylelint cache
 .stylelintcache
 
+venv/
+.venv/
+env/
+.env/
+ENV/
