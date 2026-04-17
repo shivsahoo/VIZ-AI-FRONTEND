@@ -12,7 +12,9 @@ export type ChartType =
   | "heatmap"
   | "funnel"
   | "map"
-  | "stackedlinechart";
+  | "stackedlinechart"
+  | "stackedhorizontalbar"
+  | "clustering";
 
 export interface ChartConfig {
   [key: string]: {

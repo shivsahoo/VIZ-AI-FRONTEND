@@ -67,7 +67,11 @@ export interface ChartSpec {
     | "funnel"
     | "map"
     | "stackedlinechart"
-    | "StackedLineChart";
+    | "StackedLineChart"
+    | "stackedhorizontalbar"
+    | "StackedHorizontalBar"
+    | "clustering"
+    | "Clustering";
   report?: string;
   relevance: number;
   is_time_based: boolean;

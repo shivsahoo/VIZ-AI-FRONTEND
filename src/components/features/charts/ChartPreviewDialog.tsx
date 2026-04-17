@@ -369,7 +369,14 @@ export function ChartPreviewDialog({
           } else {
             const config = inferChartDataConfig(
               response.data.data,
-              chart.type as "line" | "bar" | "pie" | "area",
+              chart.type as
+                | "line"
+                | "bar"
+                | "pie"
+                | "donut"
+                | "area"
+                | "stackedlinechart"
+                | "stackedhorizontalbar",
               {
                 xAxisHint: xHint,
                 yAxisHint: yHint,

@@ -92,6 +92,8 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     if (normalized === 'pie' || normalized === 'donut') return 'pie';
     if (normalized === 'area') return 'area';
     if (normalized === 'stackedlinechart' || normalized === 'stacked_line_chart') return 'line';
+    if (normalized === 'stackedhorizontalbar' || normalized === 'stacked_horizontal_bar') return 'bar';
+    if (normalized === 'clustering' || normalized === 'cluster' || normalized === 'clustering_chart') return 'line';
     if (normalized === 'line') return 'line';
     return 'line'; // Default fallback
   }, []);

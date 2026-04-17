@@ -11,3 +11,5 @@ export {
   StackedLineChart,
   transformStackedLineChartData,
 } from "./StackedLineChart";
+export { buildStackedHorizontalBarOption } from "./StackedHorizontalBarChart";
+export { buildClusteringOption } from "./ClusteringChartRenderer";

@@ -18,6 +18,8 @@ import { buildHeatmapOption } from "./renderers/HeatmapChartRenderer";
 import { buildFunnelOption } from "./renderers/FunnelChartRenderer";
 import { buildMapOption } from "./renderers/MapChartRenderer";
 import { buildStackedLineChartOption } from "./renderers/StackedLineChart";
+import { buildStackedHorizontalBarOption } from "./renderers/StackedHorizontalBarChart";
+import { buildClusteringOption } from "./renderers/ClusteringChartRenderer";
 
 export type { ChartCardProps };
 export type BuildChartOptionProps = ChartCardProps;
@@ -37,6 +39,8 @@ const OPTION_BUILDERS: Record<
   funnel: buildFunnelOption,
   map: buildMapOption,
   stackedlinechart: buildStackedLineChartOption,
+  stackedhorizontalbar: buildStackedHorizontalBarOption,
+  clustering: buildClusteringOption,
 };
 
 function hasRenderableSeries(option: EChartsOption): boolean {
@@ -53,15 +57,23 @@ function hasRenderableSeries(option: EChartsOption): boolean {
   });
 }
 
+function extractCategoryCount(axis: EChartsOption["xAxis"] | EChartsOption["yAxis"]): number {
+  const target = Array.isArray(axis) ? axis[0] : axis;
+  if (!target || typeof target !== "object") return 0;
+  const data = (target as { data?: unknown }).data;
+  return Array.isArray(data) ? data.length : 0;
+}
+
 export function ChartCard(props: ChartCardProps) {
   const {
     data,
-    height = 300,
+    height,
     compact = false,
     config,
     type,
     axisConfig,
   } = props;
+  const baseHeight = height ?? 300;
 
   const [mapReady, setMapReady] = React.useState(type !== "map");
   const [mapError, setMapError] = React.useState<string | undefined>();
@@ -170,10 +182,36 @@ export function ChartCard(props: ChartCardProps) {
     );
   }
 
+  const stackedHorizontalDesiredHeight = Math.min(1200, 40 * data.length + 140);
+  const heatmapDesiredHeight =
+    type === "heatmap"
+      ? Math.min(900, Math.max(baseHeight - 24, Math.ceil(data.length / 12) * 24 + 96))
+      : baseHeight;
+  const effectiveHeight =
+    type === "stackedhorizontalbar"
+      ? (height !== undefined ? baseHeight : Math.max(baseHeight, stackedHorizontalDesiredHeight))
+      : type === "heatmap"
+        ? (height !== undefined ? baseHeight : heatmapDesiredHeight)
+      : baseHeight;
+  const stackedHorizontalRenderHeight =
+    type === "stackedhorizontalbar"
+      ? (height !== undefined ? Math.max(baseHeight, stackedHorizontalDesiredHeight) : effectiveHeight)
+      : effectiveHeight;
+  const heatmapRenderHeight =
+    type === "heatmap"
+      ? (height !== undefined ? heatmapDesiredHeight : effectiveHeight)
+      : effectiveHeight;
+  const chartRenderHeight =
+    type === "stackedhorizontalbar"
+      ? stackedHorizontalRenderHeight
+      : type === "heatmap"
+        ? heatmapRenderHeight
+        : effectiveHeight;
+
   const chart = (
     <ReactECharts
       option={option}
-      style={{ width: "100%", height: height ?? 300 }}
+      style={{ width: "100%", height: chartRenderHeight }}
       opts={{ renderer: type === "heatmap" ? "canvas" : "svg" }}
       notMerge
       lazyUpdate
@@ -200,11 +238,54 @@ export function ChartCard(props: ChartCardProps) {
     type === "donut" ||
     type === "map" ||
     type === "scatter" ||
+    type === "clustering" ||
     type === "heatmap" ||
-    type === "funnel"
+    type === "funnel" ||
+    type === "stackedhorizontalbar"
   ) {
+    if (type === "heatmap") {
+      const xCount = extractCategoryCount(option.xAxis);
+      const yCount = extractCategoryCount(option.yAxis);
+      const needsHorizontalScroll = xCount > 14;
+      const needsVerticalScroll = yCount > 9;
+      const minWidth = Math.max(560, xCount * 48);
+      const renderHeight = needsVerticalScroll
+        ? heatmapRenderHeight
+        : baseHeight;
+      return (
+        <div
+          className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full ${needsHorizontalScroll ? "overflow-x-auto" : "overflow-x-hidden"} ${needsVerticalScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
+          style={{ height: baseHeight, minHeight: baseHeight }}
+        >
+          <div style={{ minWidth: needsHorizontalScroll ? minWidth : "100%", minHeight: renderHeight }}>
+            {wrapped}
+          </div>
+        </div>
+      );
+    }
+
+    if (type === "stackedhorizontalbar") {
+      const needsVerticalScroll = stackedHorizontalDesiredHeight > baseHeight;
+      const needsHorizontalScroll = data.length > 10;
+      const horizontalMinWidth = Math.max(720, Math.round(baseHeight * 1.6));
+      return (
+        <div
+          className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full ${needsHorizontalScroll ? "overflow-x-auto" : "overflow-x-hidden"} ${needsVerticalScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
+          style={{ height: baseHeight, minHeight: baseHeight }}
+        >
+          <div
+            style={{
+              minHeight: stackedHorizontalRenderHeight,
+              minWidth: needsHorizontalScroll ? horizontalMinWidth : "100%",
+            }}
+          >
+            {wrapped}
+          </div>
+        </div>
+      );
+    }
     return (
-      <div className="w-full" style={{ minHeight: height }}>
+      <div className="w-full" style={{ minHeight: effectiveHeight }}>
         {wrapped}
       </div>
     );
@@ -215,7 +296,7 @@ export function ChartCard(props: ChartCardProps) {
 
   return (
     <div className="scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-x-auto">
-      <div style={{ minWidth: minW, height }}>{wrapped}</div>
+      <div style={{ minWidth: minW, height: baseHeight }}>{wrapped}</div>
     </div>
   );
 }

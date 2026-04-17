@@ -158,6 +158,8 @@ const chartTypeIcons = {
   funnel: Funnel,
   map: Globe,
   stackedlinechart: LineChart,
+  stackedhorizontalbar: BarChart3,
+  clustering: ChartScatter,
 };
 
 const chartTypeColors = {
@@ -171,6 +173,8 @@ const chartTypeColors = {
   funnel: "bg-violet-500/10 text-violet-500 border-violet-500/20",
   map: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
   stackedlinechart: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
+  stackedhorizontalbar: "bg-amber-500/10 text-amber-500 border-amber-500/20",
+  clustering: "bg-sky-500/10 text-sky-500 border-sky-500/20",
 };
 
 const mapDatabaseMetadataToAssistantState = (entry: DatabaseMetadataEntry) => ({
@@ -188,6 +192,9 @@ const normalizeChartType = (type?: string): ChartType => {
   if (lower.includes("funnel")) return "funnel";
   if (lower.includes("map") && !lower.includes("heatmap")) return "map";
   if (lower.includes("stackedlinechart") || lower.includes("stacked_line_chart")) return "stackedlinechart";
+  if (lower.includes("stackedhorizontalbar") || lower.includes("stacked_horizontal_bar"))
+    return "stackedhorizontalbar";
+  if (lower.includes("clustering") || lower.includes("cluster")) return "clustering";
   if (lower.includes("bar")) return "bar";
   if (lower.includes("donut")) return "donut";
   if (lower.includes("pie")) return "pie";

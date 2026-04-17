@@ -154,12 +154,12 @@ export function buildHeatmapOption(props: ChartOptionBuildProps): EChartsOption 
 
   return withBaseOption({
     grid: compact
-      ? { top: 8, left: 0, right: 0, bottom: 8, containLabel: false }
+      ? { top: 8, left: 0, right: 0, bottom: 18, containLabel: false }
       : {
-          top: "10%",
-          left: "10%",
-          right: "5%",
-          bottom: "15%",
+          top: title ? 52 : 24,
+          left: 72,
+          right: 24,
+          bottom: 94,
           containLabel: true,
         },
     xAxis: {
@@ -193,18 +193,28 @@ export function buildHeatmapOption(props: ChartOptionBuildProps): EChartsOption 
       axisLine: { show: false },
       axisTick: { show: false },
     },
-    visualMap: {
-      min: minValue,
-      max: maxValue,
-      calculable: false,
-      orient: "horizontal",
-      left: "center",
-      bottom: "0%",
-      itemWidth: 180,
-      itemHeight: 12,
-      textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
-      inRange: { color: ["#e8edf7", "#3b5fc0"] },
-    },
+    visualMap: compact
+      ? {
+          show: false,
+        }
+      : [
+          {
+            type: "continuous",
+            min: minValue,
+            max: maxValue,
+            calculable: false,
+            realtime: false,
+            orient: "horizontal",
+            left: "center",
+            right: undefined,
+            top: undefined,
+            bottom: 18,
+            itemWidth: 140,
+            itemHeight: 8,
+            textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
+            inRange: { color: ["#e8edf7", "#3b5fc0"] },
+          },
+        ],
     tooltip: {
       trigger: "item",
       renderMode: "html",

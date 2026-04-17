@@ -1193,6 +1193,11 @@ function mapChartType(backendType?: string | null): ChartType {
     map: 'map',
     stackedlinechart: 'stackedlinechart',
     stacked_line_chart: 'stackedlinechart',
+    stackedhorizontalbar: 'stackedhorizontalbar',
+    stacked_horizontal_bar: 'stackedhorizontalbar',
+    clustering: 'clustering',
+    cluster: 'clustering',
+    clustering_chart: 'clustering',
     donut: 'donut',
   };
   return typeMap[normalized] || 'line';

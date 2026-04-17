@@ -54,6 +54,8 @@ function normalizeProbeChartType(t: string | undefined): ChartType {
     "funnel",
     "map",
     "stackedlinechart",
+    "stackedhorizontalbar",
+    "clustering",
   ];
   return (allowed.includes(s as ChartType) ? s : "bar") as ChartType;
 }
@@ -118,7 +120,10 @@ function buildChartPreviewConfig(
   }
 
   return {
-    config: inferChartDataConfig(rows, legacy),
+    config: inferChartDataConfig(
+      rows,
+      resolved as Parameters<typeof inferChartDataConfig>[1],
+    ),
     axisConfig: {},
   };
 }

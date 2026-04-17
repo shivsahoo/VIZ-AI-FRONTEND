@@ -44,7 +44,15 @@ function compareAxisValues(aVal: unknown, bVal: unknown): number {
 
 export const inferChartDataConfig = (
   rawData: any[] | undefined,
-  chartType: "line" | "bar" | "pie" | "donut" | "area" | "stackedlinechart",
+  chartType:
+    | "line"
+    | "bar"
+    | "pie"
+    | "donut"
+    | "area"
+    | "stackedlinechart"
+    | "stackedhorizontalbar"
+    | "clustering",
   options?: InferChartDataOptions
 ): ChartDataConfig => {
   if (!rawData || rawData.length === 0) {
@@ -104,7 +112,14 @@ export const inferChartDataConfig = (
   let valueColumn: string | null = null;
   let xAxisColumn: string | null = null;
 
-  if (hasGroupingColumn && (chartType === "line" || chartType === "area" || chartType === "bar" || chartType === "stackedlinechart")) {
+  if (
+    hasGroupingColumn &&
+    (chartType === "line" ||
+      chartType === "area" ||
+      chartType === "bar" ||
+      chartType === "stackedlinechart" ||
+      chartType === "stackedhorizontalbar")
+  ) {
     // Find the x-axis column (usually date/time related or first string column)
     xAxisColumn = stringKeys.find(key => {
       const val = sample[key];
@@ -307,6 +322,7 @@ export const inferChartDataConfig = (
 /** Chart kinds that use `inferExtendedChartConfig` instead of `inferChartDataConfig`. */
 export const EXTENDED_CHART_TYPES: ChartType[] = [
   "scatter",
+  "clustering",
   "heatmap",
   "funnel",
   "map",
@@ -380,7 +396,8 @@ export function inferExtendedChartConfig(
   const columns = Object.keys(rows[0]);
 
   switch (chartType) {
-    case "scatter": {
+    case "scatter":
+    case "clustering": {
       const allColumns = Object.keys(rows[0]);
       const numericCols = allColumns.filter((c) => isNumeric(rows, c));
 
@@ -408,12 +425,19 @@ export function inferExtendedChartConfig(
         };
       }
 
-      let xKey =
-        axisConfig?.xAxisKey ?? numericCols[0];
-      let yKey =
-        axisConfig?.yAxisKey ??
-        numericCols.find((c) => c !== xKey) ??
-        numericCols[1];
+      // Scatter/clustering must always use numeric axes.
+      // If incoming axis hints are categorical (common in probe mode metadata),
+      // ignore them and fall back to numeric columns from actual result rows.
+      let xKey = axisConfig?.xAxisKey;
+      if (!xKey || !numericCols.includes(xKey)) {
+        xKey = numericCols[0];
+      }
+      let yKey = axisConfig?.yAxisKey;
+      if (!yKey || !numericCols.includes(yKey) || yKey === xKey) {
+        yKey =
+          numericCols.find((c) => c !== xKey) ??
+          numericCols[1];
+      }
 
       const xDistinct = new Set(rows.map((r) => r[xKey])).size;
       const yDistinct = new Set(rows.map((r) => r[yKey])).size;
@@ -455,7 +479,17 @@ export function inferExtendedChartConfig(
         data: rows,
         dataKeys: [yKey],
         xAxisKey: xKey,
-        axisConfig: { ...axisConfig, xAxisKey: xKey, yAxisKey: yKey },
+        axisConfig: {
+          ...axisConfig,
+          xAxisKey: xKey,
+          yAxisKey: yKey,
+          categoryKey:
+            axisConfig?.categoryKey ??
+            allColumns.find(
+              (c) => c !== xKey && c !== yKey && !numericCols.includes(c),
+            ) ??
+            undefined,
+        },
       };
     }
 
@@ -542,7 +576,15 @@ export function inferExtendedChartConfig(
     default: {
       const legacy = inferChartDataConfig(
         rows,
-        chartType as "line" | "bar" | "pie" | "donut" | "area" | "stackedlinechart",
+        chartType as
+          | "line"
+          | "bar"
+          | "pie"
+          | "donut"
+          | "area"
+          | "stackedlinechart"
+          | "stackedhorizontalbar"
+          | "clustering",
         inferOptions,
       );
       return {

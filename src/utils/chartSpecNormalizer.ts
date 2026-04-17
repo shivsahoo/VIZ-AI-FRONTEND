@@ -11,11 +11,22 @@ const KNOWN_TYPES: ChartType[] = [
   "funnel",
   "map",
   "stackedlinechart",
+  "stackedhorizontalbar",
+  "clustering",
 ];
 
 export function coerceChartType(raw: string | undefined | null): ChartType {
   const s0 = (raw ?? "line").toLowerCase();
-  const s = s0 === "stacked_line_chart" ? "stackedlinechart" : s0;
+  const s =
+    s0 === "stacked_line_chart"
+      ? "stackedlinechart"
+      : s0 === "stacked_horizontal_bar"
+        ? "stackedhorizontalbar"
+        : s0 === "cluster"
+          ? "clustering"
+          : s0 === "clustering_chart"
+            ? "clustering"
+        : s0;
   return (KNOWN_TYPES.includes(s as ChartType) ? s : "line") as ChartType;
 }
 
@@ -82,6 +93,7 @@ function buildAxisConfig(
 
   switch (raw.chart_type) {
     case "scatter":
+    case "clustering":
       return {
         xAxisKey: x,
         yAxisKey: y,
@@ -117,6 +129,7 @@ function buildAxisConfig(
     case "bar":
     case "area":
     case "stackedlinechart":
+    case "stackedhorizontalbar":
       return {
         xAxisKey: x,
         yAxisKey: y,
