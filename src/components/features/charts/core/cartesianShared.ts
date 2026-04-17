@@ -34,6 +34,7 @@ export function composeCartesianOption(
   const sample = data[0];
   const xIsDate = sample && isDateStringSample(sample[xKey]);
   const categories = data.map((row) => row[xKey]);
+  const showPointSymbols = !compact && categories.length <= 12;
 
   let yMax = 0;
   let hasPositive = false;
@@ -111,14 +112,21 @@ export function composeCartesianOption(
               : Number(d[key]),
           ),
           smooth: false,
-          showSymbol: false,
+          showSymbol: showPointSymbols,
+          symbolSize: showPointSymbols ? 6 : 0,
           connectNulls: true,
           lineStyle: {
             width: strokeWidth,
             type: index > 0 ? ("dashed" as const) : "solid",
           },
-          areaStyle: cartesianType === "area" ? {} : undefined,
+          areaStyle:
+            cartesianType === "area"
+              ? { opacity: 0.24 }
+              : undefined,
           itemStyle: { color: pickColor(index, key) },
+          emphasis: {
+            focus: "series" as const,
+          },
         }));
 
   const axisTooltipFormatter = (params: unknown): string => {
@@ -177,7 +185,10 @@ export function composeCartesianOption(
       ? { show: false }
       : {
           show: legendVisible,
-          bottom: 8,
+          bottom: 0,
+          left: 12,
+          right: 12,
+          textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
           data: seriesKeys.map((k) => config?.[k]?.label ?? k),
         },
     grid,

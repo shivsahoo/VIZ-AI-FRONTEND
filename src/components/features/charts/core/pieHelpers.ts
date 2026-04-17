@@ -1,3 +1,5 @@
+const STRICT_ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(?:[T\s]|$)/;
+
 export function resolvePieNameKey(
   sample: Record<string, any>,
   xAxisKey: string,
@@ -22,6 +24,5 @@ export function resolvePieNameKey(
 
 export function isDateStringSample(v: unknown): boolean {
   if (typeof v !== "string") return false;
-  const d = new Date(v);
-  return !isNaN(d.getTime());
+  return STRICT_ISO_DATE_RE.test(v.trim());
 }

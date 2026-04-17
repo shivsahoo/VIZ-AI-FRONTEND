@@ -91,6 +91,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     if (normalized === 'bar' || normalized === 'column') return 'bar';
     if (normalized === 'pie' || normalized === 'donut') return 'pie';
     if (normalized === 'area') return 'area';
+    if (normalized === 'stackedlinechart' || normalized === 'stacked_line_chart') return 'line';
     if (normalized === 'line') return 'line';
     return 'line'; // Default fallback
   }, []);

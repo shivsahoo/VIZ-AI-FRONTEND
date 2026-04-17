@@ -5,10 +5,14 @@ export function buildAxisTooltipShell(
 ): EChartsOption["tooltip"] {
   return {
     trigger: "axis",
+    renderMode: "html",
+    appendToBody: true,
+    confine: false,
     backgroundColor: "rgba(20, 20, 30, 0.92)",
     borderColor: "rgba(255,255,255,0.1)",
     borderWidth: 1,
     textStyle: { color: "#fff", fontSize: 12, fontFamily: "inherit" },
+    extraCssText: "max-width: 360px; white-space: normal; z-index: 9999;",
     axisPointer: {
       type: "shadow",
       shadowStyle: { color: "rgba(255,255,255,0.04)" },

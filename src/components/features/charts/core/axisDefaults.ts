@@ -14,11 +14,11 @@ export function buildGrid(
     };
   }
   return {
-    top: hasTitle ? 52 : 20,
-    right: 24,
-    bottom: 90,
-    left: 64,
-    containLabel: false,
+    top: hasTitle ? 56 : 24,
+    right: 28,
+    bottom: 96,
+    left: 68,
+    containLabel: true,
   };
 }
 
@@ -41,13 +41,14 @@ export function buildXAxis(
     data: categories,
     boundaryGap: chartType === "bar",
     axisLabel: {
-      rotate: 35,
+      rotate: categories.length > 6 ? 30 : 0,
       interval: 0,
       overflow: "truncate",
-      width: 100,
+      hideOverlap: true,
+      width: categories.length > 6 ? 92 : 120,
       fontSize: 11,
       color: "rgba(255,255,255,0.65)",
-      margin: 12,
+      margin: 14,
       formatter: formatCategory,
     },
     axisLine: {
@@ -72,9 +73,12 @@ export function buildYAxis(
     type: "value",
     min: yMinMax ? yMinMax[0] : undefined,
     max: yMinMax ? yMinMax[1] : undefined,
+    splitNumber: 4,
     axisLabel: {
       fontSize: 11,
       color: "rgba(255,255,255,0.65)",
+      margin: 10,
+      hideOverlap: true,
       formatter: (value: number | string) => {
         const v = typeof value === "number" ? value : Number(value);
         if (Number.isNaN(v)) return String(value);

@@ -29,7 +29,7 @@ export function resolveSeriesKeys(
 
   for (const key of Object.keys(sample)) {
     if (key === xAxisKey || seen.has(key)) continue;
-    if (isNumericColumn(sample[key])) {
+    if (data.some((row) => row && typeof row === "object" && isNumericColumn(row[key]))) {
       keys.push(key);
       seen.add(key);
     }

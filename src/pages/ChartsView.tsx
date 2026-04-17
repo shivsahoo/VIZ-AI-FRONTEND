@@ -1089,7 +1089,9 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       heatmap: 'heatmap',
       funnel: 'funnel',
       map: 'map',
-      donut: 'pie',
+      stackedlinechart: 'stackedlinechart',
+      stacked_line_chart: 'stackedlinechart',
+      donut: 'donut',
     };
     return typeMap[normalized] || 'line';
   };

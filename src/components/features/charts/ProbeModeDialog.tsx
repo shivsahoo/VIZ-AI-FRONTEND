@@ -53,6 +53,7 @@ function normalizeProbeChartType(t: string | undefined): ChartType {
     "heatmap",
     "funnel",
     "map",
+    "stackedlinechart",
   ];
   return (allowed.includes(s as ChartType) ? s : "bar") as ChartType;
 }

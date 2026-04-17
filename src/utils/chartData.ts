@@ -21,9 +21,30 @@ export const getDefaultChartDataConfig = (): ChartDataConfig => ({
   xAxisKey: "label",
 });
 
+const STRICT_ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(?:[T\s]|$)/;
+
+function looksLikeDate(value: unknown): boolean {
+  return typeof value === "string" && STRICT_ISO_DATE_RE.test(value.trim());
+}
+
+function compareAxisValues(aVal: unknown, bVal: unknown): number {
+  if (typeof aVal === "string" && typeof bVal === "string") {
+    if (looksLikeDate(aVal) && looksLikeDate(bVal)) {
+      return new Date(aVal).getTime() - new Date(bVal).getTime();
+    }
+    return aVal.localeCompare(bVal, undefined, { numeric: true });
+  }
+
+  if (typeof aVal === "number" && typeof bVal === "number") {
+    return aVal - bVal;
+  }
+
+  return String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
+}
+
 export const inferChartDataConfig = (
   rawData: any[] | undefined,
-  chartType: "line" | "bar" | "pie" | "area",
+  chartType: "line" | "bar" | "pie" | "donut" | "area" | "stackedlinechart",
   options?: InferChartDataOptions
 ): ChartDataConfig => {
   if (!rawData || rawData.length === 0) {
@@ -55,6 +76,21 @@ export const inferChartDataConfig = (
         sample[key] !== undefined)
   );
 
+  if (normalizedRows.length === 1 && numericKeys.length === 1 && keys.length <= 2) {
+    const valueKey = numericKeys[0];
+    const labelKey = keys.find((key) => key !== valueKey);
+    const singleLabel =
+      labelKey && sample[labelKey] != null && sample[labelKey] !== ""
+        ? String(sample[labelKey])
+        : valueKey;
+
+    return {
+      data: [{ label: singleLabel, value: Number(sample[valueKey]) || 0 }],
+      dataKeys: { primary: "value" },
+      xAxisKey: "label",
+    };
+  }
+
   // Detect if we have a categorical grouping column (for multi-series charts)
   // This happens when we have: x-axis, category, value columns
   const stringKeys = keys.filter(
@@ -68,14 +104,12 @@ export const inferChartDataConfig = (
   let valueColumn: string | null = null;
   let xAxisColumn: string | null = null;
 
-  if (hasGroupingColumn && (chartType === "line" || chartType === "area" || chartType === "bar")) {
+  if (hasGroupingColumn && (chartType === "line" || chartType === "area" || chartType === "bar" || chartType === "stackedlinechart")) {
     // Find the x-axis column (usually date/time related or first string column)
     xAxisColumn = stringKeys.find(key => {
       const val = sample[key];
       if (typeof val === 'string') {
-        // Check if it's a date
-        const date = new Date(val);
-        if (!isNaN(date.getTime())) {
+        if (looksLikeDate(val)) {
           return true;
         }
         // Or check if key name suggests it's a time/date column
@@ -134,21 +168,7 @@ export const inferChartDataConfig = (
     pivotedData.sort((a, b) => {
       const aVal = a[xAxisColumn!];
       const bVal = b[xAxisColumn!];
-      
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        const aDate = new Date(aVal).getTime();
-        const bDate = new Date(bVal).getTime();
-        if (!isNaN(aDate) && !isNaN(bDate)) {
-          return aDate - bDate;
-        }
-        return aVal.localeCompare(bVal);
-      }
-      
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        return aVal - bVal;
-      }
-      
-      return String(aVal).localeCompare(String(bVal));
+      return compareAxisValues(aVal, bVal);
     });
 
     // Use first category as primary, second as secondary if available
@@ -252,7 +272,7 @@ export const inferChartDataConfig = (
     return coercedRow;
   });
 
-  if (chartType === "pie") {
+  if (chartType === "pie" || chartType === "donut") {
     const nameKey = potentialXAxisKey === "index" ? "label" : potentialXAxisKey;
     return {
       data: data.map((row, index) => ({
@@ -266,29 +286,11 @@ export const inferChartDataConfig = (
 
   // Sort data by x-axis key for line and area charts to ensure proper connections
   let sortedData = data;
-  if (chartType === "line" || chartType === "area") {
+  if (chartType === "line" || chartType === "area" || chartType === "stackedlinechart") {
     sortedData = [...data].sort((a, b) => {
       const aVal = a[potentialXAxisKey];
       const bVal = b[potentialXAxisKey];
-      
-      // Handle date strings
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        const aDate = new Date(aVal).getTime();
-        const bDate = new Date(bVal).getTime();
-        if (!isNaN(aDate) && !isNaN(bDate)) {
-          return aDate - bDate;
-        }
-        // If not valid dates, do string comparison
-        return aVal.localeCompare(bVal);
-      }
-      
-      // Handle numeric values
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        return aVal - bVal;
-      }
-      
-      // Fallback to string comparison
-      return String(aVal).localeCompare(String(bVal));
+      return compareAxisValues(aVal, bVal);
     });
   }
 
@@ -458,13 +460,42 @@ export function inferExtendedChartConfig(
     }
 
     case "heatmap": {
-      const xKey = axisConfig?.xAxisKey ?? columns[0];
-      const yKey = axisConfig?.categoryKey ?? columns[1];
+      const categoricalColumns = columns.filter((c) => !isNumeric(rows, c));
+      const numericColumns = columns.filter((c) => isNumeric(rows, c));
+      const xKey =
+        axisConfig?.xAxisKey ??
+        categoricalColumns[0] ??
+        columns[0];
+      const yKey =
+        axisConfig?.categoryKey ??
+        categoricalColumns.find((c) => c !== xKey) ??
+        columns.find((c) => c !== xKey && !numericColumns.includes(c)) ??
+        columns[1] ??
+        xKey;
       const valKey =
         axisConfig?.valueKey ??
-        columns.find((c) => isNumeric(rows, c)) ??
+        numericColumns.find((c) => c !== xKey && c !== yKey) ??
+        numericColumns[0] ??
         columns[2] ??
         columns[0];
+
+      if (
+        !xKey ||
+        !yKey ||
+        !valKey ||
+        xKey === yKey ||
+        xKey === valKey ||
+        yKey === valKey
+      ) {
+        return {
+          data: [],
+          dataKeys: [],
+          xAxisKey: "",
+          axisConfig: axisConfig ?? {},
+          fallbackType: "bar",
+        };
+      }
+
       return {
         data: rows,
         dataKeys: [valKey],
@@ -511,7 +542,7 @@ export function inferExtendedChartConfig(
     default: {
       const legacy = inferChartDataConfig(
         rows,
-        chartType as "line" | "bar" | "pie" | "area",
+        chartType as "line" | "bar" | "pie" | "donut" | "area" | "stackedlinechart",
         inferOptions,
       );
       return {

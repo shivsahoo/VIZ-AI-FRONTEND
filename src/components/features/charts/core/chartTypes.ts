@@ -7,10 +7,12 @@ export type ChartType =
   | "bar"
   | "area"
   | "pie"
+  | "donut"
   | "scatter"
   | "heatmap"
   | "funnel"
-  | "map";
+  | "map"
+  | "stackedlinechart";
 
 export interface ChartConfig {
   [key: string]: {

@@ -65,7 +65,9 @@ export interface ChartSpec {
     | "scatter"
     | "heatmap"
     | "funnel"
-    | "map";
+    | "map"
+    | "stackedlinechart"
+    | "StackedLineChart";
   report?: string;
   relevance: number;
   is_time_based: boolean;

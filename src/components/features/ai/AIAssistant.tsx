@@ -134,7 +134,7 @@ interface AIAssistantProps {
   onChartCreated?: (chart: {
     id?: string;
     name: string;
-    type: 'line' | 'bar' | 'pie' | 'area';
+    type: ChartType;
     dataSource: string;
     query: string;
     status: 'draft' | 'published';
@@ -142,7 +142,7 @@ interface AIAssistantProps {
   }) => void;
   editingChart?: {
     name: string;
-    type: 'line' | 'bar' | 'pie' | 'area';
+    type: ChartType;
     description?: string;
   } | null;
 }
@@ -151,22 +151,26 @@ const chartTypeIcons = {
   line: LineChart,
   bar: BarChart3,
   pie: PieChart,
+  donut: PieChart,
   area: AreaChart,
   scatter: ChartScatter,
   heatmap: Grid3x3,
   funnel: Funnel,
   map: Globe,
+  stackedlinechart: LineChart,
 };
 
 const chartTypeColors = {
   line: "bg-blue-500/10 text-blue-500 border-blue-500/20",
   bar: "bg-purple-500/10 text-purple-500 border-purple-500/20",
   pie: "bg-green-500/10 text-green-500 border-green-500/20",
+  donut: "bg-teal-500/10 text-teal-500 border-teal-500/20",
   area: "bg-orange-500/10 text-orange-500 border-orange-500/20",
   scatter: "bg-cyan-500/10 text-cyan-500 border-cyan-500/20",
   heatmap: "bg-pink-500/10 text-pink-500 border-pink-500/20",
   funnel: "bg-violet-500/10 text-violet-500 border-violet-500/20",
   map: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+  stackedlinechart: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
 };
 
 const mapDatabaseMetadataToAssistantState = (entry: DatabaseMetadataEntry) => ({
@@ -183,8 +187,10 @@ const normalizeChartType = (type?: string): ChartType => {
   if (lower.includes("heatmap")) return "heatmap";
   if (lower.includes("funnel")) return "funnel";
   if (lower.includes("map") && !lower.includes("heatmap")) return "map";
+  if (lower.includes("stackedlinechart") || lower.includes("stacked_line_chart")) return "stackedlinechart";
   if (lower.includes("bar")) return "bar";
-  if (lower.includes("pie") || lower.includes("donut")) return "pie";
+  if (lower.includes("donut")) return "donut";
+  if (lower.includes("pie")) return "pie";
   if (lower.includes("area")) return "area";
   return "line";
 };
@@ -1055,7 +1061,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     onChartCreated?.({
       id: savedChart?.id,
       name: probeModeChart.name,
-      type: (savedChart?.type ?? probeModeChart.type) as "line" | "bar" | "pie" | "area",
+      type: (savedChart?.type ?? probeModeChart.type) as ChartType,
       dataSource: `Database ${selectedDb.id}`,
       query: savedChart?.query ?? probeModeChart.query ?? "",
       status: "draft",

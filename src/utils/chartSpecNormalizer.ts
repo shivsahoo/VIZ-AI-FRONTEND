@@ -5,15 +5,17 @@ const KNOWN_TYPES: ChartType[] = [
   "bar",
   "area",
   "pie",
+  "donut",
   "scatter",
   "heatmap",
   "funnel",
   "map",
+  "stackedlinechart",
 ];
 
 export function coerceChartType(raw: string | undefined | null): ChartType {
-  const s = (raw ?? "line").toLowerCase();
-  if (s === "donut") return "pie";
+  const s0 = (raw ?? "line").toLowerCase();
+  const s = s0 === "stacked_line_chart" ? "stackedlinechart" : s0;
   return (KNOWN_TYPES.includes(s as ChartType) ? s : "line") as ChartType;
 }
 
@@ -105,6 +107,7 @@ function buildAxisConfig(
       };
 
     case "pie":
+    case "donut":
       return {
         xAxisKey: x,
         valueKey: y ?? raw.value_key ?? undefined,
@@ -113,6 +116,7 @@ function buildAxisConfig(
     case "line":
     case "bar":
     case "area":
+    case "stackedlinechart":
       return {
         xAxisKey: x,
         yAxisKey: y,

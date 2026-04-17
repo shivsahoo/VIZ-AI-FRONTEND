@@ -32,6 +32,7 @@ import {
 import type { ChartAxisConfig, ChartType } from "./core/chartTypes";
 import * as React from "react";
 import type { ChartSpec } from "../../../services/websocket";
+import { isDateStringSample } from "./core/pieHelpers";
 
 interface PreviewChart {
   id?: string;
@@ -188,19 +189,19 @@ export function ChartPreviewDialog({
           const bVal = b[chart.xAxisKey!];
           
           if (typeof aVal === 'string' && typeof bVal === 'string') {
-            const aDate = new Date(aVal).getTime();
-            const bDate = new Date(bVal).getTime();
-            if (!isNaN(aDate) && !isNaN(bDate)) {
+            if (isDateStringSample(aVal) && isDateStringSample(bVal)) {
+              const aDate = new Date(aVal).getTime();
+              const bDate = new Date(bVal).getTime();
               return aDate - bDate;
             }
-            return aVal.localeCompare(bVal);
+            return aVal.localeCompare(bVal, undefined, { numeric: true });
           }
           
           if (typeof aVal === 'number' && typeof bVal === 'number') {
             return aVal - bVal;
           }
           
-          return String(aVal).localeCompare(String(bVal));
+          return String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
         });
       }
 

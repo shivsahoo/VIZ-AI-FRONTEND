@@ -17,6 +17,7 @@ import { buildScatterOption } from "./renderers/ScatterChartRenderer";
 import { buildHeatmapOption } from "./renderers/HeatmapChartRenderer";
 import { buildFunnelOption } from "./renderers/FunnelChartRenderer";
 import { buildMapOption } from "./renderers/MapChartRenderer";
+import { buildStackedLineChartOption } from "./renderers/StackedLineChart";
 
 export type { ChartCardProps };
 export type BuildChartOptionProps = ChartCardProps;
@@ -30,11 +31,27 @@ const OPTION_BUILDERS: Record<
   line: buildLineOption,
   area: buildAreaOption,
   pie: buildPieOption,
+  donut: buildPieOption,
   scatter: buildScatterOption,
   heatmap: buildHeatmapOption,
   funnel: buildFunnelOption,
   map: buildMapOption,
+  stackedlinechart: buildStackedLineChartOption,
 };
+
+function hasRenderableSeries(option: EChartsOption): boolean {
+  const rawSeries = option?.series;
+  if (!rawSeries) return false;
+  const seriesList = Array.isArray(rawSeries) ? rawSeries : [rawSeries];
+  if (seriesList.length === 0) return false;
+
+  return seriesList.some((series) => {
+    if (!series || typeof series !== "object") return false;
+    const data = (series as { data?: unknown }).data;
+    if (!Array.isArray(data)) return true;
+    return data.length > 0;
+  });
+}
 
 export function ChartCard(props: ChartCardProps) {
   const {
@@ -145,10 +162,10 @@ export function ChartCard(props: ChartCardProps) {
     );
   }
 
-  if (!option || !Object.keys(option).length) {
+  if (!option || !Object.keys(option).length || !hasRenderableSeries(option)) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        No series to display
+        No data to display
       </div>
     );
   }
@@ -157,7 +174,7 @@ export function ChartCard(props: ChartCardProps) {
     <ReactECharts
       option={option}
       style={{ width: "100%", height: height ?? 300 }}
-      opts={{ renderer: "svg" }}
+      opts={{ renderer: type === "heatmap" ? "canvas" : "svg" }}
       notMerge
       lazyUpdate
     />
@@ -180,6 +197,7 @@ export function ChartCard(props: ChartCardProps) {
 
   if (
     type === "pie" ||
+    type === "donut" ||
     type === "map" ||
     type === "scatter" ||
     type === "heatmap" ||

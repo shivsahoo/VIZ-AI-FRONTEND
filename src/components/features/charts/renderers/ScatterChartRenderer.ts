@@ -65,15 +65,15 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
 
   if (xDistinctCount <= 2 && seriesData.length > 0) {
     jitterApplied = true;
-    finalData = seriesData.map(
-      (point) =>
-        [point[0] + (Math.random() - 0.5) * xPadding * 0.4, point[1]] as [number, number]
-    );
+    finalData = seriesData.map((point, index) => {
+      const offsetSeed = (index % 5) - 2;
+      return [point[0] + offsetSeed * xPadding * 0.08, point[1]] as [number, number];
+    });
   }
 
   const grid = {
     ...buildGrid(compact, Boolean(title)),
-    ...(!compact ? { bottom: 60 } : {}),
+    ...(!compact ? { bottom: 72, left: 76 } : {}),
   };
 
   return withBaseOption({
@@ -92,6 +92,7 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
         : {
             fontSize: 11,
             color: "rgba(255,255,255,0.65)",
+            hideOverlap: true,
             formatter: (v: number) =>
               v >= 1_000_000
                 ? `${(v / 1_000_000).toFixed(1)}M`
@@ -118,6 +119,7 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
           : {
               fontSize: 11,
               color: "rgba(255,255,255,0.65)",
+              hideOverlap: true,
               formatter: (v: number) =>
                 v >= 1_000_000
                   ? `${(v / 1_000_000).toFixed(1)}M`
@@ -173,6 +175,7 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
           borderWidth: 1,
         },
         emphasis: {
+          focus: "series",
           itemStyle: { opacity: 1, borderWidth: 2 },
         },
       },

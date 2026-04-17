@@ -6,3 +6,8 @@ export { buildScatterOption } from "./ScatterChartRenderer";
 export { buildHeatmapOption } from "./HeatmapChartRenderer";
 export { buildFunnelOption } from "./FunnelChartRenderer";
 export { buildMapOption } from "./MapChartRenderer";
+export {
+  buildStackedLineChartOption,
+  StackedLineChart,
+  transformStackedLineChartData,
+} from "./StackedLineChart";

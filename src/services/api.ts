@@ -1191,7 +1191,9 @@ function mapChartType(backendType?: string | null): ChartType {
     heatmap: 'heatmap',
     funnel: 'funnel',
     map: 'map',
-    donut: 'pie',
+    stackedlinechart: 'stackedlinechart',
+    stacked_line_chart: 'stackedlinechart',
+    donut: 'donut',
   };
   return typeMap[normalized] || 'line';
 }
