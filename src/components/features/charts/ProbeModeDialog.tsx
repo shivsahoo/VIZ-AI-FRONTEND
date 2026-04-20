@@ -174,6 +174,9 @@ export function ProbeModeDialog({
   /** Synced with the last successful probe result so follow-up turns send authoritative SQL/type to the backend */
   const workingSqlRef = React.useRef("");
   const workingChartTypeRef = React.useRef("bar");
+  /** Immutable baseline when the dialog opened — sent as original_* every turn so the LLM [CONTEXT] can diff session start vs current */
+  const sessionBaselineSqlRef = React.useRef("");
+  const sessionBaselineChartTypeRef = React.useRef("bar");
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const messageIdRef = React.useRef(0);
@@ -201,6 +204,8 @@ export function ProbeModeDialog({
       messageIdRef.current = 0;
       workingSqlRef.current = chart?.query ?? "";
       workingChartTypeRef.current = chart?.type ?? "bar";
+      sessionBaselineSqlRef.current = chart?.query ?? "";
+      sessionBaselineChartTypeRef.current = chart?.type ?? "bar";
 
       try {
         const userResp = await getCurrentUser();
@@ -429,7 +434,7 @@ export function ProbeModeDialog({
       wsRef.current?.disconnect();
       wsRef.current = null;
     };
-  }, [isOpen, chart?.name]);
+  }, [isOpen, chart?.name, chart?.query, chart?.type]);
 
   const handleSend = () => {
     const trimmed = input.trim();
@@ -459,16 +464,16 @@ export function ProbeModeDialog({
         current_chart_type: workingChartTypeRef.current,
       });
     } else {
-      // Send the same grounding fields every turn (backend prefixes [CONTEXT] each message).
+      // Follow-up turns: backend reuses cached probe context by websocket thread_id.
       wsRef.current.probeMode({
         user_message: trimmed,
         is_first_message: false,
         data_connection_id: connectionId,
-        original_query: workingSqlRef.current || chart?.query || "",
+        // Keep session-start query/type stable; backend merges with current_* in [CONTEXT]
+        original_query: sessionBaselineSqlRef.current || chart?.query || "",
         original_chart_title: chart?.name ?? "",
-        original_chart_type: workingChartTypeRef.current || chart?.type || "bar",
+        original_chart_type: sessionBaselineChartTypeRef.current || chart?.type || "bar",
         original_chart_spec: chart?.spec,
-        db_schema: chart?.db_schema ?? "",
         db_type: (chart?.db_type ?? "postgres") as
           | "mysql"
           | "postgres"
