@@ -22,6 +22,33 @@ export function buildGrid(
   };
 }
 
+function maxFormattedCategoryLength(
+  categories: (string | number)[],
+  formatCategory: (v: string | number) => string,
+): number {
+  let max = 0;
+  for (const c of categories) {
+    const len = String(formatCategory(c)).length;
+    if (len > max) max = len;
+  }
+  return max;
+}
+
+/** Bar charts with few categories but long names need diagonal labels so none are dropped by overlap logic. */
+function shouldRotateCategoryXAxis(
+  chartType: "bar" | "line" | "area",
+  categories: (string | number)[],
+  formatCategory: (v: string | number) => string,
+): boolean {
+  if (categories.length > 6) return true;
+  const longest = maxFormattedCategoryLength(categories, formatCategory);
+  if (chartType === "bar") {
+    if (longest >= 10) return true;
+    if (categories.length >= 4 && longest >= 8) return true;
+  }
+  return false;
+}
+
 export function buildXAxis(
   compact: boolean,
   categories: (string | number)[],
@@ -36,16 +63,18 @@ export function buildXAxis(
       boundaryGap: chartType === "bar",
     };
   }
+  const rotated = shouldRotateCategoryXAxis(chartType, categories, formatCategory);
+  const barRotated = chartType === "bar" && rotated;
   return {
     type: "category",
     data: categories,
     boundaryGap: chartType === "bar",
     axisLabel: {
-      rotate: categories.length > 6 ? 30 : 0,
+      rotate: rotated ? 30 : 0,
       interval: 0,
       overflow: "truncate",
-      hideOverlap: true,
-      width: categories.length > 6 ? 92 : 120,
+      hideOverlap: barRotated ? false : true,
+      width: rotated ? 92 : 120,
       fontSize: 11,
       color: "rgba(255,255,255,0.65)",
       margin: 14,
