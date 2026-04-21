@@ -77,6 +77,19 @@ export function ChartCard(props: ChartCardProps) {
   } = props;
   const baseHeight = height ?? 300;
 
+  // Detect dark mode by watching the `dark` class on <html>
+  const [isDark, setIsDark] = React.useState(
+    () => typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+  );
+  React.useEffect(() => {
+    if (typeof document === "undefined") return;
+    const observer = new MutationObserver(() => {
+      setIsDark(document.documentElement.classList.contains("dark"));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
   const [mapReady, setMapReady] = React.useState(type !== "map");
   const [mapError, setMapError] = React.useState<string | undefined>();
 
@@ -122,7 +135,7 @@ export function ChartCard(props: ChartCardProps) {
     );
   }
 
-  const rendererProps: ChartCardProps = { ...props, axisConfig };
+  const rendererProps: ChartCardProps = { ...props, axisConfig, isDark };
 
   const option = React.useMemo(
     () => {
@@ -144,6 +157,7 @@ export function ChartCard(props: ChartCardProps) {
     [
       type,
       mapReady,
+      isDark,
       props.data,
       props.dataKeys,
       props.xAxisKey,

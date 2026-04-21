@@ -3,7 +3,7 @@ import type { EChartsOption } from "echarts";
 import type { ChartOptionBuildProps } from "../core/chartTypes";
 import { resolveSeriesKeys } from "../core/buildChartOption";
 import { buildGrid } from "../core/axisDefaults";
-import { buildEChartsTheme, resolveColor } from "../core/colorResolver";
+import { buildEChartsTheme, getChartAxisColors, resolveColor } from "../core/colorResolver";
 import { DEFAULT_SERIES_COLORS } from "../core/constants";
 import { buildAxisTooltipShell } from "../core/tooltipDefaults";
 import { isDateStringSample } from "../core/pieHelpers";
@@ -30,7 +30,10 @@ export function buildStackedHorizontalBarOption(
     showLegend,
     showGrid = true,
     title,
+    isDark = true,
   } = props;
+
+  const { labelColor, splitLineColor, axisLineColor, barLabelColor } = getChartAxisColors(isDark);
 
   let xKey = props.xAxisKey;
   const sample = data[0];
@@ -132,11 +135,11 @@ export function buildStackedHorizontalBarOption(
         max: xMax,
         splitNumber: 4,
         splitLine: showGrid
-          ? { lineStyle: { color: "rgba(255,255,255,0.08)" } }
+          ? { lineStyle: { color: splitLineColor } }
           : { show: false },
         axisLabel: {
           fontSize: 11,
-          color: "rgba(255,255,255,0.65)",
+          color: labelColor,
           margin: 8,
           hideOverlap: true,
           formatter: (value: number | string) => {
@@ -158,12 +161,12 @@ export function buildStackedHorizontalBarOption(
         data: categories,
         axisLabel: {
           fontSize: 11,
-          color: "rgba(255,255,255,0.65)",
+          color: labelColor,
           margin: 10,
           overflow: "truncate",
           width: 132,
         },
-        axisLine: { lineStyle: { color: "rgba(255,255,255,0.15)" } },
+        axisLine: { lineStyle: { color: axisLineColor } },
         axisTick: { show: false },
       };
 
@@ -174,7 +177,7 @@ export function buildStackedHorizontalBarOption(
     emphasis: { focus: "series" as const },
     label: {
       show: !compact && !isDenseCategoryView,
-      color: "rgba(255,255,255,0.92)",
+      color: barLabelColor,
       fontSize: 10,
       formatter: (p: { value?: number }) => {
         const v = Number(p.value);
@@ -205,7 +208,7 @@ export function buildStackedHorizontalBarOption(
         : undefined,
     tooltip: compact
       ? { show: false }
-      : buildAxisTooltipShell(axisTooltipFormatter),
+      : buildAxisTooltipShell(axisTooltipFormatter, isDark),
     legend: compact
       ? { show: false }
       : {
@@ -213,7 +216,7 @@ export function buildStackedHorizontalBarOption(
           bottom: 0,
           left: 12,
           right: 12,
-          textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
+          textStyle: { color: labelColor, fontSize: 11 },
           data: seriesKeys.map((k) => config?.[k]?.label ?? k),
         },
     grid: compact

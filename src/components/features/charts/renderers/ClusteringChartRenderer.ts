@@ -4,6 +4,7 @@ import type { ChartOptionBuildProps } from "../core/chartTypes";
 import { withBaseOption } from "../core/baseOption";
 import { buildGrid, buildYAxis } from "../core/axisDefaults";
 import { DEFAULT_SERIES_COLORS } from "../core/constants";
+import { getChartAxisColors } from "../core/colorResolver";
 
 const CLUSTER_COLORS = DEFAULT_SERIES_COLORS;
 
@@ -125,7 +126,17 @@ function kMeans(
 export function buildClusteringOption(
   props: ChartOptionBuildProps,
 ): EChartsOption {
-  const { data, compact = false, title } = props;
+  const { data, compact = false, title, isDark = true } = props;
+  const { labelColor, splitLineColor, axisLineColor } = getChartAxisColors(isDark);
+
+  const tooltipBg = isDark ? "rgba(20,20,30,0.92)" : "rgba(255,255,255,0.96)";
+  const tooltipBorder = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.12)";
+  const tooltipText = isDark ? "#fff" : "#111827";
+  const tooltipSubText = isDark ? "#9CA3AF" : "#6b7280";
+  const tooltipSeparator = isDark ? "#4B5563" : "#e5e7eb";
+  const tooltipFieldText = isDark ? "#D1D5DB" : "#374151";
+  const dotBorder = isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.18)";
+
   const keys = resolveScatterKeys(props);
   if (!keys) return withBaseOption({ series: [] });
 
@@ -196,7 +207,7 @@ export function buildClusteringOption(
   const xAxisName = toAxisName(xKey, "Total Orders");
   const yAxisName = toAxisName(yKey, "Total Spend");
 
-  const yAxisBase = buildYAxis(compact, true, undefined);
+  const yAxisBase = buildYAxis(compact, true, undefined, isDark);
   return withBaseOption({
     grid: {
       ...buildGrid(compact, Boolean(title)),
@@ -212,18 +223,18 @@ export function buildClusteringOption(
       nameLocation: "middle",
       nameGap: 36,
       nameTextStyle: {
-        color: "rgba(255,255,255,0.78)",
+        color: labelColor,
         fontSize: 12,
         fontWeight: 500,
       },
-      axisLine: { lineStyle: { color: "rgba(255,255,255,0.15)" } },
+      axisLine: { lineStyle: { color: axisLineColor } },
       axisTick: { show: false },
       axisLabel: compact
         ? { show: false }
-        : { color: "rgba(255,255,255,0.65)", fontSize: 11, hideOverlap: true },
+        : { color: labelColor, fontSize: 11, hideOverlap: true },
       splitLine: {
         show: !compact,
-        lineStyle: { color: "rgba(255,255,255,0.08)" },
+        lineStyle: { color: splitLineColor },
       },
     },
     yAxis: {
@@ -235,7 +246,7 @@ export function buildClusteringOption(
       nameLocation: "middle",
       nameGap: 52,
       nameTextStyle: {
-        color: "rgba(255,255,255,0.78)",
+        color: labelColor,
         fontSize: 12,
         fontWeight: 500,
       },
@@ -248,10 +259,10 @@ export function buildClusteringOption(
           renderMode: "html",
           appendToBody: true,
           confine: false,
-          backgroundColor: "rgba(20,20,30,0.92)",
-          borderColor: "rgba(255,255,255,0.1)",
+          backgroundColor: tooltipBg,
+          borderColor: tooltipBorder,
           borderWidth: 1,
-          textStyle: { color: "#fff", fontSize: 12 },
+          textStyle: { color: tooltipText, fontSize: 12 },
           formatter: (param: {
             value?: number[];
             marker?: string;
@@ -282,23 +293,23 @@ export function buildClusteringOption(
             const extraBlock =
               extraEntries.length > 0
                 ? `
-                  <div style="margin-top:6px;padding-top:6px;border-top:1px solid #4B5563;font-size:11px;color:#9CA3AF">Other fields</div>
+                  <div style="margin-top:6px;padding-top:6px;border-top:1px solid ${tooltipSeparator};font-size:11px;color:${tooltipSubText}">Other fields</div>
                   ${extraEntries
                     .slice(0, 4)
                     .map(
                       ([k, val]) =>
-                        `<div style="font-size:11px;color:#D1D5DB;margin:0">${toAxisName(k, k)}: ${String(val)}</div>`,
+                        `<div style="font-size:11px;color:${tooltipFieldText};margin:0">${toAxisName(k, k)}: ${String(val)}</div>`,
                     )
                     .join("")}
                 `
                 : "";
 
             return `
-              <div style="font-size:22px;font-weight:600;line-height:1.2;margin-bottom:4px">${clusterLabel}</div>
-              <div>${param.marker ?? ""} ${xAxisName}: <b>${xText}</b></div>
-              <div>${yAxisName}: <b>${yText}</b></div>
+              <div style="font-size:12px"><b>${clusterLabel}</b><br/>
+              ${param.marker ?? ""} ${xAxisName}: <b>${xText}</b><br/>
+              ${yAxisName}: <b>${yText}</b>
               ${extraBlock}
-            `;
+            </div>`;
           },
         },
     visualMap: compact
@@ -317,7 +328,7 @@ export function buildClusteringOption(
           splitNumber: clusterCount,
           dimension: 2,
           pieces,
-          textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
+          textStyle: { color: labelColor, fontSize: 11 },
         },
     series: [
       {
@@ -325,7 +336,7 @@ export function buildClusteringOption(
         encode: { tooltip: [0, 1] },
         symbolSize: 15,
         itemStyle: {
-          borderColor: "rgba(255,255,255,0.3)",
+          borderColor: dotBorder,
           borderWidth: 1,
         },
         data: clustered.map((p) => ({

@@ -1,4 +1,5 @@
 import type { EChartsOption } from "echarts";
+import { getChartAxisColors } from "./colorResolver";
 
 export function buildGrid(
   compact: boolean,
@@ -54,7 +55,9 @@ export function buildXAxis(
   categories: (string | number)[],
   chartType: "bar" | "line" | "area",
   formatCategory: (v: string | number) => string,
+  isDark = true,
 ): EChartsOption["xAxis"] {
+  const { labelColor, axisLineColor } = getChartAxisColors(isDark);
   if (compact) {
     return {
       type: "category",
@@ -76,12 +79,12 @@ export function buildXAxis(
       hideOverlap: barRotated ? false : true,
       width: rotated ? 92 : 120,
       fontSize: 11,
-      color: "rgba(255,255,255,0.65)",
+      color: labelColor,
       margin: 14,
       formatter: formatCategory,
     },
     axisLine: {
-      lineStyle: { color: "rgba(255,255,255,0.15)" },
+      lineStyle: { color: axisLineColor },
     },
     axisTick: { show: false },
   };
@@ -91,7 +94,9 @@ export function buildYAxis(
   compact: boolean,
   showGrid: boolean,
   yMinMax: [number, number] | undefined,
+  isDark = true,
 ): EChartsOption["yAxis"] {
+  const { labelColor, splitLineColor } = getChartAxisColors(isDark);
   if (compact) {
     return {
       type: "value",
@@ -105,7 +110,7 @@ export function buildYAxis(
     splitNumber: 4,
     axisLabel: {
       fontSize: 11,
-      color: "rgba(255,255,255,0.65)",
+      color: labelColor,
       margin: 10,
       hideOverlap: true,
       formatter: (value: number | string) => {
@@ -118,7 +123,7 @@ export function buildYAxis(
     },
     splitLine: showGrid
       ? {
-          lineStyle: { color: "rgba(255,255,255,0.08)" },
+          lineStyle: { color: splitLineColor },
         }
       : { show: false },
     axisLine: { show: false },

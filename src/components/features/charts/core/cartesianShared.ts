@@ -5,7 +5,7 @@ import {
   formatTooltipValue,
 } from "../ChartTooltip";
 import { buildGrid, buildXAxis, buildYAxis } from "./axisDefaults";
-import { buildEChartsTheme, resolveColor } from "./colorResolver";
+import { buildEChartsTheme, getChartAxisColors, resolveColor } from "./colorResolver";
 import { DEFAULT_SERIES_COLORS } from "./constants";
 import type { ChartOptionBuildProps } from "./chartTypes";
 import { buildAxisTooltipShell } from "./tooltipDefaults";
@@ -29,6 +29,7 @@ export function composeCartesianOption(
     showLegend,
     showGrid = true,
     strokeWidth = 2,
+    isDark = true,
   } = props;
 
   const sample = data[0];
@@ -88,8 +89,11 @@ export function composeCartesianOption(
     categories as (string | number)[],
     cartesianType,
     formatAxisCategoryLabel,
+    isDark,
   );
-  const yAxis = buildYAxis(compact, showGrid, yMinMax);
+  const yAxis = buildYAxis(compact, showGrid, yMinMax, isDark);
+
+  const { labelColor } = getChartAxisColors(isDark);
 
   const seriesList: EChartsOption["series"] =
     cartesianType === "bar"
@@ -180,7 +184,7 @@ export function composeCartesianOption(
         : undefined,
     tooltip: compact
       ? { show: false }
-      : buildAxisTooltipShell(axisTooltipFormatter),
+      : buildAxisTooltipShell(axisTooltipFormatter, isDark),
     legend: compact
       ? { show: false }
       : {
@@ -188,7 +192,7 @@ export function composeCartesianOption(
           bottom: 0,
           left: 12,
           right: 12,
-          textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
+          textStyle: { color: labelColor, fontSize: 11 },
           data: seriesKeys.map((k) => config?.[k]?.label ?? k),
         },
     grid,

@@ -2,6 +2,7 @@ import type { EChartsOption } from "echarts";
 
 import type { ChartOptionBuildProps } from "../core/chartTypes";
 import { withBaseOption } from "../core/baseOption";
+import { getChartAxisColors } from "../core/colorResolver";
 
 type HeatmapTriple = [number, number, number];
 
@@ -139,7 +140,12 @@ function transformHeatmapData(props: ChartOptionBuildProps): HeatmapTransform | 
 }
 
 export function buildHeatmapOption(props: ChartOptionBuildProps): EChartsOption {
-  const { compact = false, title } = props;
+  const { compact = false, title, isDark = true } = props;
+  const { labelColor, axisLineColor } = getChartAxisColors(isDark);
+
+  const tooltipBg     = isDark ? "rgba(20,20,30,0.92)"   : "rgba(255,255,255,0.96)";
+  const tooltipBorder = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.12)";
+  const tooltipText   = isDark ? "#fff"                  : "#111827";
   const transformed = transformHeatmapData(props);
   if (!transformed || transformed.data.length === 0) {
     return withBaseOption({ series: [] });
@@ -168,7 +174,7 @@ export function buildHeatmapOption(props: ChartOptionBuildProps): EChartsOption 
       axisLabel: {
         rotate: xLabels.length > 10 ? 32 : xLabels.length > 6 ? 22 : 0,
         fontSize: 11,
-        color: "rgba(255,255,255,0.65)",
+        color: labelColor,
         interval: xLabels.length > 16 ? "auto" : 0,
         overflow: "truncate",
         hideOverlap: true,
@@ -176,7 +182,7 @@ export function buildHeatmapOption(props: ChartOptionBuildProps): EChartsOption 
         margin: 10,
       },
       splitArea: { show: true },
-      axisLine: { lineStyle: { color: "rgba(255,255,255,0.15)" } },
+      axisLine: { lineStyle: { color: axisLineColor } },
       axisTick: { show: false },
     },
     yAxis: {
@@ -184,7 +190,7 @@ export function buildHeatmapOption(props: ChartOptionBuildProps): EChartsOption 
       data: yLabels,
       axisLabel: {
         fontSize: 11,
-        color: "rgba(255,255,255,0.65)",
+        color: labelColor,
         overflow: "truncate",
         width: 112,
         hideOverlap: true,
@@ -211,7 +217,7 @@ export function buildHeatmapOption(props: ChartOptionBuildProps): EChartsOption 
             bottom: 18,
             itemWidth: 140,
             itemHeight: 8,
-            textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
+            textStyle: { color: labelColor, fontSize: 11 },
             inRange: { color: ["#e8edf7", "#3b5fc0"] },
           },
         ],
@@ -221,17 +227,17 @@ export function buildHeatmapOption(props: ChartOptionBuildProps): EChartsOption 
       appendToBody: true,
       confine: false,
       position: "top",
-      backgroundColor: "rgba(20,20,30,0.92)",
-      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: tooltipBg,
+      borderColor: tooltipBorder,
       borderWidth: 1,
-      textStyle: { color: "#fff", fontSize: 12 },
+      textStyle: { color: tooltipText, fontSize: 12 },
       extraCssText: "max-width: 320px; white-space: normal; z-index: 9999;",
       formatter: (p: { value?: number[] }) => {
         const v = p.value;
         if (!v || v.length < 3) return "";
         const xLabel = xLabels[v[0] ?? 0] ?? "";
         const yLabel = yLabels[v[1] ?? 0] ?? "";
-        return `${yLabel} / ${xLabel}: ${Number(v[2]).toLocaleString()}`;
+        return `<div style="font-size:12px"><b>${yLabel}</b> / <b>${xLabel}</b><br/>${Number(v[2]).toLocaleString()}</div>`;
       },
     },
     series: [

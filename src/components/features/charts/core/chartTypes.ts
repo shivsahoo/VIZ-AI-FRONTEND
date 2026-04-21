@@ -53,6 +53,8 @@ export interface ChartOptionBuildProps extends ChartRendererProps {
   showGrid?: boolean;
   colors?: string[];
   strokeWidth?: number;
+  /** Whether the UI is currently in dark mode. Used to set axis/label colors. */
+  isDark?: boolean;
 }
 
 /** @alias Stable public name used by `ChartCard` consumers. */

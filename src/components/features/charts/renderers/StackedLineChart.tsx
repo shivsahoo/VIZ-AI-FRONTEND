@@ -5,7 +5,7 @@ import {
   formatTooltipValue,
 } from "../ChartTooltip";
 import { buildGrid, buildXAxis, buildYAxis } from "../core/axisDefaults";
-import { buildEChartsTheme, resolveColor } from "../core/colorResolver";
+import { buildEChartsTheme, getChartAxisColors, resolveColor } from "../core/colorResolver";
 import { DEFAULT_SERIES_COLORS } from "../core/constants";
 import { buildAxisTooltipShell } from "../core/tooltipDefaults";
 import { isDateStringSample } from "../core/pieHelpers";
@@ -295,7 +295,10 @@ function buildStackedLineOption(
     data,
     extraFields,
     title,
+    isDark = true,
   } = props;
+
+  const { labelColor } = getChartAxisColors(isDark);
 
   const legendVisible =
     showLegend !== undefined
@@ -390,7 +393,7 @@ function buildStackedLineOption(
     animation: compact ? false : true,
     backgroundColor: "transparent",
     textStyle: { fontFamily: "inherit" },
-    tooltip: compact ? { show: false } : buildAxisTooltipShell(axisTooltipFormatter),
+    tooltip: compact ? { show: false } : buildAxisTooltipShell(axisTooltipFormatter, isDark),
     legend: compact
       ? { show: false }
       : {
@@ -398,7 +401,7 @@ function buildStackedLineOption(
           left: 12,
           right: 12,
           bottom: 0,
-          textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
+          textStyle: { color: labelColor, fontSize: 11 },
           data: (transformed.legendData ?? []).map((name: unknown) =>
             config?.[String(name ?? "")]?.label ?? String(name ?? ""),
           ),
@@ -409,8 +412,9 @@ function buildStackedLineOption(
       transformed.xAxisData as (string | number)[],
       "line",
       formatAxisCategoryLabel,
+      isDark,
     ),
-    yAxis: buildYAxis(compact, showGrid, undefined),
+    yAxis: buildYAxis(compact, showGrid, undefined, isDark),
     series: normalizedSeries,
   }
 }

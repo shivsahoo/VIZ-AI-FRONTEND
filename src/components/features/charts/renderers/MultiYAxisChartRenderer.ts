@@ -4,6 +4,7 @@ import type { ChartOptionBuildProps } from "../core/chartTypes";
 import { withBaseOption } from "../core/baseOption";
 import { buildAxisTooltipShell } from "../core/tooltipDefaults";
 import { DEFAULT_SERIES_COLORS } from "../core/constants";
+import { getChartAxisColors } from "../core/colorResolver";
 
 function isNumericValue(v: unknown): boolean {
   return v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v));
@@ -24,7 +25,8 @@ function formatMetricValue(value: number): string {
 }
 
 export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOption {
-  const { data, axisConfig, compact = false, title, colors } = props;
+  const { data, axisConfig, compact = false, title, colors, isDark = true } = props;
+  const { labelColor, splitLineColor, axisLineColor } = getChartAxisColors(isDark);
   if (!data.length || typeof data[0] !== "object") {
     return withBaseOption({ series: [] });
   }
@@ -65,12 +67,12 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
       axisTick: { show: false },
       splitLine:
         index === 2 && !compact
-          ? { lineStyle: { color: "rgba(255,255,255,0.08)" } }
+          ? { lineStyle: { color: splitLineColor } }
           : { show: false },
       axisLabel: compact
         ? { show: false }
         : {
-            color: "rgba(255,255,255,0.68)",
+            color: labelColor,
             fontSize: 11,
             formatter: (v: number | string) => formatMetricValue(Number(v)),
           },
@@ -111,7 +113,7 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
         return `${p.marker ?? ""} ${p.seriesName ?? "Series"}: <b>${formatMetricValue(value)}</b>`;
       })
       .join("<br/>");
-    return `<div><div style="font-size:18px;font-weight:600;margin-bottom:4px">${titleLabel}</div>${rows}</div>`;
+    return `<div style="font-size:12px"><b>${titleLabel}</b><br/>${rows}</div>`;
   };
 
   return withBaseOption({
@@ -122,13 +124,13 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
         : {
             text: title,
             left: "center",
-            textStyle: { fontSize: 14, color: "rgba(255,255,255,0.92)" },
+            textStyle: { fontSize: 14, color: labelColor },
           },
     color: palette,
     tooltip: compact
       ? { show: false }
       : {
-          ...buildAxisTooltipShell(tooltipFormatter),
+          ...buildAxisTooltipShell(tooltipFormatter, isDark),
           axisPointer: { type: "cross" },
         },
     legend: compact
@@ -138,7 +140,7 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
           left: 12,
           right: 12,
           bottom: 0,
-          textStyle: { color: "rgba(255,255,255,0.68)", fontSize: 11 },
+          textStyle: { color: labelColor, fontSize: 11 },
           data: series.map((s) => s.name),
         },
     grid: compact
@@ -151,13 +153,13 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
       axisLabel: compact
         ? { show: false }
         : {
-            color: "rgba(255,255,255,0.68)",
+            color: labelColor,
             fontSize: 11,
             hideOverlap: true,
             interval: 0,
             rotate: categories.length > 8 ? 26 : 0,
           },
-      axisLine: { lineStyle: { color: "rgba(255,255,255,0.15)" } },
+      axisLine: { lineStyle: { color: axisLineColor } },
     },
     yAxis: yAxisDefs,
     series,

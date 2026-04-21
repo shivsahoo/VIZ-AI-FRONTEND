@@ -2,12 +2,18 @@ import type { EChartsOption } from "echarts";
 import type { YAXisOption } from "echarts/types/dist/shared";
 
 import type { ChartOptionBuildProps } from "../core/chartTypes";
-import { resolveColor } from "../core/colorResolver";
+import { resolveColor, getChartAxisColors } from "../core/colorResolver";
 import { buildGrid, buildYAxis } from "../core/axisDefaults";
 import { withBaseOption } from "../core/baseOption";
 
 export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption {
-  const { data, axisConfig, config, compact = false, title } = props;
+  const { data, axisConfig, config, compact = false, title, isDark = true } = props;
+  const { labelColor, splitLineColor, axisLineColor } = getChartAxisColors(isDark);
+
+  const tooltipBg = isDark ? "rgba(20,20,30,0.92)" : "rgba(255,255,255,0.96)";
+  const tooltipBorder = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.12)";
+  const tooltipText = isDark ? "#fff" : "#111827";
+  const dotBorder = isDark ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.15)";
 
   const xKey =
     axisConfig?.xAxisKey ?? props.xAxisKey ?? props.dataKeys[0];
@@ -57,7 +63,7 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
     yMinMax = [yMin - yPadding, yMax + yPadding];
   }
 
-  const yAxisBase = buildYAxis(compact, true, yMinMax);
+  const yAxisBase = buildYAxis(compact, true, yMinMax, isDark);
 
   const xDistinctCount = new Set(seriesData.map((p) => p[0])).size;
   let jitterApplied = false;
@@ -85,13 +91,13 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
       name: xKey,
       nameLocation: "middle",
       nameGap: compact ? 0 : 36,
-      nameTextStyle: { color: "rgba(255,255,255,0.5)", fontSize: 11 },
+      nameTextStyle: { color: labelColor, fontSize: 11 },
       show: !compact,
       axisLabel: compact
         ? { show: false }
         : {
             fontSize: 11,
-            color: "rgba(255,255,255,0.65)",
+            color: labelColor,
             hideOverlap: true,
             formatter: (v: number) =>
               v >= 1_000_000
@@ -100,11 +106,11 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
                   ? `${(v / 1_000).toFixed(0)}K`
                   : `${v}`,
           },
-      axisLine: { lineStyle: { color: "rgba(255,255,255,0.15)" } },
+      axisLine: { lineStyle: { color: axisLineColor } },
       axisTick: { show: false },
       splitLine: {
         show: !compact,
-        lineStyle: { color: "rgba(255,255,255,0.08)" },
+        lineStyle: { color: splitLineColor },
       },
     },
     yAxis: {
@@ -112,13 +118,13 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
       name: yKey,
       nameLocation: "middle" as const,
       nameGap: compact ? 0 : 56,
-      nameTextStyle: { color: "rgba(255,255,255,0.5)", fontSize: 11 },
+      nameTextStyle: { color: labelColor, fontSize: 11 },
       axisLabel: (
         compact
           ? { show: false as const }
           : {
               fontSize: 11,
-              color: "rgba(255,255,255,0.65)",
+              color: labelColor,
               hideOverlap: true,
               formatter: (v: number) =>
                 v >= 1_000_000
@@ -131,10 +137,10 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
     } as YAXisOption,
     tooltip: {
       trigger: "item",
-      backgroundColor: "rgba(20,20,30,0.92)",
-      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: tooltipBg,
+      borderColor: tooltipBorder,
       borderWidth: 1,
-      textStyle: { color: "#fff", fontSize: 12 },
+      textStyle: { color: tooltipText, fontSize: 12 },
       formatter: (param: any) => {
         const idx = param.dataIndex;
         const row = typeof idx === "number" ? data[idx] : undefined;
@@ -171,7 +177,7 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
             props.colors
           ),
           opacity: 0.75,
-          borderColor: "rgba(255,255,255,0.2)",
+          borderColor: dotBorder,
           borderWidth: 1,
         },
         emphasis: {

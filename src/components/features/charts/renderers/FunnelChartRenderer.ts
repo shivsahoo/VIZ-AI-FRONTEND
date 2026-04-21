@@ -1,13 +1,22 @@
 import type { EChartsOption } from "echarts";
 
 import type { ChartOptionBuildProps } from "../core/chartTypes";
-import { resolveColor } from "../core/colorResolver";
+import { resolveColor, getChartAxisColors } from "../core/colorResolver";
 import { withBaseOption } from "../core/baseOption";
 
 const MAX_VISIBLE_FUNNEL_STAGES = 7;
 
 export function buildFunnelOption(props: ChartOptionBuildProps): EChartsOption {
-  const { data, axisConfig, config, colors, compact = false } = props;
+  const { data, axisConfig, config, colors, compact = false, isDark = true } = props;
+  const { labelColor } = getChartAxisColors(isDark);
+
+  const tooltipBg = isDark ? "rgba(20,20,30,0.92)" : "rgba(255,255,255,0.96)";
+  const tooltipBorder = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.12)";
+  const tooltipText = isDark ? "#fff" : "#111827";
+  // Inside-label always sits on a colored band, so white works for both themes.
+  // Outside label should match the axis label color (dark text in light mode).
+  const outsideLabelColor = labelColor;
+
   const labelKey = axisConfig?.xAxisKey ?? props.xAxisKey;
   const valueKey = axisConfig?.valueKey ?? props.dataKeys[0];
 
@@ -37,10 +46,10 @@ export function buildFunnelOption(props: ChartOptionBuildProps): EChartsOption {
   return withBaseOption({
     tooltip: {
       trigger: "item",
-      backgroundColor: "rgba(20,20,30,0.92)",
-      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: tooltipBg,
+      borderColor: tooltipBorder,
       borderWidth: 1,
-      textStyle: { color: "#fff", fontSize: 12 },
+      textStyle: { color: tooltipText, fontSize: 12 },
       formatter: (p: {
         name?: string;
         value?: number;
@@ -63,7 +72,7 @@ export function buildFunnelOption(props: ChartOptionBuildProps): EChartsOption {
       left: 12,
       right: 12,
       bottom: 0,
-      textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
+      textStyle: { color: labelColor, fontSize: 11 },
     },
     series: [
       {
@@ -77,7 +86,9 @@ export function buildFunnelOption(props: ChartOptionBuildProps): EChartsOption {
         label: {
           show: true,
           position: useOutsideLabels ? "right" : "inside",
-          color: useOutsideLabels ? "rgba(255,255,255,0.72)" : "#fff",
+          // Inside labels sit on colored bands — keep white for contrast.
+          // Outside labels should match the theme text color.
+          color: useOutsideLabels ? outsideLabelColor : "#fff",
           fontSize: 11,
           overflow: "truncate",
           width: useOutsideLabels ? 140 : 160,

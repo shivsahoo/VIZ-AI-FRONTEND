@@ -4,6 +4,7 @@ import type { ChartOptionBuildProps } from "./chartTypes";
 import { PIE_SEGMENT_COLORS } from "./constants";
 import { resolvePieNameKey } from "./pieHelpers";
 import { formatPieTooltip } from "./pieTooltip";
+import { getChartAxisColors } from "./colorResolver";
 
 /** ECharts option for the pie series (invoked from `buildChartOption` after keys are resolved). */
 export function composePieOption(
@@ -17,7 +18,9 @@ export function composePieOption(
     compact = false,
     showLegend,
     extraFields,
+    isDark = true,
   } = props;
+  const { labelColor } = getChartAxisColors(isDark);
 
   const sample = data[0];
   const valueKey = seriesKeys[0] ?? "value";
@@ -65,6 +68,7 @@ export function composePieOption(
               data,
               valueKey,
               extraFields,
+              isDark,
             ),
         },
     legend: compact
@@ -74,7 +78,7 @@ export function composePieOption(
           left: 12,
           right: 12,
           bottom: 0,
-          textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
+          textStyle: { color: labelColor, fontSize: 11 },
         },
     series: [
       {
@@ -86,7 +90,7 @@ export function composePieOption(
         minShowLabelAngle: 4,
         itemStyle: {
           borderRadius: isDonut ? 6 : 4,
-          borderColor: "#111827",
+          borderColor: isDark ? "#111827" : "#ffffff",
           borderWidth: 2,
         },
         label: compact
@@ -94,7 +98,7 @@ export function composePieOption(
           : {
               show: true,
               position: "outside",
-              color: "rgba(255,255,255,0.72)",
+              color: labelColor,
               fontSize: 11,
               formatter: "{b}",
             },

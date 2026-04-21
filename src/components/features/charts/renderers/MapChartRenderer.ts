@@ -2,6 +2,7 @@ import type { EChartsOption } from "echarts";
 
 import type { ChartOptionBuildProps } from "../core/chartTypes";
 import { withBaseOption } from "../core/baseOption";
+import { getChartAxisColors } from "../core/colorResolver";
 
 const MAP_HIGHLIGHT_COLORS = [
   "#8B5CF6",
@@ -48,7 +49,25 @@ function normalizeCountryName(value: unknown): string {
  * Call `ensureWorldMapRegistered()` before rendering (handled in `ChartCard`).
  */
 export function buildMapOption(props: ChartOptionBuildProps): EChartsOption {
-  const { data, axisConfig, compact = false } = props;
+  const { data, axisConfig, compact = false, isDark = true } = props;
+  const { labelColor } = getChartAxisColors(isDark);
+
+  const tooltipBg = isDark ? "rgba(20,20,30,0.92)" : "rgba(255,255,255,0.96)";
+  const tooltipBorder = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.12)";
+  const tooltipText = isDark ? "#fff" : "#111827";
+
+  // Map fill colors — dark: near-black base, light: near-white base
+  const defaultAreaColor = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
+  const defaultAreaColorDistinct = isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)";
+  const borderColor = isDark ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.18)";
+  const emphasisBorderColor = isDark ? "#ffffff" : "#333333";
+  const emphasisShadowColor = isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.2)";
+
+  // Choropleth gradient — light mode uses a softer purple range
+  const choroplethColors = isDark
+    ? ["#1a1a2e", "#4a3f8f", "#7c6af7"]
+    : ["#e8e4ff", "#a78bfa", "#7c6af7"];
+
   const regionKey = axisConfig?.regionKey ?? props.xAxisKey;
   const metricKey = axisConfig?.metricKey ?? props.dataKeys[0];
 
@@ -70,10 +89,10 @@ export function buildMapOption(props: ChartOptionBuildProps): EChartsOption {
   return withBaseOption({
     tooltip: {
       trigger: "item",
-      backgroundColor: "rgba(20,20,30,0.92)",
-      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: tooltipBg,
+      borderColor: tooltipBorder,
       borderWidth: 1,
-      textStyle: { color: "#fff", fontSize: 12 },
+      textStyle: { color: tooltipText, fontSize: 12 },
       formatter: (p: { name?: string; value?: number | null }) =>
         p.value != null && !Number.isNaN(p.value)
           ? `<div style="font-size:12px"><b>${p.name ?? ""}</b><br/>
@@ -89,8 +108,8 @@ export function buildMapOption(props: ChartOptionBuildProps): EChartsOption {
           top: "bottom",
           text: [`${maxVal.toLocaleString()}`, `${minVal.toLocaleString()}`],
           calculable: true,
-          textStyle: { color: "rgba(255,255,255,0.65)", fontSize: 11 },
-          inRange: { color: ["#1a1a2e", "#4a3f8f", "#7c6af7"] },
+          textStyle: { color: labelColor, fontSize: 11 },
+          inRange: { color: choroplethColors },
         },
     series: [
       {
@@ -100,26 +119,26 @@ export function buildMapOption(props: ChartOptionBuildProps): EChartsOption {
         selectedMode: false,
         label: {
           show: false,
-          color: "rgba(255,255,255,0.72)",
+          color: labelColor,
           fontSize: 10,
         },
         emphasis: {
           label: {
             show: false,
-            color: "#fff",
+            color: isDark ? "#fff" : "#111827",
           },
           itemStyle: {
-            borderColor: "#ffffff",
+            borderColor: emphasisBorderColor,
             borderWidth: 1.2,
             shadowBlur: 12,
-            shadowColor: "rgba(255,255,255,0.25)",
+            shadowColor: emphasisShadowColor,
           },
         },
         itemStyle: {
           areaColor: useDistinctCountryColors
-            ? "rgba(255,255,255,0.05)"
-            : "rgba(255,255,255,0.08)",
-          borderColor: "rgba(255,255,255,0.2)",
+            ? defaultAreaColorDistinct
+            : defaultAreaColor,
+          borderColor: borderColor,
           borderWidth: 0.5,
         },
         data: mapData,
