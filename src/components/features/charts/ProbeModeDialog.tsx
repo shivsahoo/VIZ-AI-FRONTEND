@@ -462,10 +462,9 @@ export function ProbeModeDialog({
             setIsLoading(false);
           }
 
-          if (response.status !== "error") {
-            if (modifiedSql) workingSqlRef.current = modifiedSql;
-            if (modifiedChartType) workingChartTypeRef.current = modifiedChartType;
-          }
+          // Update working SQL/type refs (error case already returned early above)
+          if (modifiedSql) workingSqlRef.current = modifiedSql;
+          if (modifiedChartType) workingChartTypeRef.current = modifiedChartType;
         });
 
         await ws.connect();
@@ -573,6 +572,16 @@ export function ProbeModeDialog({
         msg.previewChartType ?? msg.modifiedChartType ?? chart.type ?? "bar",
       );
 
+      // Resolve axis fields from the preview config
+      const savedXAxis =
+        msg.chartPreview?.config.xAxisKey ??
+        msg.chartPreview?.spec?.x_axis ??
+        undefined;
+      const savedYAxis =
+        msg.chartPreview?.config.dataKeys?.primary ??
+        msg.chartPreview?.spec?.y_axis ??
+        undefined;
+
       const response = await addChartToDashboard({
         title: chart.name,
         query: msg.modifiedSql,
@@ -581,6 +590,8 @@ export function ProbeModeDialog({
         dashboard_id: String(dashboardId),
         data_connection_id: connectionId,
         report: msg.content,
+        x_axis: savedXAxis,
+        y_axis: savedYAxis,
       });
 
       if (response.success) {
@@ -622,10 +633,20 @@ export function ProbeModeDialog({
       msg.chartPreview?.config.xAxisKey ??
       msg.chartPreview?.spec?.x_axis ??
       undefined;
-    const yAxis =
-      msg.chartPreview?.config.dataKeys?.primary ??
-      msg.chartPreview?.spec?.y_axis ??
-      undefined;
+
+    // Collect ALL series keys so multi-measure stacked charts can be restored
+    const allSeriesKeys: string[] = [];
+    if (msg.chartPreview?.config.dataKeys?.primary) {
+      allSeriesKeys.push(msg.chartPreview.config.dataKeys.primary);
+    }
+    if (msg.chartPreview?.config.dataKeys?.secondary) {
+      allSeriesKeys.push(msg.chartPreview.config.dataKeys.secondary);
+    }
+    if ((msg.chartPreview?.config as any)?.extraKeys?.length) {
+      allSeriesKeys.push(...(msg.chartPreview!.config as any).extraKeys);
+    }
+
+    const yAxis = allSeriesKeys[0] ?? msg.chartPreview?.spec?.y_axis ?? undefined;
 
     const isTimeBased =
       chart.spec?.type === "time_series"
@@ -649,6 +670,8 @@ export function ProbeModeDialog({
         config: {
           xAxis: xAxis || undefined,
           yAxis: yAxis || undefined,
+          // Store all series keys so the stacked layout can be restored on reload
+          ...(allSeriesKeys.length > 1 ? { seriesKeys: allSeriesKeys } as any : {}),
         },
       });
 

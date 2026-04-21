@@ -97,6 +97,13 @@ interface Chart {
   isGenerated?: boolean;
   isFavorite?: boolean;
   is_time_based?: boolean;
+  /** Saved axis/series config from the backend (x_axis, y_axis, seriesKeys). */
+  config?: {
+    xAxis?: string;
+    yAxis?: string;
+    /** All measure/series column names for stacked/multi-series charts. */
+    seriesKeys?: string[];
+  };
   dateRange?: {
     startDate: Date | null;
     endDate: Date | null;
@@ -381,7 +388,13 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         ? formatDateForAPI(dateRange.endDate)
         : undefined;
 
-      const response = await getChartData(chartKey, chart.databaseId, chart.query, fromDate, toDate);
+      // Pass saved axis hints so execute-query returns the right column metadata
+      const axisHints =
+        chart.config?.xAxis || chart.config?.yAxis
+          ? { xAxis: chart.config.xAxis ?? null, yAxis: chart.config.yAxis ?? null }
+          : undefined;
+
+      const response = await getChartData(chartKey, chart.databaseId, chart.query, fromDate, toDate, false, axisHints);
 
       if (response.success && response.data) {
         setChartDataStatus((prev) => ({
@@ -631,6 +644,15 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           isGenerated: false,
           isFavorite: (chart as any).isFavorite || false,
           is_time_based: chart.is_time_based ?? false,
+          // Carry saved axis/series config so axis hints survive the list view
+          config: chart.config
+            ? {
+                xAxis: chart.config.xAxis ?? undefined,
+                yAxis: chart.config.yAxis ?? undefined,
+                seriesKeys:
+                  (chart.config as any).seriesKeys ?? undefined,
+              }
+            : undefined,
         }));
       } else {
         toast.error(chartsResponse.error?.message || "Failed to load charts");
@@ -671,6 +693,11 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                 isGenerated: false,
                 isFavorite: false,
                 is_time_based: chart.is_time_based ?? false,
+                // Carry saved axis info from dashboard chart response
+                config:
+                  chart.x_axis || chart.y_axis
+                    ? { xAxis: chart.x_axis ?? undefined, yAxis: chart.y_axis ?? undefined }
+                    : undefined,
               };
             })
           );
@@ -702,6 +729,17 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             isGenerated: chart.isGenerated ?? existing.isGenerated,
             isFavorite: chart.isFavorite ?? existing.isFavorite,
             is_time_based: chart.is_time_based ?? existing.is_time_based ?? false,
+            // Merge config: prefer whichever has more data
+            config: (() => {
+              const a = existing.config;
+              const b = chart.config;
+              if (!a && !b) return undefined;
+              return {
+                xAxis: b?.xAxis ?? a?.xAxis,
+                yAxis: b?.yAxis ?? a?.yAxis,
+                seriesKeys: b?.seriesKeys ?? a?.seriesKeys,
+              };
+            })(),
           });
         } else {
           combinedChartsMap.set(key, chart);
@@ -925,8 +963,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     if (status?.data) {
       if (isExtendedChartType(chart.type)) {
         const ext = inferExtendedChartConfig(status.data, chart.type, {
-          xAxisKey: status.metadata?.xAxis ?? undefined,
-          yAxisKey: status.metadata?.yAxis ?? undefined,
+          xAxisKey: chart.config?.xAxis ?? status.metadata?.xAxis ?? undefined,
+          yAxisKey: chart.config?.yAxis ?? status.metadata?.yAxis ?? undefined,
         });
         preparedData = extendedToChartDataConfig(ext);
         preparedAxis = ext.axisConfig;
@@ -936,8 +974,9 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           status.data,
           chart.type as "line" | "bar" | "pie" | "area",
           {
-            xAxisHint: status.metadata?.xAxis ?? null,
-            yAxisHint: status.metadata?.yAxis ?? null,
+            xAxisHint: chart.config?.xAxis ?? status.metadata?.xAxis ?? null,
+            yAxisHint: chart.config?.yAxis ?? status.metadata?.yAxis ?? null,
+            seriesKeysHint: chart.config?.seriesKeys ?? null,
           },
         );
       }
@@ -1213,8 +1252,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     if (status?.data) {
       if (isExtendedChartType(chart.type)) {
         const ext = inferExtendedChartConfig(status.data, chart.type, {
-          xAxisKey: status.metadata?.xAxis ?? undefined,
-          yAxisKey: status.metadata?.yAxis ?? undefined,
+          xAxisKey: chart.config?.xAxis ?? status.metadata?.xAxis ?? undefined,
+          yAxisKey: chart.config?.yAxis ?? status.metadata?.yAxis ?? undefined,
         });
         preparedData = extendedToChartDataConfig(ext);
         listAxis = ext.axisConfig;
@@ -1222,10 +1261,11 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       } else {
         preparedData = inferChartDataConfig(
           status.data,
-          chart.type as "line" | "bar" | "pie" | "area",
+          chart.type as "line" | "bar" | "pie" | "area" | "stackedhorizontalbar" | "stackedlinechart" | "multiyaxischart",
           {
-            xAxisHint: status.metadata?.xAxis ?? null,
-            yAxisHint: status.metadata?.yAxis ?? null,
+            xAxisHint: chart.config?.xAxis ?? status.metadata?.xAxis ?? null,
+            yAxisHint: chart.config?.yAxis ?? status.metadata?.yAxis ?? null,
+            seriesKeysHint: chart.config?.seriesKeys ?? null,
           },
         );
       }
@@ -1291,10 +1331,14 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
               ...(preparedData.dataKeys.secondary
                 ? [preparedData.dataKeys.secondary]
                 : []),
+              ...(preparedData.extraKeys ?? []),
             ]}
             xAxisKey={preparedData.xAxisKey}
             axisConfig={listAxis}
-            showLegend={!!preparedData.dataKeys.secondary && displayChartType !== "pie"}
+            showLegend={
+              (!!preparedData.dataKeys.secondary || (preparedData.extraKeys?.length ?? 0) > 0) &&
+              displayChartType !== "pie"
+            }
             height={240}
           />
         )}

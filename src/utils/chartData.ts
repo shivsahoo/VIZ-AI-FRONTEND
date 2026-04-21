@@ -7,12 +7,24 @@ export interface ChartDataConfig {
     secondary?: string;
   };
   xAxisKey: string;
+  /**
+   * Additional series keys beyond primary/secondary for charts with 3+ measures
+   * (e.g. stackedhorizontalbar, stackedlinechart, multiyaxischart).
+   */
+  extraKeys?: string[];
 }
 
 /** Optional axis column names from execute-query metadata or saved chart config. */
 export interface InferChartDataOptions {
   xAxisHint?: string | null;
   yAxisHint?: string | null;
+  /**
+   * Saved series/measure column names from a previous chart save.
+   * When provided and all keys are present in the actual data, bypasses
+   * the pivot-detection heuristic and restores the exact multi-series layout.
+   * Applies to: stackedhorizontalbar, stackedlinechart, multiyaxischart.
+   */
+  seriesKeysHint?: string[] | null;
 }
 
 export const getDefaultChartDataConfig = (): ChartDataConfig => ({
@@ -106,6 +118,45 @@ export const inferChartDataConfig = (
     (key) => typeof sample[key] === "string" || typeof sample[key] === "object"
   );
   
+  // ── Saved series-keys hint (overrides pivot inference) ────────────────────
+  // When the caller provides seriesKeysHint (e.g. restored from a saved chart
+  // config) and all hint keys are actually present in the data columns, we skip
+  // the grouping/pivot heuristic and directly use those saved series keys.
+  // This is the primary fix for stackedhorizontalbar losing its stacking after
+  // a save/reload cycle.
+  const isStackedType =
+    chartType === "stackedhorizontalbar" ||
+    chartType === "stackedlinechart" ||
+    chartType === "multiyaxischart";
+
+  if (isStackedType && options?.seriesKeysHint && options.seriesKeysHint.length > 0) {
+    const hints = options.seriesKeysHint;
+    // Verify all hinted series keys actually exist in the current data
+    const allHintsPresent = hints.every((k) => keys.includes(k));
+    if (allHintsPresent) {
+      // Determine x-axis: prefer xAxisHint, then the first non-series column
+      const seriesSet = new Set(hints);
+      const xKey =
+        (options.xAxisHint && keys.includes(options.xAxisHint)
+          ? options.xAxisHint
+          : null) ??
+        keys.find((k) => !seriesSet.has(k) && !numericKeys.includes(k)) ??
+        keys.find((k) => !seriesSet.has(k)) ??
+        keys[0];
+
+      const [primary, secondary, ...rest] = hints;
+      return {
+        data: normalizedRows,
+        dataKeys: {
+          primary,
+          ...(secondary ? { secondary } : {}),
+        },
+        xAxisKey: xKey,
+        ...(rest.length > 0 ? { extraKeys: rest } : {}),
+      };
+    }
+  }
+
   // Check if we have a pattern like: date/month column, category column (user_type, status, etc.), and value column
   // This indicates we need to pivot the data
   const hasGroupingColumn = stringKeys.length >= 2 && numericKeys.length >= 1;
@@ -442,17 +493,37 @@ export function inferExtendedChartConfig(
           numericCols[1];
       }
 
-      const xDistinct = new Set(rows.map((r) => r[xKey])).size;
-      const yDistinct = new Set(rows.map((r) => r[yKey])).size;
+      // Guard: if either key is still undefined (e.g. numericCols was empty
+      // despite the length check above), fall back to a plain bar chart.
+      if (!xKey || !yKey) {
+        const legacy = inferChartDataConfig(rows, "bar", inferOptions);
+        return {
+          data: legacy.data,
+          dataKeys: [
+            legacy.dataKeys.primary,
+            ...(legacy.dataKeys.secondary ? [legacy.dataKeys.secondary] : []),
+          ],
+          xAxisKey: legacy.xAxisKey,
+          axisConfig: {
+            ...axisConfig,
+            xAxisKey: legacy.xAxisKey,
+            yAxisKey: legacy.dataKeys.primary,
+          },
+          fallbackType: "bar",
+        };
+      }
+
+      const xDistinct = new Set(rows.map((r) => r[xKey as string])).size;
+      const yDistinct = new Set(rows.map((r) => r[yKey as string])).size;
 
       if (yDistinct > xDistinct * 2) {
-        const t = xKey;
+        const t: string = xKey;
         xKey = yKey;
         yKey = t;
       }
 
-      const xD = new Set(rows.map((r) => r[xKey])).size;
-      const yD = new Set(rows.map((r) => r[yKey])).size;
+      const xD = new Set(rows.map((r) => r[xKey as string])).size;
+      const yD = new Set(rows.map((r) => r[yKey as string])).size;
 
       if (xD <= 3 && yD <= 3) {
         const legacy = inferChartDataConfig(rows, "bar", {
@@ -650,6 +721,7 @@ export function extendedToChartDataConfig(
   ext: ExtendedChartInferResult,
 ): ChartDataConfig {
   const secondary = ext.dataKeys[1];
+  const extraKeys = ext.dataKeys.slice(2);
   return {
     data: ext.data,
     dataKeys: {
@@ -657,6 +729,7 @@ export function extendedToChartDataConfig(
       ...(secondary ? { secondary } : {}),
     },
     xAxisKey: ext.xAxisKey,
+    ...(extraKeys.length > 0 ? { extraKeys } : {}),
   };
 }
 
