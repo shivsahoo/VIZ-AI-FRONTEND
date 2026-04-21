@@ -107,6 +107,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
             displayType = 'Oracle';
           } else if (rawType === 'salesforce') {
             displayType = 'Salesforce';
+          } else if (rawType === 'databricks') {
+            displayType = 'Databricks';
           }
 
           return {
@@ -173,6 +175,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
       setDbType('oracledb');
     } else if (normalizedType === 'salesforce') {
       setDbType('salesforce');
+    } else if (normalizedType === 'databricks') {
+      setDbType('databricks');
     } else {
       setDbType(normalizedType || 'postgresql');
     }
@@ -202,6 +206,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
           ? "oracledb"
           : dbType === "mysql"
           ? "mysql"
+          : dbType === "databricks"
+          ? "databricks"
           : dbType;
 
       const response = await updateConnection(selectedDatabase.id, {
@@ -274,7 +280,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h2 className="text-2xl text-foreground mb-1">Database Connections</h2>
-            <p className="text-muted-foreground">Manage your PostgreSQL and MySQL connections</p>
+            <p className="text-muted-foreground">Manage your database connections</p>
           </div>
           <GradientButton 
             onClick={() => setShowConnectionFlow(true)}
@@ -518,7 +524,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                     <SelectContent>
                       <SelectItem value="postgresql">PostgreSQL</SelectItem>
                       <SelectItem value="mysql">MySQL</SelectItem>
-                    <SelectItem value="oracledb">Oracle</SelectItem>
+                      <SelectItem value="oracledb">Oracle</SelectItem>
+                      <SelectItem value="databricks">Databricks</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -253,6 +253,14 @@ export function ProbeModeDialog({
             (state.query_x_axis ?? state.queryXAxis) ?? undefined;
           const queryYAxis: string | undefined =
             (state.query_y_axis ?? state.queryYAxis) ?? undefined;
+          const queryLabelColumns: string[] = Array.isArray(
+            state.query_label_columns ?? state.queryLabelColumns
+          )
+            ? (state.query_label_columns ?? state.queryLabelColumns)
+            : [];
+          const queryYAxes: string[] = Array.isArray(state.query_y_axes ?? state.queryYAxes)
+            ? (state.query_y_axes ?? state.queryYAxes)
+            : [];
 
           // Show a visual preview when SQL/type changed, or when the server already returned rows
           const hasQueryRows = Boolean(queryData?.length);
@@ -285,8 +293,32 @@ export function ProbeModeDialog({
           };
 
           /** Build ChartDataConfig using axis hints when available, auto-detect otherwise */
-          const buildConfig = (rows: any[], type: "bar" | "line" | "pie" | "area", xHint?: string, yHint?: string) => {
+          const buildConfig = (
+            rows: any[],
+            type: "bar" | "line" | "pie" | "area",
+            xHint?: string,
+            yHint?: string,
+            labelHints: string[] = [],
+            valueHints: string[] = [],
+          ) => {
             if (!rows.length) return getDefaultChartDataConfig();
+            // If probe returned multiple label columns (e.g., category + name),
+            // compose a readable x-axis label so secondary dimensions are not dropped visually.
+            if (type !== "pie" && labelHints.length > 1) {
+              const measureKey = yHint || valueHints[0] || queryYAxis || "value";
+              const withCompositeLabel = rows.map((r) => ({
+                ...r,
+                __viz_label: labelHints
+                  .map((k) => r?.[k])
+                  .filter((v) => v !== null && v !== undefined && String(v).trim() !== "")
+                  .join(" | "),
+              }));
+              return {
+                data: withCompositeLabel,
+                dataKeys: { primary: measureKey },
+                xAxisKey: "__viz_label",
+              };
+            }
             if (xHint && yHint) {
               // Backend already detected the best axes — use them directly
               if (type === "pie") {
@@ -317,7 +349,14 @@ export function ProbeModeDialog({
             if (queryData) {
               // ── Fast path: LLM service already executed the query ──────────
               newMsg.chartPreview = {
-                config: buildConfig(queryData, resolvedType, queryXAxis, queryYAxis),
+                config: buildConfig(
+                  queryData,
+                  resolvedType,
+                  queryXAxis,
+                  queryYAxis,
+                  queryLabelColumns,
+                  queryYAxes,
+                ),
                 spec: modifiedSpec ?? {},
                 isLoading: false,
               };
@@ -454,12 +493,12 @@ export function ProbeModeDialog({
         original_chart_spec: chart?.spec,
         db_schema: chart?.db_schema ?? "",
         db_type: (chart?.db_type ?? "postgres") as
-          | "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce",
+          | "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce" | "databricks",
         current_working_sql: workingSqlRef.current,
         current_chart_type: workingChartTypeRef.current,
       });
     } else {
-      // Send the same grounding fields every turn (backend prefixes [CONTEXT] each message).
+      // Follow-up turns: do NOT resend db_schema; backend uses probe_context_cache.
       wsRef.current.probeMode({
         user_message: trimmed,
         is_first_message: false,
@@ -468,13 +507,13 @@ export function ProbeModeDialog({
         original_chart_title: chart?.name ?? "",
         original_chart_type: workingChartTypeRef.current || chart?.type || "bar",
         original_chart_spec: chart?.spec,
-        db_schema: chart?.db_schema ?? "",
         db_type: (chart?.db_type ?? "postgres") as
           | "mysql"
           | "postgres"
           | "sqlite"
           | "oracledb"
-          | "salesforce",
+          | "salesforce"
+          | "databricks",
         current_working_sql: workingSqlRef.current,
         current_chart_type: workingChartTypeRef.current,
       });

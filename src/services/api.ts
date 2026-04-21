@@ -1754,6 +1754,7 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
  *   - connectionString: Full connection string (e.g., "postgresql://user:pass@host:port/db")
  *   - OR form fields: connectionName, dbType, host, port, database, username, password
  *   - Salesforce OAuth2 fields: sessionId, instanceUrl
+ *   - Databricks fields: workspaceUrl, httpPath, catalogName, schemaName, accessToken
  */
 export const createDatabase = async (
   projectId: string,
@@ -1770,6 +1771,12 @@ export const createDatabase = async (
     // Salesforce OAuth2 fields (session-based authentication only)
     sessionId?: string;
     instanceUrl?: string;
+    // Databricks fields
+    workspaceUrl?: string;
+    httpPath?: string;
+    catalogName?: string;
+    schemaName?: string;
+    accessToken?: string;
   }
 ): Promise<ApiResponse<DatabaseCreationTask>> => {
   try {
@@ -1797,6 +1804,8 @@ export const createDatabase = async (
         dbType = 'oracledb';
       } else if (dbType === 'salesforce') {
         dbType = 'salesforce';
+      } else if (dbType === 'databricks') {
+        dbType = 'databricks';
       }
       
       requestBody.connection_name = data.connectionName || '';
@@ -1811,6 +1820,12 @@ export const createDatabase = async (
         if (data.instanceUrl) {
           requestBody.instance_url = data.instanceUrl;
         }
+      } else if (dbType === 'databricks') {
+        requestBody.workspace_url = data.workspaceUrl || '';
+        requestBody.http_path = data.httpPath || '';
+        requestBody.catalog_name = data.catalogName || '';
+        requestBody.schema_name = data.schemaName || '';
+        requestBody.access_token = data.accessToken || '';
       } else {
         // Traditional database fields
         // Construct host with port if port is provided and different from default

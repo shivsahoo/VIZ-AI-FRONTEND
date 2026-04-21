@@ -409,7 +409,7 @@ export class VizAIWebSocket {
     nlq_query: string;
     data_connection_id: string;
     db_schema: string; // JSON string of database schema
-    db_type: "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce";
+    db_type: "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce" | "databricks";
     role: string;
     domain?: string;
     kpi_info?: string; // Project-level KPIs
@@ -457,7 +457,7 @@ export class VizAIWebSocket {
     original_chart_type?: string;
     original_chart_spec?: ChartSpec;
     db_schema?: string;
-    db_type?: 'mysql' | 'postgres' | 'sqlite' | 'oracledb' | 'salesforce';
+    db_type?: 'mysql' | 'postgres' | 'sqlite' | 'oracledb' | 'salesforce' | 'databricks';
     /**
      * Every turn: last executed SQL and chart type so the agent does not rely on
      * summarized memory (fixes e.g. sort applied to an old line-chart query after a bar conversion).
