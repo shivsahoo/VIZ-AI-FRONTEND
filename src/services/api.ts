@@ -1324,6 +1324,7 @@ export const addChartToDashboard = async (data: {
   is_time_based?: boolean;
   x_axis?: string | null;
   y_axis?: string | null;
+  series_keys?: string[];
 }): Promise<ApiResponse<{ chart_id: string }>> => {
   try {
     // Prepare request body - only include fields that have values
@@ -1356,6 +1357,9 @@ export const addChartToDashboard = async (data: {
     }
     if (data.y_axis) {
       requestBody.y_axis = data.y_axis;
+    }
+    if (Array.isArray(data.series_keys) && data.series_keys.length > 0) {
+      requestBody.series_keys = data.series_keys;
     }
 
     const response = await apiRequest<{

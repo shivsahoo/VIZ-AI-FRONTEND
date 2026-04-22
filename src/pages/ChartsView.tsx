@@ -963,8 +963,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     if (status?.data) {
       if (isExtendedChartType(chart.type)) {
         const ext = inferExtendedChartConfig(status.data, chart.type, {
-          xAxisKey: chart.config?.xAxis ?? status.metadata?.xAxis ?? undefined,
-          yAxisKey: chart.config?.yAxis ?? status.metadata?.yAxis ?? undefined,
+          xAxisKey: chart.config?.xAxis ?? undefined,
+          yAxisKey: chart.config?.yAxis ?? undefined,
         });
         preparedData = extendedToChartDataConfig(ext);
         preparedAxis = ext.axisConfig;
@@ -974,8 +974,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           status.data,
           chart.type as "line" | "bar" | "pie" | "area",
           {
-            xAxisHint: chart.config?.xAxis ?? status.metadata?.xAxis ?? null,
-            yAxisHint: chart.config?.yAxis ?? status.metadata?.yAxis ?? null,
+            xAxisHint: chart.config?.xAxis ?? null,
+            yAxisHint: chart.config?.yAxis ?? null,
             seriesKeysHint: chart.config?.seriesKeys ?? null,
           },
         );
@@ -1191,6 +1191,9 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         dashboard_id: selectedDashboardForAdd,
         data_connection_id: databaseId,
         type: chart.type,
+        x_axis: chart.config?.xAxis,
+        y_axis: chart.config?.yAxis,
+        series_keys: chart.config?.seriesKeys,
       });
 
       if (response.success) {
@@ -1346,138 +1349,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     );
   };
 
-  const renderDateRangeButton = (chart: Chart) => {
-    const chartKey = String(chart.id);
-    const isOpen = openDatePicker === chartKey;
 
-    return (
-      <div 
-        data-date-picker="true"
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        onMouseDown={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        onMouseUp={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        className="relative"
-      >
-        <DatePicker
-          selectsRange
-          open={isOpen}
-          onClickOutside={() => setOpenDatePicker(null)}
-          onInputClick={() => {
-            setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
-          }}
-          startDate={chartDateRanges[String(chart.id)]?.startDate || chart.dateRange?.startDate || null}
-          endDate={chartDateRanges[String(chart.id)]?.endDate || chart.dateRange?.endDate || null}
-          onChange={(dates) => {
-            const [start, end] = dates as [Date | null, Date | null];
-            const chartKey = String(chart.id);
-            setChartDateRanges(prev => ({
-              ...prev,
-              [chartKey]: { startDate: start, endDate: end }
-            }));
-            
-            // Update chart object
-            setCharts(prev => prev.map(c => 
-              c.id === chart.id 
-                ? { ...c, dateRange: { startDate: start, endDate: end } }
-                : c
-            ));
-            
-            // Fetch data if both dates are set or both are cleared
-            // Use the updated date range directly to avoid state timing issues
-            if ((start && end) || (!start && !end)) {
-              const updatedChart = { ...chart, dateRange: { startDate: start, endDate: end } };
-              // Pass the date range directly to ensure we use the latest values
-              const dateRangeToUse = { startDate: start, endDate: end };
-              fetchChartDataForChart(updatedChart, dateRangeToUse);
-            }
-          }}
-          placeholderText="Date range"
-          dateFormat="MMM d, yyyy"
-          showPopperArrow={false}
-          popperPlacement="top-end"
-          customInput={
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              className="h-8 pl-3 pr-3 text-xs bg-white shadow-md hover:bg-gray-50 text-foreground hover:text-foreground border-border relative inline-flex items-center gap-2"
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                // Toggle date picker
-                setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
-              }}
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-              }}
-              onMouseUp={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-              }}
-            >
-              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-foreground" />
-              <span className="text-xs whitespace-nowrap">
-                {(() => {
-                  const range = chartDateRanges[String(chart.id)] || chart.dateRange;
-                  const start = range?.startDate;
-                  const end = range?.endDate;
-                  if (start && end) {
-                    return `${formatDateForDisplay(start)} - ${formatDateForDisplay(end)}`;
-                  }
-                  if (start) {
-                    return `${formatDateForDisplay(start)} - End date`;
-                  }
-                  return "Date range";
-                })()}
-              </span>
-              {(chartDateRanges[String(chart.id)]?.startDate || chart.dateRange?.startDate) && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    const chartKey = String(chart.id);
-                    setChartDateRanges(prev => ({
-                      ...prev,
-                      [chartKey]: { startDate: null, endDate: null }
-                    }));
-                    setCharts(prev => prev.map(c => 
-                      c.id === chart.id 
-                        ? { ...c, dateRange: { startDate: null, endDate: null } }
-                        : c
-                    ));
-                    const updatedChart = { ...chart, dateRange: { startDate: null, endDate: null } };
-                    fetchChartDataForChart(updatedChart, { startDate: null, endDate: null });
-                  }}
-                  className="w-5 h-5 flex items-center justify-center hover:bg-red-100 rounded transition-colors shrink-0"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                  onMouseUp={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                >
-                  <X className="h-3.5 w-3.5 text-red-600" strokeWidth={2.5} />
-                </button>
-              )}
-            </Button>
-          }
-        />
-      </div>
-    );
-  };
 
   const handleExportChart = async (chart: Chart) => {
     try {
@@ -1661,8 +1533,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           {renderChartPreview(chart)}
         </div>
 
-        {/* Bottom Section - Status Badge and Date Range */}
-        <div className="px-4 pb-3 flex items-center justify-between gap-4" data-date-picker="true">
+        <div className="px-4 pb-3 flex items-center justify-between gap-4">
           {/* Status Badge */}
           <div>
             {chart.status === 'published' && dashboard && (
@@ -1672,13 +1543,6 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
               <StatusBadge status="draft" />
             )}
           </div>
-          
-          {/* Date Range Picker */}
-          {chart.is_time_based === true && (
-            <div>
-              {renderDateRangeButton(chart)}
-            </div>
-          )}
         </div>
       </Card>
     );

@@ -559,6 +559,18 @@ export function ProbeModeDialog({
         msg.chartPreview?.spec?.y_axis ??
         undefined;
 
+      const allSeriesKeys: string[] = [];
+      if (msg.chartPreview?.config.dataKeys?.primary) {
+        allSeriesKeys.push(msg.chartPreview.config.dataKeys.primary);
+      }
+      if (msg.chartPreview?.config.dataKeys?.secondary) {
+        allSeriesKeys.push(msg.chartPreview.config.dataKeys.secondary);
+      }
+      if (msg.chartPreview?.config.extraKeys) {
+        allSeriesKeys.push(...msg.chartPreview.config.extraKeys);
+      }
+      const uniqueSeriesKeys = Array.from(new Set(allSeriesKeys));
+
       const response = await addChartToDashboard({
         title: chart.name,
         query: msg.modifiedSql,
@@ -569,6 +581,7 @@ export function ProbeModeDialog({
         report: msg.content,
         x_axis: savedXAxis,
         y_axis: savedYAxis,
+        series_keys: uniqueSeriesKeys.length > 0 ? uniqueSeriesKeys : undefined,
       });
 
       if (response.success) {

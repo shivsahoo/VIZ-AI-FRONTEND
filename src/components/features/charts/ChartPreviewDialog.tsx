@@ -519,6 +519,18 @@ export function ChartPreviewDialog({
                          chart.spec?.type === 'aggregate' ? false :
                          chart.spec?.is_time_based ?? false;
 
+      const allSeriesKeys: string[] = [];
+      if (chartDataConfig?.dataKeys?.primary) {
+        allSeriesKeys.push(chartDataConfig.dataKeys.primary);
+      }
+      if (chartDataConfig?.dataKeys?.secondary) {
+        allSeriesKeys.push(chartDataConfig.dataKeys.secondary);
+      }
+      if (chartDataConfig?.extraKeys) {
+        allSeriesKeys.push(...chartDataConfig.extraKeys);
+      }
+      const uniqueSeriesKeys = Array.from(new Set(allSeriesKeys));
+
       const response = await addChartToDashboard({
         title: chart.name,
         query: chart.query || "",
@@ -531,6 +543,7 @@ export function ChartPreviewDialog({
         data_connection_id: databaseId,
         x_axis: axisFields.xAxis || undefined,
         y_axis: axisFields.yAxis || undefined,
+        series_keys: uniqueSeriesKeys.length > 0 ? uniqueSeriesKeys : undefined,
       });
 
       if (response.success) {
