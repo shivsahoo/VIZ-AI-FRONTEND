@@ -1020,6 +1020,8 @@ export interface Chart {
     xAxis?: string;
     yAxis?: string;
     color?: string;
+    /** Saved series/measure column names for stacked/multi-series charts. */
+    seriesKeys?: string[];
   };
   createdAt: string;
   updatedAt: string;
@@ -1056,10 +1058,12 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
         query: string;
         type: string; // Backend uses 'type' which is actually chart_type
         datasourceConnectionId: string | null; // Backend uses camelCase
+        data_connection_id?: string | null; // Alternative field name
         created_at: string;
         isFavorite?: boolean;
         x_axis?: string | null;
         y_axis?: string | null;
+        series_keys?: string[] | null;
         is_time_based?: boolean;
       }>;
     }>(`/api/v1/backend/charts?project_id=${projectId}`);
@@ -1070,22 +1074,30 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
     return {
       success: true,
       data: chartsArray
-        .filter((chart) => chart.datasourceConnectionId) // Filter charts with connections
-        .map((chart) => ({
-          id: chart.id,
-          name: chart.title,
-          type: mapChartType(chart.type), // Backend returns 'type' which is chart_type
-          projectId, // Will need to get from backend or context
-          databaseId: chart.datasourceConnectionId || undefined,
-          query: chart.query,
-          config: {
-            xAxis: chart.x_axis ?? undefined,
-            yAxis: chart.y_axis ?? undefined,
-          },
-          createdAt: chart.created_at,
-          updatedAt: chart.created_at,
-          is_time_based: chart.is_time_based ?? false,
-        })),
+        // Include all charts — don't drop charts that lack a connection ID here;
+        // ChartsView already handles "missing query/connection" gracefully.
+        .map((chart) => {
+          const connectionId = chart.datasourceConnectionId || chart.data_connection_id || undefined;
+          return {
+            id: chart.id,
+            name: chart.title,
+            type: mapChartType(chart.type), // Backend returns 'type' which is chart_type
+            projectId, // Will need to get from backend or context
+            databaseId: connectionId,
+            query: chart.query,
+            config: {
+              xAxis: chart.x_axis ?? undefined,
+              yAxis: chart.y_axis ?? undefined,
+              // Restore series keys for stacked/multi-series charts
+              ...(chart.series_keys && chart.series_keys.length > 0
+                ? { seriesKeys: chart.series_keys }
+                : {}),
+            },
+            createdAt: chart.created_at,
+            updatedAt: chart.created_at,
+            is_time_based: chart.is_time_based ?? false,
+          };
+        }),
     };
   } catch (error: any) {
     return {
@@ -1226,6 +1238,11 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
     if (data.config?.yAxis) {
       requestBody.y_axis = data.config.yAxis;
     }
+    // Send series keys so stacked-chart layout can be restored on reload
+    const seriesKeys = (data.config as any)?.seriesKeys;
+    if (Array.isArray(seriesKeys) && seriesKeys.length > 0) {
+      requestBody.series_keys = seriesKeys;
+    }
 
     const response = await apiRequest<{
       id?: string;
@@ -1271,6 +1288,10 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
           xAxis: data.config?.xAxis,
           yAxis: data.config?.yAxis,
           color: data.config?.color,
+          // Preserve series keys so stacked chart layout survives a refresh
+          ...((data.config as any)?.seriesKeys?.length
+            ? { seriesKeys: (data.config as any).seriesKeys }
+            : {}),
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

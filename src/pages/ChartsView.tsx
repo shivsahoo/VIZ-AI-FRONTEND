@@ -1252,8 +1252,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     if (status?.data) {
       if (isExtendedChartType(chart.type)) {
         const ext = inferExtendedChartConfig(status.data, chart.type, {
-          xAxisKey: chart.config?.xAxis ?? status.metadata?.xAxis ?? undefined,
-          yAxisKey: chart.config?.yAxis ?? status.metadata?.yAxis ?? undefined,
+          xAxisKey: chart.config?.xAxis ?? undefined,
+          yAxisKey: chart.config?.yAxis ?? undefined,
         });
         preparedData = extendedToChartDataConfig(ext);
         listAxis = ext.axisConfig;
@@ -1263,8 +1263,8 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           status.data,
           chart.type as "line" | "bar" | "pie" | "area" | "stackedhorizontalbar" | "stackedlinechart" | "multiyaxischart",
           {
-            xAxisHint: chart.config?.xAxis ?? status.metadata?.xAxis ?? null,
-            yAxisHint: chart.config?.yAxis ?? status.metadata?.yAxis ?? null,
+            xAxisHint: chart.config?.xAxis ?? null,
+            yAxisHint: chart.config?.yAxis ?? null,
             seriesKeysHint: chart.config?.seriesKeys ?? null,
           },
         );
@@ -1510,10 +1510,11 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       chartTypeIcons[chart.type as keyof typeof chartTypeIcons] ?? LineChart;
     const dashboard = resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId));
     const dataSourceLabel = getDatabaseLabel(chart);
-    const colorClass = {
+    const colorClass: Record<string, string> = {
       line: 'text-[#06B6D4] bg-[#06B6D4]/10',
       bar: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
       pie: 'text-[#10B981] bg-[#10B981]/10',
+      donut: 'text-[#10B981] bg-[#10B981]/10',
       area: 'text-[#F59E0B] bg-[#F59E0B]/10',
       scatter: 'text-[#06B6D4] bg-[#06B6D4]/10',
       clustering: 'text-[#0EA5E9] bg-[#0EA5E9]/10',
@@ -1521,7 +1522,10 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       heatmap: 'text-[#EC4899] bg-[#EC4899]/10',
       funnel: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
       map: 'text-[#10B981] bg-[#10B981]/10',
-    }[chart.type] ?? 'text-muted-foreground bg-muted/20';
+      stackedlinechart: 'text-[#06B6D4] bg-[#06B6D4]/10',
+      stackedhorizontalbar: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
+    };
+    const chartColorClass = colorClass[chart.type as string] ?? 'text-muted-foreground bg-muted/20';
     const chartName = chart.name?.trim() || "Untitled Chart";
 
     return (
@@ -1550,7 +1554,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-card via-card/95 to-transparent pb-8">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2.5 flex-1 min-w-0">
-              <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${colorClass} transition-smooth group-hover:scale-110`}>
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${chartColorClass} transition-smooth group-hover:scale-110`}>
                 <Icon className="w-4 h-4" />
               </div>
               <div className="flex-1 min-w-0">

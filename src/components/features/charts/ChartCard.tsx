@@ -249,58 +249,118 @@ export function ChartCard(props: ChartCardProps) {
     );
   }
 
-  if (
-    type === "pie" ||
-    type === "donut" ||
-    type === "map" ||
-    type === "scatter" ||
-    type === "clustering" ||
-    type === "multiyaxischart" ||
-    type === "heatmap" ||
-    type === "funnel" ||
-    type === "stackedhorizontalbar"
-  ) {
-    if (type === "heatmap") {
-      const xCount = extractCategoryCount(option.xAxis);
-      const yCount = extractCategoryCount(option.yAxis);
-      const needsHorizontalScroll = xCount > 14;
-      const needsVerticalScroll = yCount > 9;
-      const minWidth = Math.max(560, xCount * 48);
-      const renderHeight = needsVerticalScroll
-        ? heatmapRenderHeight
-        : baseHeight;
-      return (
-        <div
-          className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full ${needsHorizontalScroll ? "overflow-x-auto" : "overflow-x-hidden"} ${needsVerticalScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
-          style={{ height: baseHeight, minHeight: baseHeight }}
-        >
-          <div style={{ minWidth: needsHorizontalScroll ? minWidth : "100%", minHeight: renderHeight }}>
-            {wrapped}
-          </div>
+  // ── Heatmap ──────────────────────────────────────────────────────────────
+  if (type === "heatmap") {
+    const xCount = extractCategoryCount(option.xAxis);
+    const yCount = extractCategoryCount(option.yAxis);
+    const needsHorizontalScroll = xCount > 14;
+    const needsVerticalScroll = yCount > 9;
+    const minWidth = Math.max(560, xCount * 48);
+    const renderHeight = needsVerticalScroll ? heatmapRenderHeight : baseHeight;
+    return (
+      <div
+        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full ${needsHorizontalScroll ? "overflow-x-auto" : "overflow-x-hidden"} ${needsVerticalScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
+        <div style={{ minWidth: needsHorizontalScroll ? minWidth : "100%", minHeight: renderHeight }}>
+          {wrapped}
         </div>
-      );
-    }
+      </div>
+    );
+  }
 
-    if (type === "stackedhorizontalbar") {
-      const needsVerticalScroll = stackedHorizontalDesiredHeight > baseHeight;
-      const needsHorizontalScroll = data.length > 10;
-      const horizontalMinWidth = Math.max(720, Math.round(baseHeight * 1.6));
-      return (
+  // ── Stacked Horizontal Bar ────────────────────────────────────────────────
+  if (type === "stackedhorizontalbar") {
+    const needsVerticalScroll = stackedHorizontalDesiredHeight > baseHeight;
+    const needsHorizontalScroll = data.length > 10;
+    const horizontalMinWidth = Math.max(720, Math.round(baseHeight * 1.6));
+    return (
+      <div
+        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full ${needsHorizontalScroll ? "overflow-x-auto" : "overflow-x-hidden"} ${needsVerticalScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
         <div
-          className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full ${needsHorizontalScroll ? "overflow-x-auto" : "overflow-x-hidden"} ${needsVerticalScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
-          style={{ height: baseHeight, minHeight: baseHeight }}
+          style={{
+            minHeight: stackedHorizontalRenderHeight,
+            minWidth: needsHorizontalScroll ? horizontalMinWidth : "100%",
+          }}
         >
-          <div
-            style={{
-              minHeight: stackedHorizontalRenderHeight,
-              minWidth: needsHorizontalScroll ? horizontalMinWidth : "100%",
-            }}
-          >
-            {wrapped}
-          </div>
+          {wrapped}
         </div>
-      );
-    }
+      </div>
+    );
+  }
+
+  // ── Pie / Donut — vertical scroll when many slices (congested legend) ─────
+  if (type === "pie" || type === "donut") {
+    const sliceCount = data.length;
+    const needsScroll = sliceCount > 20;
+    // Approx. 18 px per legend row (3 items per row) when many slices
+    const legendExtraHeight = needsScroll ? Math.min(600, Math.ceil(sliceCount / 3) * 18) : 0;
+    const pieRenderHeight = baseHeight + legendExtraHeight;
+    return (
+      <div
+        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-x-hidden ${needsScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
+        <div style={{ minHeight: pieRenderHeight, width: "100%" }}>
+          {wrapped}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Scatter / Clustering — horizontal scroll for large datasets ───────────
+  if (type === "scatter" || type === "clustering") {
+    const needsScroll = data.length > 200;
+    const minW = needsScroll ? Math.max(baseHeight * 1.5, 600) : undefined;
+    return (
+      <div
+        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-y-hidden ${needsScroll ? "overflow-x-auto" : "overflow-x-hidden"}`}
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
+        <div style={{ minWidth: minW ?? "100%", minHeight: baseHeight }}>
+          {wrapped}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Multi Y-Axis — horizontal scroll when many categories ────────────────
+  if (type === "multiyaxischart") {
+    const needsScroll = data.length > 15;
+    const minW = needsScroll ? Math.max(600, data.length * 56) : undefined;
+    return (
+      <div
+        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-y-hidden ${needsScroll ? "overflow-x-auto" : "overflow-x-hidden"}`}
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
+        <div style={{ minWidth: minW ?? "100%", minHeight: baseHeight }}>
+          {wrapped}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Funnel — vertical scroll when many stages ─────────────────────────────
+  if (type === "funnel") {
+    const stageCount = data.length;
+    const needsScroll = stageCount > 8;
+    const funnelRenderHeight = needsScroll ? Math.min(1200, stageCount * 48 + 80) : baseHeight;
+    return (
+      <div
+        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-x-hidden ${needsScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
+        <div style={{ minHeight: funnelRenderHeight, width: "100%" }}>
+          {wrapped}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Map — fixed size, self-contained ─────────────────────────────────────
+  if (type === "map") {
     return (
       <div className="w-full" style={{ minHeight: effectiveHeight }}>
         {wrapped}
@@ -308,6 +368,7 @@ export function ChartCard(props: ChartCardProps) {
     );
   }
 
+  // ── Line, Bar, Area, StackedLineChart — horizontal scroll by point count ──
   const pointCount = data.length;
   const minW = Math.max(400, pointCount * (type === "bar" ? 80 : 60));
 

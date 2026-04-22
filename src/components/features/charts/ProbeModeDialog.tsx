@@ -96,36 +96,13 @@ function buildChartPreviewConfig(
 
   const legacy = resolved as "bar" | "line" | "pie" | "area";
 
-  if (xHint && yHint) {
-    if (legacy === "pie") {
-      return {
-        config: {
-          data: rows.map((r) => ({
-            name: r[xHint] ?? "",
-            value: Number(r[yHint]) || 0,
-          })),
-          dataKeys: { primary: "value" },
-          xAxisKey: "name",
-        },
-        axisConfig: baseAxis,
-      };
-    }
-    return {
-      config: {
-        data: rows,
-        dataKeys: { primary: yHint },
-        xAxisKey: xHint,
-      },
-      axisConfig: baseAxis,
-    };
-  }
-
   return {
     config: inferChartDataConfig(
       rows,
       resolved as Parameters<typeof inferChartDataConfig>[1],
+      { xAxisHint: xHint, yAxisHint: yHint }
     ),
-    axisConfig: {},
+    axisConfig: baseAxis,
   };
 }
 
