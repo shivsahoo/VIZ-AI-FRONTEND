@@ -1,0 +1,30 @@
+diff --git a/node_modules/recharts/es6/cartesian/CartesianAxis.js b/node_modules/recharts/es6/cartesian/CartesianAxis.js
+index 1aaaa93..07e8a12 100644
+--- a/node_modules/recharts/es6/cartesian/CartesianAxis.js
++++ b/node_modules/recharts/es6/cartesian/CartesianAxis.js
+@@ -267,7 +267,9 @@ export var CartesianAxis = /*#__PURE__*/function (_Component) {
+         });
+         return /*#__PURE__*/React.createElement(Layer, _extends({
+           className: "recharts-cartesian-axis-tick",
+-          key: "tick-".concat(entry.value, "-").concat(entry.coordinate, "-").concat(entry.tickCoord)
++          // Include tick index: entry.tickCoord is often undefined while duplicate value+coordinate
++          // pairs are not — duplicate React keys break charts (e.g. Probe Mode previews).
++          key: "tick-".concat(i, "-").concat(entry.value, "-").concat(entry.coordinate, "-").concat(entry.tickCoord)
+         }, adaptEventsOfChild(_this2.props, entry, i)), tickLine && /*#__PURE__*/React.createElement("line", _extends({}, tickLineProps, lineCoord, {
+           className: clsx('recharts-cartesian-axis-tick-line', get(tickLine, 'className'))
+         })), tick && CartesianAxis.renderTickItem(tick, tickProps, "".concat(isFunction(tickFormatter) ? tickFormatter(entry.value, i) : entry.value).concat(unit || '')));
+diff --git a/node_modules/recharts/lib/cartesian/CartesianAxis.js b/node_modules/recharts/lib/cartesian/CartesianAxis.js
+index c88f8ae..3f4d213 100644
+--- a/node_modules/recharts/lib/cartesian/CartesianAxis.js
++++ b/node_modules/recharts/lib/cartesian/CartesianAxis.js
+@@ -271,7 +271,9 @@ var CartesianAxis = exports.CartesianAxis = /*#__PURE__*/function (_Component) {
+         });
+         return /*#__PURE__*/_react["default"].createElement(_Layer.Layer, _extends({
+           className: "recharts-cartesian-axis-tick",
+-          key: "tick-".concat(entry.value, "-").concat(entry.coordinate, "-").concat(entry.tickCoord)
++          // Include tick index: entry.tickCoord is often undefined while duplicate value+coordinate
++          // pairs are not — duplicate React keys break charts (e.g. Probe Mode previews).
++          key: "tick-".concat(i, "-").concat(entry.value, "-").concat(entry.coordinate, "-").concat(entry.tickCoord)
+         }, (0, _types.adaptEventsOfChild)(_this2.props, entry, i)), tickLine && /*#__PURE__*/_react["default"].createElement("line", _extends({}, tickLineProps, lineCoord, {
+           className: (0, _clsx["default"])('recharts-cartesian-axis-tick-line', (0, _get["default"])(tickLine, 'className'))
+         })), tick && CartesianAxis.renderTickItem(tick, tickProps, "".concat((0, _isFunction["default"])(tickFormatter) ? tickFormatter(entry.value, i) : entry.value).concat(unit || '')));

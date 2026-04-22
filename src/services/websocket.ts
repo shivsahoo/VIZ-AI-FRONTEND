@@ -451,11 +451,12 @@ export class VizAIWebSocket {
     is_first_message: boolean;
     /** Always send so the backend can execute the query on every turn */
     data_connection_id?: string;
-    /** Send every turn so probe [CONTEXT] stays accurate */
+    /** Keep stable session baseline; backend merges with current_* each turn */
     original_query?: string;
     original_chart_title?: string;
     original_chart_type?: string;
     original_chart_spec?: ChartSpec;
+    /** Send on first turn; backend caches by websocket/thread_id for follow-ups */
     db_schema?: string;
     db_type?: 'mysql' | 'postgres' | 'sqlite' | 'oracledb' | 'salesforce' | 'databricks';
     /**
