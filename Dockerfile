@@ -20,8 +20,8 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 # Create working directory
 WORKDIR /app
 
-# Copy dependency files
-COPY package*.json yarn.lock ./
+# Copy Yarn dependency files only
+COPY package.json yarn.lock ./
 
 # Install dependencies
 RUN yarn install --frozen-lockfile
