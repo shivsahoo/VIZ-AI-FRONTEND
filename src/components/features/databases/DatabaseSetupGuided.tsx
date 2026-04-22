@@ -40,6 +40,11 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
   // Salesforce OAuth2 fields (session-based authentication only)
   const [sessionId, setSessionId] = useState("");
   const [instanceUrl, setInstanceUrl] = useState("");
+  const [workspaceUrl, setWorkspaceUrl] = useState("");
+  const [httpPath, setHttpPath] = useState("");
+  const [catalogName, setCatalogName] = useState("");
+  const [schemaName, setSchemaName] = useState("");
+  const [accessToken, setAccessToken] = useState("");
 
   // Progress Overlay State
   const [showProgressOverlay, setShowProgressOverlay] = useState(false);
@@ -299,6 +304,15 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
           toast.error("Instance URL must be your Salesforce instance (e.g., https://na45.salesforce.com), not a login URL");
           return;
         }
+      } else if (dbType === "databricks") {
+        if (!normalizedConnectionName) {
+          toast.error("Please provide a connection name");
+          return;
+        }
+        if (!workspaceUrl.trim() || !httpPath.trim() || !catalogName.trim() || !schemaName.trim() || !accessToken.trim()) {
+          toast.error("Please fill all Databricks required fields");
+          return;
+        }
       } else {
         // Validation for traditional databases
         if (
@@ -336,6 +350,17 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
             dbType: dbType,
             sessionId: sessionId.trim(),
             instanceUrl: instanceUrl.trim(),
+            consentGiven: true,
+          };
+        } else if (dbType === "databricks") {
+          requestData = {
+            connectionName: normalizedConnectionName,
+            dbType: dbType,
+            workspaceUrl: workspaceUrl.trim(),
+            httpPath: httpPath.trim(),
+            catalogName: catalogName.trim(),
+            schemaName: schemaName.trim(),
+            accessToken: accessToken.trim(),
             consentGiven: true,
           };
         } else {
@@ -513,6 +538,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                     <SelectItem value="mysql">MySQL</SelectItem>
                     <SelectItem value="oracle">Oracle</SelectItem>
                     <SelectItem value="salesforce">Salesforce</SelectItem>
+                    <SelectItem value="databricks">Databricks</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -557,8 +583,87 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                 </>
               )}
 
-              {/* Traditional database fields (shown when NOT Salesforce) */}
-              {dbType !== "salesforce" && (
+              {/* Databricks fields */}
+              {dbType === "databricks" && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="workspaceUrl">
+                      Workspace URL <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="workspaceUrl"
+                      placeholder="dbc-xxxx.cloud.databricks.com"
+                      value={workspaceUrl}
+                      onChange={(e) => setWorkspaceUrl(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="httpPath">
+                      HTTP Path <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="httpPath"
+                      placeholder="/sql/1.0/warehouses/xxxxx or /sql/protocolv1/o/..."
+                      value={httpPath}
+                      onChange={(e) => setHttpPath(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Warehouse and cluster paths are both supported.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="catalogName">
+                      Catalog Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="catalogName"
+                      placeholder="main"
+                      value={catalogName}
+                      onChange={(e) => setCatalogName(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="schemaName">
+                      Schema Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="schemaName"
+                      placeholder="analytics"
+                      value={schemaName}
+                      onChange={(e) => setSchemaName(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div className="col-span-2 space-y-2">
+                    <Label htmlFor="accessToken">
+                      Access Token <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="accessToken"
+                      type="password"
+                      placeholder="dapi..."
+                      value={accessToken}
+                      onChange={(e) => setAccessToken(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* Traditional database fields (shown when NOT Salesforce/Databricks) */}
+              {dbType !== "salesforce" && dbType !== "databricks" && (
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="host">
@@ -635,7 +740,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
               )}
 
               {/* SSL and Additional Parameters - only for non-Salesforce databases */}
-              {dbType !== "salesforce" && (
+              {dbType !== "salesforce" && dbType !== "databricks" && (
                 <>
                   <div className="col-span-2 flex items-center space-x-2">
                     <Checkbox
@@ -713,6 +818,9 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                 </code>
                 <code className="block text-xs bg-card p-3 rounded-lg border border-border">
                   oracle+oracledb://username:password@host/?service_name=service_name
+                </code>
+                <code className="block text-xs bg-card p-3 rounded-lg border border-border">
+                  databricks://token:ACCESS_TOKEN@dbc-xxxx.cloud.databricks.com?http_path=/sql/1.0/warehouses/xxxx&catalog=main&schema=analytics
                 </code>
               </div>
             </div>
