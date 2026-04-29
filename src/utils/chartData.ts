@@ -525,7 +525,10 @@ export function inferExtendedChartConfig(
       const xD = new Set(rows.map((r) => r[xKey as string])).size;
       const yD = new Set(rows.map((r) => r[yKey as string])).size;
 
-      if (xD <= 3 && yD <= 3) {
+      // Only downgrade to bar for truly degenerate scatter shapes.
+      // Small-but-valid numeric spreads (common with aggregated business data)
+      // should still render as scatter when explicitly requested.
+      if (xD <= 1 || yD <= 1) {
         const legacy = inferChartDataConfig(rows, "bar", {
           ...inferOptions,
           xAxisHint: xKey,

@@ -28,7 +28,16 @@ export function composePieOption(
     ? resolvePieNameKey(sample, xKey, valueKey)
     : "name";
 
-  const pieData = data.map((row, i) => ({
+  type PieDatum = {
+    name: string;
+    value: number;
+    itemStyle: { color: string };
+    __row?: Record<string, any>;
+    __isOther?: boolean;
+    __otherBreakdown?: Array<{ name: string; value: number; percent: number }>;
+  };
+
+  const rawPieData: PieDatum[] = data.map((row, i) => ({
     name: String(row[nameKey] ?? row[xKey] ?? `Slice ${i + 1}`),
     value: Number(row[valueKey]) || 0,
     itemStyle: {
@@ -36,7 +45,42 @@ export function composePieOption(
         config?.[String(row[nameKey] ?? row[xKey])]?.color ??
         PIE_SEGMENT_COLORS[i % PIE_SEGMENT_COLORS.length],
     },
+    __row: row,
   }));
+
+  // Long-tail: percent-only rules fail when dozens of cities each have a small
+  // but non-trivial share — the chart turns into an unreadable wheel. When the
+  // number of categories exceeds MAX_SLICES_SHOW_ALL, keep the top K by value
+  // and merge the rest into "Other" (tooltip lists the breakdown).
+  const MAX_SLICES_SHOW_ALL = 24;
+  const TOP_K_WHEN_MANY_CATEGORIES = 18;
+  const OTHER_SLICE_COLOR = "#60A5FA";
+  const total = rawPieData.reduce((sum, d) => sum + d.value, 0);
+
+  let pieData: PieDatum[] = rawPieData;
+  if (rawPieData.length > MAX_SLICES_SHOW_ALL && total > 0) {
+    const sorted = [...rawPieData].sort((a, b) => b.value - a.value);
+    const top = sorted.slice(0, TOP_K_WHEN_MANY_CATEGORIES);
+    const rest = sorted.slice(TOP_K_WHEN_MANY_CATEGORIES);
+    if (rest.length >= 1) {
+      const otherValue = rest.reduce((s, d) => s + d.value, 0);
+      const breakdown = rest
+        .map((d) => ({
+          name: d.name,
+          value: d.value,
+          percent: (d.value / total) * 100,
+        }))
+        .sort((a, b) => b.value - a.value);
+      const otherSlice: PieDatum = {
+        name: `Other (${rest.length})`,
+        value: otherValue,
+        itemStyle: { color: OTHER_SLICE_COLOR },
+        __isOther: true,
+        __otherBreakdown: breakdown,
+      };
+      pieData = [...top, otherSlice];
+    }
+  }
 
   const legendVisible =
     showLegend !== undefined ? showLegend : pieData.length > 1;
@@ -65,7 +109,6 @@ export function composePieOption(
           formatter: (p: unknown) =>
             formatPieTooltip(
               p as Record<string, unknown>,
-              data,
               valueKey,
               extraFields,
               isDark,
