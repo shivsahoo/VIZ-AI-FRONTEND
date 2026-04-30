@@ -126,14 +126,22 @@ const normalizeDbType = (type?: string): 'postgres' | 'mysql' | 'sqlite' | 'orac
 
 const ensureSchemaString = (schema?: string | null): string => {
   if (!schema) {
-    return JSON.stringify({ tables: [] });
+    return "";
   }
   try {
-    JSON.parse(schema);
+    const parsed = JSON.parse(schema);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray((parsed as { tables?: unknown[] }).tables) &&
+      (parsed as { tables?: unknown[] }).tables!.length === 0
+    ) {
+      return "";
+    }
     return schema;
   } catch (error) {
-    console.warn('AIAssistant: Received invalid schema JSON, falling back to empty schema', { error });
-    return JSON.stringify({ tables: [] });
+    console.warn('AIAssistant: Received invalid schema JSON, omitting schema from payload', { error });
+    return "";
   }
 };
 
