@@ -386,26 +386,23 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
         throw new Error(response.error?.message || "Failed to create database connection");
       }
 
-      if (PROGRESS_OVERLAY_ENABLED) {
-        setProgressTables({
-          total: response.data.tablesCount || 0,
-          completed: 0,
-          currentTable: "",
-        });
-        setProgressMessage("Preparing schema extraction...");
+      setProgressTables({
+        total: response.data.tablesCount || 0,
+        completed: 0,
+        currentTable: "",
+      });
+      setProgressMessage("Preparing schema extraction...");
 
-        if (response.data.taskId) {
-          console.log(
-            "[DatabaseSetupGuided] Starting schema extraction task",
-            response.data.taskId
-          );
-        } else {
-          console.warn("[DatabaseSetupGuided] Missing taskId in createDatabase response");
-        }
-
+      if (response.data.taskId) {
+        console.log(
+          "[DatabaseSetupGuided] Starting schema extraction task",
+          response.data.taskId
+        );
         await waitForSchemaExtraction(response.data.taskId, response.data.tablesCount || 0);
-        setProgressMessage("Finalizing connection details...");
+      } else {
+        console.warn("[DatabaseSetupGuided] Missing taskId in createDatabase response");
       }
+      setProgressMessage("Finalizing connection details...");
 
       const createdConnection = await fetchConnectionByName(normalizedConnectionName);
 

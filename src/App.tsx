@@ -312,7 +312,7 @@ export default function App() {
     name: string;
     description: string;
     context: Record<string, string>;
-    database: any;
+    database?: any;
   }) => {
     setShowOnboarding(false);
     setHasCompletedOnboarding(true);

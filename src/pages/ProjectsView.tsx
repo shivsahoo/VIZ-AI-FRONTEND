@@ -183,10 +183,10 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         updatedAt: createdAt,
         owner: '', // Will be populated by backend
         memberCount: 1,
-        databaseCount: 1, // Database was connected in the flow
+        databaseCount: 0, // Database is connected later from Home/Databases
         dashboardCount: 0,
         dashboards: 0,
-        databases: 1,
+        databases: 0,
         team: 1,
         lastActive: "just now",
         gradient: colors.gradient,
@@ -194,8 +194,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
       };
       setProjects([newProject, ...projects]);
       
-      // KPIs were already collected during onboarding Step 3 (DatabaseContextBot)
-      // Save KPI information if available from onboarding
+      // KPI step removed from onboarding; only save if provided from future flows.
       const kpisSummary = projectData.context?.kpisSummary;
       if (kpisSummary) {
         try {

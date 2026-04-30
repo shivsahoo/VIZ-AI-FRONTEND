@@ -33,7 +33,8 @@ import {
 } from "../components/ui/table";
 import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
-import { getDatabases, deleteConnection, updateConnection } from "../services/api";
+import { DSGraphViewer } from "../components/features/databases/DSGraphViewer";
+import { getDatabases, deleteConnection, updateConnection, getDatabaseDSGraph, type DSGraphPayload } from "../services/api";
 import { storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 
 interface DatabaseConnection {
@@ -44,6 +45,7 @@ interface DatabaseConnection {
   host: string;
   status: string;
   lastChecked: string;
+  hasDsGraph?: boolean;
 }
 
 interface DatabasesViewProps {
@@ -57,6 +59,10 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedDatabase, setSelectedDatabase] = useState<DatabaseConnection | null>(null);
+  const [dsGraphDialogOpen, setDsGraphDialogOpen] = useState(false);
+  const [isGraphLoading, setIsGraphLoading] = useState(false);
+  const [graphError, setGraphError] = useState<string | null>(null);
+  const [currentGraph, setCurrentGraph] = useState<DSGraphPayload | null>(null);
   
   // Edit form state (for editing existing connections)
   const [connectionName, setConnectionName] = useState("");
@@ -119,6 +125,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
             host: db.host || 'N/A',
             status: db.status,
             lastChecked: formatTimeAgo(db.lastChecked),
+            hasDsGraph: db.hasDsGraph,
           };
         });
         setDatabases(mappedDatabases);
@@ -161,6 +168,26 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   const handleViewConnection = (db: DatabaseConnection) => {
     setSelectedDatabase(db);
     setViewDialogOpen(true);
+  };
+
+  const handleViewDSGraph = async (db: DatabaseConnection) => {
+    setSelectedDatabase(db);
+    setDsGraphDialogOpen(true);
+    setIsGraphLoading(true);
+    setGraphError(null);
+    setCurrentGraph(null);
+    try {
+      const response = await getDatabaseDSGraph(db.id);
+      if (response.success && response.data) {
+        setCurrentGraph(response.data);
+      } else {
+        setGraphError(response.error?.message || "Unable to load datasource graph");
+      }
+    } catch (error: any) {
+      setGraphError(error.message || "Unable to load datasource graph");
+    } finally {
+      setIsGraphLoading(false);
+    }
   };
 
   const handleEditConnection = (db: DatabaseConnection) => {
@@ -390,6 +417,10 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleViewDSGraph(db)}>
+                            <Database className="w-4 h-4 mr-2" />
+                            View DS Graph
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleViewConnection(db)}>
                             <Eye className="w-4 h-4 mr-2" />
                             View Details
@@ -556,6 +587,26 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                 {isUpdatingConnection ? "Updating..." : "Update Connection"}
               </GradientButton>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={dsGraphDialogOpen} onOpenChange={setDsGraphDialogOpen}>
+          <DialogContent className="max-w-[1200px]">
+            <DialogHeader>
+              <DialogTitle>Datasource Graph</DialogTitle>
+              <DialogDescription>
+                {selectedDatabase ? `Visual schema graph for ${selectedDatabase.name}` : "Visual schema graph"}
+              </DialogDescription>
+            </DialogHeader>
+            {isGraphLoading ? (
+              <div className="h-[420px] flex items-center justify-center text-muted-foreground">Loading graph...</div>
+            ) : graphError ? (
+              <div className="h-[420px] flex items-center justify-center text-destructive">{graphError}</div>
+            ) : currentGraph ? (
+              <DSGraphViewer graph={currentGraph} />
+            ) : (
+              <div className="h-[420px] flex items-center justify-center text-muted-foreground">Graph not available.</div>
+            )}
           </DialogContent>
         </Dialog>
         </div>

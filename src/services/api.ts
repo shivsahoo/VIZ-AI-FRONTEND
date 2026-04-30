@@ -1658,8 +1658,41 @@ export interface Database {
   status: 'connected' | 'disconnected' | 'error';
   lastChecked: string;
   schema?: string | null;
+  dsGraphJson?: string | null;
+  hasDsGraph?: boolean;
   connectionString?: string | null;
   consentGiven?: boolean;
+}
+
+export interface DSGraphNode {
+  id: string;
+  label: string;
+  table: string;
+  schema?: string | null;
+  catalog?: string | null;
+  column_count: number;
+  columns: Array<{ name: string; type: string; is_primary_key: boolean }>;
+  pk_columns: string[];
+}
+
+export interface DSGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  source_column: string;
+  target_column: string;
+  label: string;
+  relationship_type: string;
+}
+
+export interface DSGraphPayload {
+  nodes: DSGraphNode[];
+  edges: DSGraphEdge[];
+  stats: {
+    table_count: number;
+    relation_count: number;
+    orphan_table_count: number;
+  };
 }
 
 export interface DatabaseSchema {
@@ -1677,6 +1710,7 @@ export interface DatabaseSchema {
 export interface DatabaseCreationTask {
   taskId: string;
   tablesCount: number;
+  connectionId?: string;
 }
 
 /**
@@ -1696,6 +1730,8 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
         project_id: string;
         consent_given?: boolean;
         db_schema?: string;
+        ds_graph_json?: string;
+        has_ds_graph?: boolean;
         db_connection_string?: string;
       }>;
     }>(`/api/v1/backend/connections/${projectId}`);
@@ -1711,6 +1747,8 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
       project_id: string;
       consent_given?: boolean;
       db_schema?: string;
+      ds_graph_json?: string;
+      has_ds_graph?: boolean;
       db_connection_string?: string;
     }> = [];
 
@@ -1731,6 +1769,8 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
         status: 'connected' as const,
         lastChecked: new Date().toISOString(), // Backend doesn't provide created_at in this response
         schema: conn.db_schema ?? null,
+        dsGraphJson: conn.ds_graph_json ?? null,
+        hasDsGraph: conn.has_ds_graph ?? undefined,
         connectionString: conn.db_connection_string ?? null,
         consentGiven: conn.consent_given ?? undefined,
       })),
@@ -1860,6 +1900,7 @@ export const createDatabase = async (
     const response = await apiRequest<{
       taskId: string;
       tablesCount: number;
+      connectionId?: string;
     }>(`/api/v1/backend/database/${projectId}`, {
       method: 'POST',
       body: JSON.stringify(requestBody),
@@ -1870,6 +1911,7 @@ export const createDatabase = async (
       data: {
         taskId: response.taskId,
         tablesCount: response.tablesCount,
+        connectionId: response.connectionId,
       },
     };
   } catch (error: any) {
@@ -1995,6 +2037,30 @@ export const getDatabaseSchema = async (databaseId: string): Promise<ApiResponse
       error: {
         code: 'FETCH_SCHEMA_FAILED',
         message: error.message || 'Failed to fetch schema',
+      },
+    };
+  }
+};
+
+export const getDatabaseDSGraph = async (
+  connectionId: string
+): Promise<ApiResponse<DSGraphPayload>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      graph: DSGraphPayload;
+    }>(`/api/v1/backend/connections/${connectionId}/ds-graph`);
+
+    return {
+      success: true,
+      data: response.graph,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: "FETCH_DS_GRAPH_FAILED",
+        message: error.message || "Failed to fetch datasource graph",
       },
     };
   }
