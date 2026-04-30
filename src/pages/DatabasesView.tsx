@@ -591,7 +591,10 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
         </Dialog>
 
         <Dialog open={dsGraphDialogOpen} onOpenChange={setDsGraphDialogOpen}>
-          <DialogContent className="max-w-[1200px]">
+          <DialogContent
+            className="!w-[82vw] !max-w-[82vw] sm:!max-w-[82vw] h-[84vh] max-h-[84vh] p-4 flex flex-col overflow-hidden"
+            style={{ width: "82vw", maxWidth: "82vw", height: "84vh", maxHeight: "84vh" }}
+          >
             <DialogHeader>
               <DialogTitle>Datasource Graph</DialogTitle>
               <DialogDescription>
@@ -599,13 +602,15 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
               </DialogDescription>
             </DialogHeader>
             {isGraphLoading ? (
-              <div className="h-[420px] flex items-center justify-center text-muted-foreground">Loading graph...</div>
+              <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Loading graph...</div>
             ) : graphError ? (
-              <div className="h-[420px] flex items-center justify-center text-destructive">{graphError}</div>
+              <div className="flex-1 min-h-0 flex items-center justify-center text-destructive">{graphError}</div>
             ) : currentGraph ? (
-              <DSGraphViewer graph={currentGraph} />
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <DSGraphViewer graph={currentGraph} />
+              </div>
             ) : (
-              <div className="h-[420px] flex items-center justify-center text-muted-foreground">Graph not available.</div>
+              <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Graph not available.</div>
             )}
           </DialogContent>
         </Dialog>
