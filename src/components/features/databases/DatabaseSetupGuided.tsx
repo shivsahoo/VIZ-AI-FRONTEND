@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Database as DatabaseIcon, ArrowRight, Check, Sparkles, Loader2 } from "lucide-react";
+import { Database as DatabaseIcon, ArrowRight, Check, Sparkles, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { Input } from "../../ui/input";
@@ -42,9 +42,10 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
   const [instanceUrl, setInstanceUrl] = useState("");
   const [workspaceUrl, setWorkspaceUrl] = useState("");
   const [httpPath, setHttpPath] = useState("");
-  const [catalogName, setCatalogName] = useState("");
-  const [schemaName, setSchemaName] = useState("");
   const [accessToken, setAccessToken] = useState("");
+  const [databricksScopes, setDatabricksScopes] = useState([
+    { catalogName: "", schemaName: "", isDefault: true },
+  ]);
 
   // Progress Overlay State
   const [showProgressOverlay, setShowProgressOverlay] = useState(false);
@@ -305,11 +306,37 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
           return;
         }
       } else if (dbType === "databricks") {
+        const validScopes = databricksScopes
+          .map((scope) => ({
+            catalogName: scope.catalogName.trim(),
+            schemaName: scope.schemaName.trim(),
+            isDefault: scope.isDefault,
+          }))
+          .filter((scope) => scope.catalogName && scope.schemaName);
+
         if (!normalizedConnectionName) {
           toast.error("Please provide a connection name");
           return;
         }
-        if (!workspaceUrl.trim() || !httpPath.trim() || !catalogName.trim() || !schemaName.trim() || !accessToken.trim()) {
+        if (!workspaceUrl.trim() || !httpPath.trim() || !accessToken.trim()) {
+          toast.error("Please fill Databricks workspace URL, HTTP path and access token");
+          return;
+        }
+        if (validScopes.length === 0) {
+          toast.error("Please add at least one valid catalog/schema scope");
+          return;
+        }
+        const scopeKeys = new Set(validScopes.map((scope) => `${scope.catalogName.toLowerCase()}.${scope.schemaName.toLowerCase()}`));
+        if (scopeKeys.size !== validScopes.length) {
+          toast.error("Duplicate Databricks scopes are not allowed");
+          return;
+        }
+        const defaultScopes = validScopes.filter((scope) => scope.isDefault);
+        if (defaultScopes.length > 1) {
+          toast.error("Only one Databricks scope can be default");
+          return;
+        }
+        if (defaultScopes.length === 0) {
           toast.error("Please fill all Databricks required fields");
           return;
         }
@@ -353,13 +380,23 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
             consentGiven: true,
           };
         } else if (dbType === "databricks") {
+          const normalizedScopes = databricksScopes
+            .map((scope) => ({
+              catalogName: scope.catalogName.trim(),
+              schemaName: scope.schemaName.trim(),
+              isDefault: scope.isDefault,
+            }))
+            .filter((scope) => scope.catalogName && scope.schemaName);
+          const defaultScope = normalizedScopes.find((scope) => scope.isDefault) || normalizedScopes[0];
+
           requestData = {
             connectionName: normalizedConnectionName,
             dbType: dbType,
             workspaceUrl: workspaceUrl.trim(),
             httpPath: httpPath.trim(),
-            catalogName: catalogName.trim(),
-            schemaName: schemaName.trim(),
+            catalogName: defaultScope?.catalogName || "",
+            schemaName: defaultScope?.schemaName || "",
+            scopes: normalizedScopes,
             accessToken: accessToken.trim(),
             consentGiven: true,
           };
@@ -617,32 +654,126 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                     </p>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="catalogName">
-                      Catalog Name <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      id="catalogName"
-                      placeholder="main"
-                      value={catalogName}
-                      onChange={(e) => setCatalogName(e.target.value)}
-                      className="h-12"
-                      autoComplete="off"
-                    />
-                  </div>
+                  <div className="col-span-2 space-y-3">
+                    <div className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/20 px-3 py-2">
+                      <Label>
+                        Catalog/Schema Scopes <span className="text-destructive">*</span>
+                      </Label>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-8"
+                        onClick={() =>
+                          setDatabricksScopes((prev) => [
+                            ...prev,
+                            { catalogName: "", schemaName: "", isDefault: prev.length === 0 },
+                          ])
+                        }
+                      >
+                        <Plus className="w-4 h-4 mr-1" />
+                        Add Scope
+                      </Button>
+                    </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="schemaName">
-                      Schema Name <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      id="schemaName"
-                      placeholder="analytics"
-                      value={schemaName}
-                      onChange={(e) => setSchemaName(e.target.value)}
-                      className="h-12"
-                      autoComplete="off"
-                    />
+                    <div className="space-y-3">
+                      {databricksScopes.map((scope, idx) => (
+                        <div
+                          key={idx}
+                          className={`rounded-xl border p-4 transition-all ${
+                            scope.isDefault
+                              ? "border-primary/50 bg-primary/5 shadow-sm shadow-primary/10"
+                              : "border-border bg-card/40"
+                          }`}
+                        >
+                          <div className="mb-3 flex items-center justify-between">
+                            <p className="text-xs font-medium text-muted-foreground">Scope {idx + 1}</p>
+                            <div className="flex items-center gap-3">
+                              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Checkbox
+                                  checked={scope.isDefault}
+                                  onCheckedChange={(checked) =>
+                                    setDatabricksScopes((prev) => {
+                                      if (!Boolean(checked)) {
+                                        return prev;
+                                      }
+                                      return prev.map((item, i) => ({
+                                        ...item,
+                                        isDefault: i === idx,
+                                      }));
+                                    })
+                                  }
+                                />
+                                Default
+                              </label>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                disabled={databricksScopes.length === 1}
+                                onClick={() =>
+                                  setDatabricksScopes((prev) => {
+                                    const next = prev.filter((_, i) => i !== idx);
+                                    if (next.length > 0 && !next.some((item) => item.isDefault)) {
+                                      next[0] = { ...next[0], isDefault: true };
+                                    }
+                                    return next;
+                                  })
+                                }
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:max-w-[460px] md:mx-auto">
+                            <div className="space-y-2 rounded-lg border border-border/80 bg-background/40 p-3">
+                              <Label htmlFor={`catalogName-${idx}`}>Catalog</Label>
+                              <Input
+                                id={`catalogName-${idx}`}
+                                placeholder="main"
+                                value={scope.catalogName}
+                                onChange={(e) =>
+                                  setDatabricksScopes((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx ? { ...item, catalogName: e.target.value } : item
+                                    )
+                                  )
+                                }
+                                className="h-11 border-border/70 focus-visible:ring-1 focus-visible:ring-primary/40 focus-visible:ring-offset-0 focus-visible:shadow-none"
+                                autoComplete="off"
+                              />
+                            </div>
+                            <div className="space-y-2 rounded-lg border border-border/80 bg-background/40 p-3">
+                              <Label htmlFor={`schemaName-${idx}`}>Schema</Label>
+                              <Input
+                                id={`schemaName-${idx}`}
+                                placeholder="analytics"
+                                value={scope.schemaName}
+                                onChange={(e) =>
+                                  setDatabricksScopes((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx ? { ...item, schemaName: e.target.value } : item
+                                    )
+                                  )
+                                }
+                                className="h-11 border-border/70 focus-visible:ring-1 focus-visible:ring-primary/40 focus-visible:ring-offset-0 focus-visible:shadow-none"
+                                autoComplete="off"
+                              />
+                            </div>
+                          </div>
+                          {scope.isDefault && (
+                            <p className="mt-3 text-xs text-primary">
+                              This scope will be used as fallback in query generation.
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Add one or more scopes and keep a single default.
+                    </p>
                   </div>
 
                   <div className="col-span-2 space-y-2">

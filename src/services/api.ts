@@ -1776,6 +1776,11 @@ export const createDatabase = async (
     httpPath?: string;
     catalogName?: string;
     schemaName?: string;
+    scopes?: Array<{
+      catalogName: string;
+      schemaName: string;
+      isDefault?: boolean;
+    }>;
     accessToken?: string;
   }
 ): Promise<ApiResponse<DatabaseCreationTask>> => {
@@ -1823,8 +1828,20 @@ export const createDatabase = async (
       } else if (dbType === 'databricks') {
         requestBody.workspace_url = data.workspaceUrl || '';
         requestBody.http_path = data.httpPath || '';
-        requestBody.catalog_name = data.catalogName || '';
-        requestBody.schema_name = data.schemaName || '';
+        if (data.scopes && data.scopes.length > 0) {
+          const scopes = data.scopes.map((scope) => ({
+            catalog_name: scope.catalogName,
+            schema_name: scope.schemaName,
+            is_default: Boolean(scope.isDefault),
+          }));
+          requestBody.scopes = scopes;
+          const defaultScope = scopes.find((scope) => scope.is_default) || scopes[0];
+          requestBody.catalog_name = defaultScope.catalog_name;
+          requestBody.schema_name = defaultScope.schema_name;
+        } else {
+          requestBody.catalog_name = data.catalogName || '';
+          requestBody.schema_name = data.schemaName || '';
+        }
         requestBody.access_token = data.accessToken || '';
       } else {
         // Traditional database fields
