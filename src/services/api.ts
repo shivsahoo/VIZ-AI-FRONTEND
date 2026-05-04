@@ -608,7 +608,12 @@ export const getProjects = async (): Promise<ApiResponse<Project[]>> => {
 /**
  * Create new project
  */
-export const createProject = async (data: { name: string; description: string }): Promise<ApiResponse<Project>> => {
+export const createProject = async (data: {
+  name: string;
+  description: string;
+  primary_domain: string;
+  additional_kpis?: string | null;
+}): Promise<ApiResponse<Project>> => {
   try {
     const response = await apiRequest<{
       message: string;
@@ -624,6 +629,8 @@ export const createProject = async (data: { name: string; description: string })
       body: JSON.stringify({
         name: data.name,
         description: data.description,
+        primary_domain: data.primary_domain,
+        additional_kpis: data.additional_kpis ?? null,
       }),
     });
 
@@ -731,7 +738,7 @@ export const updateProjectKpiInfo = async (projectId: string, kpiInfo: string): 
     await apiRequest(`/api/v1/backend/projects/${projectId}/kpi-info`, {
       method: 'PATCH',
       body: JSON.stringify({
-        kpi_info: kpiInfo,
+        additional_kpis: kpiInfo,
       }),
     });
     return { success: true };

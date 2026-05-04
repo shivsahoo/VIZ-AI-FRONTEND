@@ -1,54 +1,66 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Sparkles, Loader2, Wand2 } from "lucide-react";
+import { Sparkles, Loader2 } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { Input } from "../../ui/input";
 import { Textarea } from "../../ui/textarea";
 import { Label } from "../../ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../ui/select";
 import { createProject } from "../../../services/api";
 import { toast } from "sonner";
 import { cn } from "../../ui/utils";
+
+const PRIMARY_DOMAIN_OPTIONS = [
+  "Sales",
+  "Marketing",
+  "Finance",
+  "Operations",
+  "Engineering",
+  "HR",
+  "Customer Success",
+  "Other",
+] as const;
 
 interface ProjectCreationFormProps {
   onComplete: (data: {
     name: string;
     description: string;
     projectId: string;
+    primary_domain: string;
+    additional_kpis: string | null;
   }) => void;
   onCancel?: () => void;
 }
 
-// Get LLM service URL
-const getLLMServiceUrl = (): string => {
-  const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
-  
-  // Priority 1: Use dedicated LLM service URL if set
-  if (env?.VITE_LLM_SERVICE_URL) {
-    return env.VITE_LLM_SERVICE_URL.replace(/\/$/, ''); // Remove trailing slash
-  }
-  
-  // Priority 2: Convert WebSocket URL to HTTP if available
-  if (env?.VITE_WEBSOCKET_URL) {
-    const baseUrl = env.VITE_WEBSOCKET_URL;
-    // Convert to HTTP if it's WebSocket URL
-    return baseUrl.replace('wss://', 'https://').replace('ws://', 'http://').replace(/\/$/, '');
-  }
-  
-  // Priority 3: Default to localhost for local development
-  return 'http://localhost:8001';
-};
-
 export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFormProps) {
   const [projectName, setProjectName] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
+  const [selectedDomain, setSelectedDomain] = useState("");
+  const [customDomainText, setCustomDomainText] = useState("");
+  const [additionalKpis, setAdditionalKpis] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const [isEnhancing, setIsEnhancing] = useState(false);
-  const [errors, setErrors] = useState<{ name?: string; description?: string }>({});
+  const [errors, setErrors] = useState<{
+    name?: string;
+    description?: string;
+    primaryDomain?: string;
+    customDomain?: string;
+  }>({});
 
   const validateForm = (): boolean => {
-    const newErrors: { name?: string; description?: string } = {};
-    
+    const newErrors: {
+      name?: string;
+      description?: string;
+      primaryDomain?: string;
+      customDomain?: string;
+    } = {};
+
     if (!projectName.trim()) {
       newErrors.name = "Project name is required";
     } else if (projectName.trim().length < 3) {
@@ -65,9 +77,24 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
       newErrors.description = "Description must be less than 2000 characters";
     }
 
+    if (!selectedDomain.trim()) {
+      newErrors.primaryDomain = "Primary domain is required";
+    }
+    if (selectedDomain === "Other" && !customDomainText.trim()) {
+      newErrors.customDomain = "Please enter your domain";
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
+
+  const isFormReady =
+    projectName.trim().length >= 3 &&
+    projectName.trim().length <= 100 &&
+    projectDescription.trim().length >= 10 &&
+    projectDescription.trim().length <= 2000 &&
+    !!selectedDomain.trim() &&
+    (selectedDomain !== "Other" || !!customDomainText.trim());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,9 +106,15 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
     setIsCreating(true);
 
     try {
+      const primary_domain =
+        selectedDomain === "Other" ? customDomainText.trim() : selectedDomain.trim();
+      const kpisValue = additionalKpis.trim();
+
       const response = await createProject({
         name: projectName.trim(),
         description: projectDescription.trim(),
+        primary_domain,
+        additional_kpis: kpisValue || null,
       });
 
       if (!response.success || !response.data) {
@@ -89,13 +122,15 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
       }
 
       const projectId = response.data.id;
-      
+
       toast.success("Product created successfully! 🎉");
-      
+
       onComplete({
         name: projectName.trim(),
         description: projectDescription.trim(),
         projectId,
+        primary_domain,
+        additional_kpis: kpisValue || null,
       });
     } catch (error: any) {
       console.error("Failed to create project:", error);
@@ -118,57 +153,9 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
     }
   };
 
-  const handleEnhanceWithAI = async () => {
-    if (!projectDescription.trim()) {
-      toast.error("Please enter a description first");
-      return;
-    }
-
-    if (projectDescription.trim().length < 10) {
-      toast.error("Description must be at least 10 characters to enhance");
-      return;
-    }
-
-    setIsEnhancing(true);
-
-    try {
-      const llmServiceUrl = getLLMServiceUrl();
-      const response = await fetch(`http://170.187.237.181:8001/api/v1/enhance-text`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: projectDescription.trim(),
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Failed to enhance text' }));
-        throw new Error(errorData.detail || 'Failed to enhance text');
-      }
-
-      const data = await response.json();
-      
-      if (data.enhanced_text) {
-        // Truncate to 2000 characters if needed
-        const enhanced = data.enhanced_text.slice(0, 2000);
-        setProjectDescription(enhanced);
-        toast.success("Description enhanced successfully! ✨");
-      } else {
-        throw new Error("No enhanced text received");
-      }
-    } catch (error: any) {
-      console.error("Failed to enhance description:", error);
-      toast.error(error.message || "Failed to enhance description. Please try again.");
-    } finally {
-      setIsEnhancing(false);
-    }
-  };
-
   return (
     <Card className="border border-border shadow-xl overflow-hidden">
-      <div className="flex flex-col h-[600px]">
+      <div className="flex flex-col w-full">
         {/* Header */}
         <div className="px-6 py-4 border-b border-border bg-gradient-to-r from-primary/5 to-accent/5">
           <div className="flex items-center gap-3 w-full">
@@ -196,7 +183,7 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
         </div>
 
         {/* Form Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-8">
+        <div className="px-6 py-8">
           <motion.form
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -296,7 +283,7 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
                   "outline-none focus:outline-none focus-visible:outline-none",
                   "ring-0 focus:ring-2 focus:ring-purple-400/20"
                 )}
-                disabled={isCreating || isEnhancing}
+                disabled={isCreating}
                 maxLength={2000}
               />
               {errors.description && (
@@ -325,6 +312,131 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
               </div>
             </div>
 
+            {/* Primary Domain */}
+            <div className="space-y-2.5">
+              <Label className="text-sm font-semibold text-foreground">
+                Primary Domain <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={selectedDomain}
+                onValueChange={(v) => {
+                  setSelectedDomain(v);
+                  if (v !== "Other") {
+                    setCustomDomainText("");
+                  }
+                  setErrors((prev) => ({
+                    ...prev,
+                    primaryDomain: undefined,
+                    customDomain: undefined,
+                  }));
+                }}
+                disabled={isCreating}
+              >
+                <SelectTrigger
+                  className={cn(
+                    "w-full h-11 border-2 transition-all duration-200",
+                    errors.primaryDomain
+                      ? "border-destructive focus:border-destructive"
+                      : "border-border hover:border-primary/50 focus:border-purple-400/60",
+                    "bg-background shadow-sm"
+                  )}
+                >
+                  <SelectValue placeholder="Select your primary domain" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRIMARY_DOMAIN_OPTIONS.map((opt) => (
+                    <SelectItem key={opt} value={opt}>
+                      {opt}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.primaryDomain && (
+                <motion.p
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-xs text-destructive font-medium flex items-center gap-1"
+                >
+                  <span>⚠</span> {errors.primaryDomain}
+                </motion.p>
+              )}
+              {selectedDomain === "Other" && (
+                <div className="space-y-2 pt-1">
+                  <Input
+                    type="text"
+                    value={customDomainText}
+                    onChange={(e) => {
+                      setCustomDomainText(e.target.value);
+                      if (errors.customDomain) {
+                        setErrors((prev) => ({ ...prev, customDomain: undefined }));
+                      }
+                    }}
+                    placeholder="Enter your domain"
+                    disabled={isCreating}
+                    className={cn(
+                      "w-full h-11 border-2",
+                      errors.customDomain ? "border-destructive" : "border-border"
+                    )}
+                  />
+                  {errors.customDomain && (
+                    <motion.p
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-xs text-destructive font-medium flex items-center gap-1"
+                    >
+                      <span>⚠</span> {errors.customDomain}
+                    </motion.p>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                The main business area this product belongs to
+              </p>
+            </div>
+
+            {/* Additional KPIs */}
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Label htmlFor="additionalKpis" className="text-sm font-semibold text-foreground">
+                  Additional KPIs
+                </Label>
+               <span className="text-sm text-muted-foreground font-normal">
+                (optional)
+              </span>
+              </div>
+              <Textarea
+                id="additionalKpis"
+                value={additionalKpis}
+                onChange={(e) => setAdditionalKpis(e.target.value.slice(0, 500))}
+                placeholder="e.g., Monthly churn rate, Net Promoter Score, Customer Acquisition Cost, Average deal size..."
+                className={cn(
+                  "w-full min-h-[100px] resize-none border-2 transition-all duration-200",
+                  "border-border hover:border-primary/50 focus:border-purple-400/60 focus:ring-purple-400/20",
+                  "bg-background shadow-sm hover:shadow-md focus:shadow-lg",
+                  "outline-none focus:ring-2 focus:ring-purple-400/20"
+                )}
+                disabled={isCreating}
+                maxLength={500}
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Describe additional KPIs you want to monitor
+                </p>
+                <p
+                  className={cn(
+                    "text-xs font-medium transition-colors",
+                    additionalKpis.length > 480
+                      ? "text-destructive"
+                      : additionalKpis.length > 450
+                        ? "text-orange-500 dark:text-orange-400"
+                        : "text-muted-foreground"
+                  )}
+                >
+                  {additionalKpis.length}/500
+                </p>
+              </div>
+            </div>
+
             {/* Info Box */}
             <div className="bg-gradient-to-br from-primary/5 via-accent/5 to-primary/5 border-2 border-primary/20 rounded-xl p-5 shadow-sm">
               <div className="flex items-start gap-3">
@@ -347,7 +459,7 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
           <Button
             type="button"
             onClick={handleSubmit}
-            disabled={isCreating || !projectName.trim() || !projectDescription.trim()}
+            disabled={isCreating || !isFormReady}
             className="w-full h-12 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all disabled:opacity-50"
           >
             {isCreating ? (

@@ -161,6 +161,12 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         const response = await createProject({
           name: projectData.name,
           description: description,
+          primary_domain:
+            projectData.context?.primary_domain ??
+            projectData.context?.domain ??
+            "Other",
+          additional_kpis:
+            projectData.context?.additional_kpis?.trim() || null,
         });
 
         if (!response.success || !response.data) {

@@ -268,8 +268,8 @@ export default function App() {
     setSelectedProjectId(finalProjectId);
     
     setCurrentView('workspace');
-    // Redirect to charts page for new projects, home for existing projects
-    setWorkspaceTab(isNewProject ? 'charts' : 'home');
+    // New projects → databases tab (to add a connection), existing projects → home
+    setWorkspaceTab(isNewProject ? 'databases' : 'home');
     
     // Store last visited project for ALL users (not just project_user)
     localStorage.setItem('vizai_last_project', projectName);

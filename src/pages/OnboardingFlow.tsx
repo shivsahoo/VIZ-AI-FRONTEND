@@ -33,6 +33,8 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
     name: string;
     description: string;
     projectId: string;
+    primary_domain: string;
+    additional_kpis: string | null;
   }) => {
     setProjectName(data.name);
     setProjectDescription(data.description);
@@ -43,6 +45,10 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
       context: {
         project_name: data.name,
         project_description: data.description,
+        primary_domain: data.primary_domain,
+        ...(data.additional_kpis != null && data.additional_kpis !== ""
+          ? { additional_kpis: data.additional_kpis }
+          : {}),
         ...(data.projectId ? { projectId: data.projectId } : {}),
       },
       database: null,
@@ -58,7 +64,7 @@ export function OnboardingFlow({ onComplete, onCancel }: OnboardingFlowProps) {
       <div className="absolute top-20 left-20 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
       <div className="absolute bottom-20 right-20 w-96 h-96 bg-accent/5 rounded-full blur-3xl" />
       
-      <div className="w-full max-w-5xl relative z-10">
+      <div className="w-full max-w-6xl relative z-10">
         {/* Progress Steps */}
         <div className="mb-8 md:mb-12">
           <div className="flex items-center justify-center gap-2 md:gap-3">

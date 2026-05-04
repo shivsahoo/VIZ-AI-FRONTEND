@@ -50,9 +50,10 @@ interface DatabaseConnection {
 
 interface DatabasesViewProps {
   projectId?: string | number;
+  onTabChange?: (tab: string) => void;
 }
 
-export function DatabasesView({ projectId }: DatabasesViewProps) {
+export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
   const [databases, setDatabases] = useState<DatabaseConnection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showConnectionFlow, setShowConnectionFlow] = useState(false);
@@ -157,12 +158,17 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   }) => {
     const dbName = connectionData.database.connectionName || connectionData.database.name || "New Database";
     toast.success(`Database "${dbName}" connected successfully!`);
-    
+
     // Refresh the database list from API
     if (projectId) {
       fetchDatabases();
     }
     setShowConnectionFlow(false);
+
+    // Redirect directly to the charts page
+    if (onTabChange) {
+      onTabChange('charts');
+    }
   };
 
   const handleViewConnection = (db: DatabaseConnection) => {
