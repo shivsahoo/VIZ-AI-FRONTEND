@@ -708,8 +708,11 @@ export function ChartPreviewDialog({
 
         {/* Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto px-3 sm:px-4 md:px-5 min-h-0">
-          <div className="bg-muted/30 rounded-lg border border-border p-2 sm:p-3 md:p-4 mb-4">
-            <div className="relative w-full" style={{ height: `${getChartHeight()}px` }}>
+          <div className="bg-muted/30 rounded-lg border border-border p-2 sm:p-3 md:p-4 mb-4 overflow-hidden">
+            <div
+              className="relative w-full overflow-hidden"
+              style={{ height: `${getChartHeight()}px` }}
+            >
               
               {isConversational ? (
                 <div className="absolute inset-0 flex items-center justify-center p-6">

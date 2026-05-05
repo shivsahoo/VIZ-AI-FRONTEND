@@ -116,18 +116,19 @@ export function composePieOption(
         },
     legend: compact
       ? { show: false }
-      : {
+        : {
           show: legendVisible,
           left: 12,
           right: 12,
-          bottom: 0,
+          bottom: 2,
+          itemGap: 6,
           textStyle: { color: labelColor, fontSize: 11 },
         },
     series: [
       {
         type: "pie",
         top: titleOffset,
-        bottom: legendVisible && !compact ? 56 : 16,
+        bottom: legendVisible && !compact ? 38 : 12,
         radius: isDonut ? ["44%", "68%"] : ["0%", "70%"],
         avoidLabelOverlap: true,
         minShowLabelAngle: 4,

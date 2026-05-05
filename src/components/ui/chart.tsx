@@ -33,7 +33,7 @@ function ChartContainer({
       data-slot="chart"
       data-chart={chartId}
       className={cn(
-        "flex h-full w-full justify-center text-xs [&_.echarts-svg]:outline-none",
+        "relative h-full w-full text-xs [&_.echarts-svg]:outline-none",
         className,
       )}
       {...props}

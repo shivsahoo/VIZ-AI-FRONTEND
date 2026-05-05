@@ -14,11 +14,12 @@ export function buildGrid(
       containLabel: false,
     };
   }
+  /* Bottom is a floor only — containLabel expands for rotated x-axis text. Keeps plots from hugging footer. */
   return {
-    top: hasTitle ? 56 : 24,
-    right: 28,
-    bottom: 96,
-    left: 68,
+    top: hasTitle ? 56 : 20,
+    right: 18,
+    bottom: 48,
+    left: 12,
     containLabel: true,
   };
 }
@@ -80,7 +81,7 @@ export function buildXAxis(
       width: rotated ? 92 : 120,
       fontSize: 11,
       color: labelColor,
-      margin: 14,
+      margin: 10,
       formatter: formatCategory,
     },
     axisLine: {

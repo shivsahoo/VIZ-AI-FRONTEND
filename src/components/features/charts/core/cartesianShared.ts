@@ -189,9 +189,10 @@ export function composeCartesianOption(
       ? { show: false }
       : {
           show: legendVisible,
-          bottom: 0,
+          bottom: 2,
           left: 12,
           right: 12,
+          itemGap: 6,
           textStyle: { color: labelColor, fontSize: 11 },
           data: seriesKeys.map((k) => config?.[k]?.label ?? k),
         },

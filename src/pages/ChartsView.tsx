@@ -1279,7 +1279,10 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     const error = status?.error;
 
     return (
-      <div className="relative h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden p-4 flex items-center justify-center" data-chart-visualization="true">
+      <div
+        className="relative h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden px-4 flex flex-col"
+        data-chart-visualization="true"
+      >
         {isLoading && hasQueryAndConnection && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/90 backdrop-blur-md rounded-lg z-10">
             {/* Three dot loader */}
@@ -1301,14 +1304,14 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         )}
 
         {!isLoading && error && (
-          <div className="text-center text-muted-foreground text-xs">
+          <div className="flex flex-1 flex-col items-center justify-center px-2 text-center text-muted-foreground text-xs">
             <p className="font-medium text-foreground mb-1">Unable to load data</p>
             <p className="max-w-[220px] mx-auto leading-relaxed">{error}</p>
           </div>
         )}
 
         {!isLoading && !error && !hasQueryAndConnection && (
-          <div className="text-center text-muted-foreground text-xs">
+          <div className="flex flex-1 flex-col items-center justify-center px-2 text-center text-muted-foreground text-xs">
             <p className="font-medium text-foreground mb-1">Missing query configuration</p>
             <p className="max-w-[220px] mx-auto leading-relaxed">
               This chart does not have a saved SQL query or database connection. Edit the chart to provide both before viewing live data.
@@ -1317,7 +1320,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         )}
 
         {!isLoading && !error && preparedData.data.length === 0 && hasQueryAndConnection && (
-          <div className="text-center text-muted-foreground text-xs">
+          <div className="flex flex-1 flex-col items-center justify-center px-2 text-center text-muted-foreground text-xs">
             <p className="font-medium text-foreground mb-1">No data returned</p>
             <p className="max-w-[220px] mx-auto leading-relaxed">
               This chart&apos;s query did not return any rows. Try adjusting the query or filters.
@@ -1326,24 +1329,26 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         )}
 
         {!isLoading && !error && preparedData.data.length > 0 && hasQueryAndConnection && (
-          <ChartCard
-            type={displayChartType}
-            data={preparedData.data}
-            dataKeys={[
-              preparedData.dataKeys.primary,
-              ...(preparedData.dataKeys.secondary
-                ? [preparedData.dataKeys.secondary]
-                : []),
-              ...(preparedData.extraKeys ?? []),
-            ]}
-            xAxisKey={preparedData.xAxisKey}
-            axisConfig={listAxis}
-            showLegend={
-              (!!preparedData.dataKeys.secondary || (preparedData.extraKeys?.length ?? 0) > 0) &&
-              displayChartType !== "pie"
-            }
-            height={240}
-          />
+          <div className="min-h-0 flex-1 w-full">
+            <ChartCard
+              type={displayChartType}
+              data={preparedData.data}
+              dataKeys={[
+                preparedData.dataKeys.primary,
+                ...(preparedData.dataKeys.secondary
+                  ? [preparedData.dataKeys.secondary]
+                  : []),
+                ...(preparedData.extraKeys ?? []),
+              ]}
+              xAxisKey={preparedData.xAxisKey}
+              axisConfig={listAxis}
+              showLegend={
+                (!!preparedData.dataKeys.secondary || (preparedData.extraKeys?.length ?? 0) > 0) &&
+                displayChartType !== "pie"
+              }
+              height={280}
+            />
+          </div>
         )}
       </div>
     );

@@ -249,21 +249,38 @@ export function ChartCard(props: ChartCardProps) {
     );
   }
 
+  const scrollXBar =
+    "scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent";
+
+  /** Below this content width we skip overflow-x wrappers (fewer scrollbar bugs on Win/Chrome). */
+  const CARTESIAN_PAN_WIDTH_PX = 648;
+
+  const horizontalPanLayerStyle = {
+    height: baseHeight,
+    maxHeight: baseHeight,
+    overflowX: "auto" as const,
+    overflowY: "hidden" as const,
+    minHeight: 0,
+  };
+
   // ── Heatmap ──────────────────────────────────────────────────────────────
   if (type === "heatmap") {
     const xCount = extractCategoryCount(option.xAxis);
-    const yCount = extractCategoryCount(option.yAxis);
     const needsHorizontalScroll = xCount > 14;
-    const needsVerticalScroll = yCount > 9;
     const minWidth = Math.max(560, xCount * 48);
-    const renderHeight = needsVerticalScroll ? heatmapRenderHeight : baseHeight;
     return (
-      <div
-        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full ${needsHorizontalScroll ? "overflow-x-auto" : "overflow-x-hidden"} ${needsVerticalScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
-        style={{ height: baseHeight, minHeight: baseHeight }}
-      >
-        <div style={{ minWidth: needsHorizontalScroll ? minWidth : "100%", minHeight: renderHeight }}>
-          {wrapped}
+      <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
+        <div
+          className={
+            needsHorizontalScroll
+              ? `${scrollXBar} w-full shrink-0 min-h-0`
+              : "h-full max-h-full overflow-hidden min-h-0"
+          }
+          style={needsHorizontalScroll ? horizontalPanLayerStyle : undefined}
+        >
+          <div style={{ minWidth: needsHorizontalScroll ? minWidth : "100%", minHeight: heatmapRenderHeight }}>
+            {wrapped}
+          </div>
         </div>
       </div>
     );
@@ -271,56 +288,66 @@ export function ChartCard(props: ChartCardProps) {
 
   // ── Stacked Horizontal Bar ────────────────────────────────────────────────
   if (type === "stackedhorizontalbar") {
-    const needsVerticalScroll = stackedHorizontalDesiredHeight > baseHeight;
     const needsHorizontalScroll = data.length > 10;
     const horizontalMinWidth = Math.max(720, Math.round(baseHeight * 1.6));
     return (
-      <div
-        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full ${needsHorizontalScroll ? "overflow-x-auto" : "overflow-x-hidden"} ${needsVerticalScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
-        style={{ height: baseHeight, minHeight: baseHeight }}
-      >
+      <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
         <div
-          style={{
-            minHeight: stackedHorizontalRenderHeight,
-            minWidth: needsHorizontalScroll ? horizontalMinWidth : "100%",
-          }}
+          className={
+            needsHorizontalScroll
+              ? `${scrollXBar} w-full shrink-0 min-h-0`
+              : "h-full max-h-full overflow-hidden min-h-0"
+          }
+          style={needsHorizontalScroll ? horizontalPanLayerStyle : undefined}
         >
-          {wrapped}
+          <div
+            style={{
+              minHeight: stackedHorizontalRenderHeight,
+              minWidth: needsHorizontalScroll ? horizontalMinWidth : "100%",
+            }}
+          >
+            {wrapped}
+          </div>
         </div>
       </div>
     );
   }
 
-  // ── Pie / Donut — vertical scroll when many slices (congested legend) ─────
+  // ── Pie / Donut — clip within card height (no vertical scroll) ────────────
   if (type === "pie" || type === "donut") {
-    const sliceCount = data.length;
-    const needsScroll = sliceCount > 20;
-    // Approx. 18 px per legend row (3 items per row) when many slices
-    const legendExtraHeight = needsScroll ? Math.min(600, Math.ceil(sliceCount / 3) * 18) : 0;
-    const pieRenderHeight = baseHeight + legendExtraHeight;
     return (
       <div
-        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-x-hidden ${needsScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
+        className="scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-x-hidden overflow-y-hidden"
         style={{ height: baseHeight, minHeight: baseHeight }}
       >
-        <div style={{ minHeight: pieRenderHeight, width: "100%" }}>
-          {wrapped}
-        </div>
+        <div style={{ height: baseHeight, width: "100%" }}>{wrapped}</div>
       </div>
     );
   }
 
   // ── Scatter / Clustering — horizontal scroll for large datasets ───────────
   if (type === "scatter" || type === "clustering") {
-    const needsScroll = data.length > 200;
-    const minW = needsScroll ? Math.max(baseHeight * 1.5, 600) : undefined;
+    const needsHorizontal = data.length > 200;
+    const minW = needsHorizontal ? Math.max(baseHeight * 1.5, 600) : undefined;
     return (
-      <div
-        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-y-hidden ${needsScroll ? "overflow-x-auto" : "overflow-x-hidden"}`}
-        style={{ height: baseHeight, minHeight: baseHeight }}
-      >
-        <div style={{ minWidth: minW ?? "100%", minHeight: baseHeight }}>
-          {wrapped}
+      <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
+        <div
+          className={
+            needsHorizontal
+              ? `${scrollXBar} w-full shrink-0 min-h-0`
+              : "h-full max-h-full overflow-hidden min-h-0"
+          }
+          style={needsHorizontal ? horizontalPanLayerStyle : undefined}
+        >
+          <div
+            style={{
+              minWidth: minW ?? "100%",
+              height: baseHeight,
+              maxHeight: baseHeight,
+            }}
+          >
+            {wrapped}
+          </div>
         </div>
       </div>
     );
@@ -328,33 +355,40 @@ export function ChartCard(props: ChartCardProps) {
 
   // ── Multi Y-Axis — horizontal scroll when many categories ────────────────
   if (type === "multiyaxischart") {
-    const needsScroll = data.length > 15;
-    const minW = needsScroll ? Math.max(600, data.length * 56) : undefined;
+    const needsHorizontal = data.length > 15;
+    const minW = needsHorizontal ? Math.max(600, data.length * 56) : undefined;
     return (
-      <div
-        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-y-hidden ${needsScroll ? "overflow-x-auto" : "overflow-x-hidden"}`}
-        style={{ height: baseHeight, minHeight: baseHeight }}
-      >
-        <div style={{ minWidth: minW ?? "100%", minHeight: baseHeight }}>
-          {wrapped}
+      <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
+        <div
+          className={
+            needsHorizontal
+              ? `${scrollXBar} w-full shrink-0 min-h-0`
+              : "h-full max-h-full overflow-hidden min-h-0"
+          }
+          style={needsHorizontal ? horizontalPanLayerStyle : undefined}
+        >
+          <div
+            style={{
+              minWidth: minW ?? "100%",
+              height: baseHeight,
+              maxHeight: baseHeight,
+            }}
+          >
+            {wrapped}
+          </div>
         </div>
       </div>
     );
   }
 
-  // ── Funnel — vertical scroll when many stages ─────────────────────────────
+  // ── Funnel — clip within card height (no vertical scroll) ─────────────────
   if (type === "funnel") {
-    const stageCount = data.length;
-    const needsScroll = stageCount > 8;
-    const funnelRenderHeight = needsScroll ? Math.min(1200, stageCount * 48 + 80) : baseHeight;
     return (
       <div
-        className={`scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-x-hidden ${needsScroll ? "overflow-y-auto" : "overflow-y-hidden"}`}
+        className="scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-x-hidden overflow-y-hidden"
         style={{ height: baseHeight, minHeight: baseHeight }}
       >
-        <div style={{ minHeight: funnelRenderHeight, width: "100%" }}>
-          {wrapped}
-        </div>
+        <div style={{ height: baseHeight, width: "100%" }}>{wrapped}</div>
       </div>
     );
   }
@@ -368,13 +402,29 @@ export function ChartCard(props: ChartCardProps) {
     );
   }
 
-  // ── Line, Bar, Area, StackedLineChart — horizontal scroll by point count ──
+  // ── Line, Bar, Area, StackedLineChart — pan only when many points need extra width ──
   const pointCount = data.length;
-  const minW = Math.max(400, pointCount * (type === "bar" ? 80 : 60));
+  const pitch = type === "bar" ? 80 : 60;
+  const minWDesired = Math.max(400, pointCount * pitch);
+  const needsHorizontalPan = minWDesired > CARTESIAN_PAN_WIDTH_PX;
+
+  if (!needsHorizontalPan) {
+    return (
+      <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
+        <div style={{ height: baseHeight }} className="h-full overflow-hidden">
+          {wrapped}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent w-full overflow-x-auto">
-      <div style={{ minWidth: minW, height: baseHeight }}>{wrapped}</div>
+    <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
+      <div className={`${scrollXBar} w-full shrink-0 min-h-0`} style={horizontalPanLayerStyle}>
+        <div style={{ minWidth: minWDesired, height: baseHeight, maxHeight: baseHeight }}>
+          {wrapped}
+        </div>
+      </div>
     </div>
   );
 }

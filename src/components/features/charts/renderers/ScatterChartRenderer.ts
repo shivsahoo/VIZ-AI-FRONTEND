@@ -79,7 +79,7 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
 
   const grid = {
     ...buildGrid(compact, Boolean(title)),
-    ...(!compact ? { bottom: 72, left: 76 } : {}),
+    ...(!compact ? { bottom: 42 } : {}),
   };
 
   return withBaseOption({
@@ -90,7 +90,7 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
       max: xRange === 0 ? xMax + 1 : Math.ceil(xMax + xPadding),
       name: xKey,
       nameLocation: "middle",
-      nameGap: compact ? 0 : 36,
+      nameGap: compact ? 0 : 22,
       nameTextStyle: { color: labelColor, fontSize: 11 },
       show: !compact,
       axisLabel: compact

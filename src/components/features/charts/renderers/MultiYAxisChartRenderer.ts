@@ -52,7 +52,7 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
 
   const yAxisDefs = metricKeys.map((key, index) => {
     const axisColor = palette[index % palette.length];
-    const position = index === 2 ? "left" : "right";
+    const position: "left" | "right" = index === 2 ? "left" : "right";
     const offset = index === 1 ? 80 : 0;
     return {
       type: "value" as const,
@@ -139,13 +139,14 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
           show: true,
           left: 12,
           right: 12,
-          bottom: 0,
+          bottom: 2,
+          itemGap: 6,
           textStyle: { color: labelColor, fontSize: 11 },
           data: series.map((s) => s.name),
         },
     grid: compact
       ? { top: 0, bottom: 0, left: 0, right: 0, containLabel: false }
-      : { top: title ? 56 : 24, left: 72, right: 180, bottom: 92, containLabel: true },
+      : { top: title ? 56 : 22, left: 72, right: 180, bottom: 52, containLabel: true },
     xAxis: {
       type: "category",
       data: categories,
