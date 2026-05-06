@@ -6,9 +6,8 @@ import { Input } from "../components/ui/input";
 import { GradientButton } from "../components/shared/GradientButton";
 import { OnboardingFlow } from "./OnboardingFlow";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
-import { KPIInfoBot } from "../components/features/ai/KPIInfoBot";
 import { toast } from "sonner";
-import { getProjects, createProject, getCurrentUser, deleteProject, updateProjectKpiInfo, type Project as ApiProject } from "../services/api";
+import { getProjects, createProject, getCurrentUser, deleteProject, type Project as ApiProject } from "../services/api";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,20 +63,12 @@ interface ProjectsViewProps {
 
 export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
   const [showNewProjectFlow, setShowNewProjectFlow] = useState(false);
-  const [showKPICollection, setShowKPICollection] = useState(false);
   const [projects, setProjects] = useState<UIProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<UIProject | null>(null);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
-  const [pendingProjectData, setPendingProjectData] = useState<{
-    projectId: string;
-    projectName: string;
-    projectDescription?: string;
-    projectDomain?: string;
-    enhancedDescription?: string;
-  } | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -165,8 +156,7 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
             projectData.context?.primary_domain ??
             projectData.context?.domain ??
             "Other",
-          additional_kpis:
-            projectData.context?.additional_kpis?.trim() || null,
+          additional_kpis: projectData.context?.additional_kpis?.trim() || null,
         });
 
         if (!response.success || !response.data) {
@@ -200,19 +190,6 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
       };
       setProjects([newProject, ...projects]);
       
-      // KPI step removed from onboarding; only save if provided from future flows.
-      const kpisSummary = projectData.context?.kpisSummary;
-      if (kpisSummary) {
-        try {
-          const response = await updateProjectKpiInfo(projectId, kpisSummary);
-          if (!response.success) {
-            console.error("Failed to save KPI info:", response.error?.message);
-          }
-        } catch (error) {
-          console.error("Error saving KPI info:", error);
-        }
-      }
-
       // Navigate directly to the created project (skip second KPI collection)
       setShowNewProjectFlow(false);
       
@@ -227,62 +204,6 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     } catch (err: any) {
       toast.error(err.message || "An error occurred while setting up project");
     }
-  };
-
-  const handleKPICollectionComplete = async (data: {
-    kpis: string[];
-    kpisSummary: string;
-  }) => {
-    // KPI collection complete - save KPIs to project
-    console.log("KPIs collected:", data);
-    
-    if (pendingProjectData) {
-      // Save KPI information to the project
-      if (data.kpisSummary) {
-        try {
-          const response = await updateProjectKpiInfo(
-            pendingProjectData.projectId, 
-            data.kpisSummary
-          );
-          
-          if (!response.success) {
-            console.error("Failed to save KPI info:", response.error?.message);
-            // Don't block navigation if KPI save fails, just log it
-          }
-        } catch (error) {
-          console.error("Error saving KPI info:", error);
-          // Don't block navigation if KPI save fails
-        }
-      }
-      
-      // Show success toast with project details
-      toast.success(
-        `🎉 Project "${pendingProjectData.projectName}" created successfully! Redirecting to your workspace...`,
-        {
-          duration: 3000,
-        }
-      );
-      
-      // Navigate to the created project after a brief delay
-      setTimeout(() => {
-        setShowKPICollection(false);
-        onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId, true); // true indicates this is a new project
-        setPendingProjectData(null);
-      }, 500);
-    } else {
-      toast.success("KPIs collected successfully!");
-      setShowKPICollection(false);
-      setPendingProjectData(null);
-    }
-  };
-
-  const handleKPICollectionCancel = () => {
-    // Skip KPI collection and select the project
-    setShowKPICollection(false);
-    if (pendingProjectData) {
-      onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId, true); // true indicates this is a new project
-    }
-    setPendingProjectData(null);
   };
 
   const handleNewProjectCancel = () => {
@@ -349,25 +270,6 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
           onComplete={handleNewProjectComplete} 
           onCancel={handleNewProjectCancel}
         />
-      </div>
-    );
-  }
-
-  // If collecting KPIs, show KPI collection flow
-  if (showKPICollection && pendingProjectData && currentUserId) {
-    return (
-      <div className="min-h-full bg-background flex items-center justify-center p-8">
-        <div className="w-full max-w-3xl">
-          <KPIInfoBot
-            userId={currentUserId}
-            projectName={pendingProjectData.projectName}
-            projectDescription={pendingProjectData.projectDescription}
-            projectDomain={pendingProjectData.projectDomain}
-            productDescription={pendingProjectData.enhancedDescription}
-            onComplete={handleKPICollectionComplete}
-            onCancel={handleKPICollectionCancel}
-          />
-        </div>
       </div>
     );
   }

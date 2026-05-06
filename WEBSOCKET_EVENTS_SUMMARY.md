@@ -1,8 +1,8 @@
-# WebSocket API - 4 Main Workflow Events
+# WebSocket API - Main Workflow Events
 
 ## Overview
 
-The VizAI WebSocket API supports 4 main conversational workflow events for creating projects, collecting KPIs, creating dashboards, and generating charts.
+The VizAI WebSocket API supports conversational workflow events for creating projects, creating dashboards, and generating charts.
 
 ## WebSocket URL
 
@@ -12,7 +12,7 @@ wss://nonmyopic-diligently-madden.ngrok-free.dev/ws/vizai
 
 ---
 
-## The 4 Main Workflow Events
+## Main Workflow Events
 
 ### 1. `project_info`
 
@@ -38,33 +38,7 @@ wss://nonmyopic-diligently-madden.ngrok-free.dev/ws/vizai
 
 ---
 
-### 2. `kpi_info`
-
-**Purpose**: Collect KPIs through conversational questions (up to 5 questions).
-
-**Flow**:
-- Send project context (name, description, domain, enhanced description)
-- Server asks up to 5 questions about KPIs
-- User answers each question
-- Server extracts and validates KPIs
-
-**Key Fields**:
-- `project_name` (optional) - Project name
-- `project_description` (optional) - Basic project description
-- `project_domain` (optional) - Project domain
-- `product_description` (optional) - Enhanced description from project_info (has priority)
-- `data_connection_id` (optional) - Database connection ID to associate KPI context
-- `user_response` (for follow-ups) - Answer to the question
-
-**Response**:
-- `status: "collecting"` - More questions to ask
-- `status: "completed"` - KPIs collected
-- `state.kpis` - Array of KPI strings
-- `state.kpis_summary` - Comma-separated KPI string
-
----
-
-### 3. `dashboard_creation`
+### 2. `dashboard_creation`
 
 **Purpose**: Create a dashboard with name, optional description, and KPI-related questions.
 
@@ -105,8 +79,8 @@ wss://nonmyopic-diligently-madden.ngrok-free.dev/ws/vizai
 - `db_type` (required) - "mysql", "postgres", or "sqlite"
 - `role` (required) - User role for query generation
 - `domain` (optional) - Project domain
-- `kpi_info` (optional) - Project-level KPIs
-- `dashboard_kpi_info` (optional) - Dashboard-level KPIs (has priority)
+- `product_name` (optional) - Product name
+- `product_description` (optional) - Product description
 - `product_info` (optional) - Product/context description
 - `conversation_summary` (optional) - Conversation summary
 - `min_max_dates` (optional) - [min_date, max_date] for time-based queries
@@ -145,20 +119,7 @@ wsClient.on('project_info', (response) => {
 });
 wsClient.projectInfo({ name: "My Project", domain: "data analytics" });
 
-// 2. KPI Info
-wsClient.on('kpi_info', (response) => {
-  if (response.status === 'completed') {
-    const kpis = response.state?.kpis; // Array of KPIs
-    // Use KPIs for project/dashboard
-  }
-});
-wsClient.kpiInfo({ 
-  project_name: "My Project",
-  product_description: enhancedDescription,
-  data_connection_id: "connection-uuid-123"
-});
-
-// 3. Dashboard Creation
+// 2. Dashboard Creation
 wsClient.on('dashboard_creation', (response) => {
   if (response.status === 'completed') {
     const dashboardName = response.state?.name;
@@ -184,8 +145,8 @@ wsClient.chartCreation({
   db_schema: JSON.stringify({ tables: [...] }),
   db_type: "mysql",
   role: "Analyst",
-  kpi_info: "Revenue, User Growth",
-  dashboard_kpi_info: "Active Users"
+  product_name: "My Product",
+  product_description: enhancedDescription
 });
 ```
 
@@ -201,11 +162,8 @@ wsClient.chartCreation({
 
 4. **Date Placeholders**: Chart queries may contain `[MIN_DATE]` and `[MAX_DATE]` placeholders that need to be replaced.
 
-5. **Priority**: Dashboard KPIs have priority over project KPIs in chart_creation.
-
 6. **Max Questions**: 
    - `project_info`: 5 questions max
-   - `kpi_info`: 5 questions max
    - `dashboard_creation`: 5 KPI-related questions (after name/description)
 
 7. **Chart Limits**: Chart creation generates 1-7 charts based on context, capped at 7 maximum.

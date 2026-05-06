@@ -3,7 +3,6 @@
  * 
  * Handles WebSocket connections for conversational workflows:
  * - project_info: Collect project metadata
- * - kpi_info: Collect KPIs
  * - dashboard_creation: Create dashboard with conversational flow
  * - chart_creation: Generate chart specifications
  */
@@ -361,28 +360,6 @@ export class VizAIWebSocket {
   }
 
   /**
-   * 2. KPI Info - Collect KPIs through conversational questions
-   * 
-   * @param payload - Initial KPI data or user response
-   *   - Initial: { project_name?, project_description?, project_domain?, product_description? }
-   *   - Follow-up: { user_response: string }
-   */
-  kpiInfo(payload: {
-    project_name?: string;
-    project_description?: string;
-    project_domain?: string;
-    product_description?: string;
-    data_connection_id?: string;
-    user_response?: string;
-  }): void {
-    this.send({
-      event_type: 'kpi_info',
-      user_id: this.userId,
-      payload,
-    });
-  }
-
-  /**
    * 3. Dashboard Creation - Create dashboard with conversational flow
    * 
    * @param payload - Initial dashboard data or user response
@@ -412,8 +389,8 @@ export class VizAIWebSocket {
     db_type: "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce" | "databricks";
     role: string;
     domain?: string;
-    kpi_info?: string; // Project-level KPIs
-    dashboard_kpi_info?: string; // Dashboard-level KPIs (has priority)
+    product_name?: string;
+    product_description?: string;
     product_info?: string;
     conversation_summary?: string;
     min_max_dates?: [string, string]; // [min_date, max_date]
@@ -481,8 +458,8 @@ export class VizAIWebSocket {
     role?: string;
     domain?: string;
     product_info?: string;
-    kpi_info?: string;
-    dashboard_kpi_info?: string;
+    product_name?: string;
+    product_description?: string;
     min_max_dates?: [string, string];
   }): void {
     const formattedPayload: Record<string, any> = { ...payload };

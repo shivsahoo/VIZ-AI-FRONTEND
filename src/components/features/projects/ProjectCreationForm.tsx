@@ -109,7 +109,6 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
       const primary_domain =
         selectedDomain === "Other" ? customDomainText.trim() : selectedDomain.trim();
       const kpisValue = additionalKpis.trim();
-
       const response = await createProject({
         name: projectName.trim(),
         description: projectDescription.trim(),
@@ -394,48 +393,46 @@ export function ProjectCreationForm({ onComplete, onCancel }: ProjectCreationFor
               </p>
             </div>
 
-            {/* Additional KPIs */}
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Label htmlFor="additionalKpis" className="text-sm font-semibold text-foreground">
-                  Additional KPIs
-                </Label>
-               <span className="text-sm text-muted-foreground font-normal">
-                (optional)
-              </span>
-              </div>
-              <Textarea
-                id="additionalKpis"
-                value={additionalKpis}
-                onChange={(e) => setAdditionalKpis(e.target.value.slice(0, 500))}
-                placeholder="e.g., Monthly churn rate, Net Promoter Score, Customer Acquisition Cost, Average deal size..."
-                className={cn(
-                  "w-full min-h-[100px] resize-none border-2 transition-all duration-200",
-                  "border-border hover:border-primary/50 focus:border-purple-400/60 focus:ring-purple-400/20",
-                  "bg-background shadow-sm hover:shadow-md focus:shadow-lg",
-                  "outline-none focus:ring-2 focus:ring-purple-400/20"
-                )}
-                disabled={isCreating}
-                maxLength={500}
-              />
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Describe additional KPIs you want to monitor
-                </p>
-                <p
-                  className={cn(
-                    "text-xs font-medium transition-colors",
-                    additionalKpis.length > 480
-                      ? "text-destructive"
-                      : additionalKpis.length > 450
-                        ? "text-orange-500 dark:text-orange-400"
-                        : "text-muted-foreground"
-                  )}
-                >
-                  {additionalKpis.length}/500
-                </p>
-              </div>
+          {/* Additional KPIs */}
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Label htmlFor="additionalKpis" className="text-sm font-semibold text-foreground">
+                Additional KPIs
+              </Label>
+              <span className="text-sm text-muted-foreground font-normal">(optional)</span>
             </div>
+            <Textarea
+              id="additionalKpis"
+              value={additionalKpis}
+              onChange={(e) => setAdditionalKpis(e.target.value.slice(0, 500))}
+              placeholder="e.g., Monthly churn rate, Net Promoter Score, Customer Acquisition Cost, Average deal size..."
+              className={cn(
+                "w-full min-h-[100px] resize-none border-2 transition-all duration-200",
+                "border-border hover:border-primary/50 focus:border-purple-400/60 focus:ring-purple-400/20",
+                "bg-background shadow-sm hover:shadow-md focus:shadow-lg",
+                "outline-none focus:ring-2 focus:ring-purple-400/20"
+              )}
+              disabled={isCreating}
+              maxLength={500}
+            />
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Store any KPIs you care about (not used as AI context)
+              </p>
+              <p
+                className={cn(
+                  "text-xs font-medium transition-colors",
+                  additionalKpis.length > 480
+                    ? "text-destructive"
+                    : additionalKpis.length > 450
+                      ? "text-orange-500 dark:text-orange-400"
+                      : "text-muted-foreground"
+                )}
+              >
+                {additionalKpis.length}/500
+              </p>
+            </div>
+          </div>
 
             {/* Info Box */}
             <div className="bg-gradient-to-br from-primary/5 via-accent/5 to-primary/5 border-2 border-primary/20 rounded-xl p-5 shadow-sm">

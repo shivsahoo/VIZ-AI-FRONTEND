@@ -731,29 +731,6 @@ export const updateProject = async (projectId: string, data: Partial<Project>): 
 };
 
 /**
- * Update project KPI information
- */
-export const updateProjectKpiInfo = async (projectId: string, kpiInfo: string): Promise<ApiResponse<void>> => {
-  try {
-    await apiRequest(`/api/v1/backend/projects/${projectId}/kpi-info`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        additional_kpis: kpiInfo,
-      }),
-    });
-    return { success: true };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: {
-        code: 'UPDATE_PROJECT_KPI_FAILED',
-        message: error.message || 'Failed to update project KPI information',
-      },
-    };
-  }
-};
-
-/**
  * Delete project
  */
 export const deleteProject = async (projectId: string): Promise<ApiResponse<void>> => {

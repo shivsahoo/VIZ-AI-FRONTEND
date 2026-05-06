@@ -53,8 +53,8 @@ type ChartCreationRequestPayload = {
   db_schema: string;
   db_type: 'postgres' | 'mysql' | 'sqlite' | 'oracledb' | 'salesforce' | 'databricks';
   role: string;
-  kpi_info?: string;
-  dashboard_kpi_info?: string;
+  product_name?: string;
+  product_description?: string;
   product_info?: string;
   conversation_summary?: string;
   min_max_dates?: [string, string];
