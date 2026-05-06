@@ -911,9 +911,6 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
 
 /**
  * Create new dashboard
- * @deprecated Dashboard creation is now handled through WebSocket events.
- * This function is kept for backward compatibility but should not be used for new dashboard creation.
- * Use DashboardCreationBot component with WebSocket for dashboard creation workflow.
  */
 export const createDashboard = async (projectId: string, data: { name: string; description: string }): Promise<ApiResponse<Dashboard>> => {
   try {
@@ -929,7 +926,7 @@ export const createDashboard = async (projectId: string, data: { name: string; d
     }>(`/api/v1/backend/projects/${projectId}/dashboard`, {
       method: 'POST',
       body: JSON.stringify({
-        title: data.name,
+        dashboard_name: data.name,
         description: data.description,
       }),
     });

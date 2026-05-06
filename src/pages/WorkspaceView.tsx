@@ -7,11 +7,23 @@ import { ChartsView } from "./ChartsView";
 import { InsightsView } from "./InsightsView";
 import { UsersView } from "./UsersView";
 import { DashboardDetailView } from "./DashboardDetailView";
-import { DashboardCreationBot } from "../components/features/dashboards/DashboardCreationBot";
+import { DashboardCreationForm } from "../components/features/dashboards/DashboardCreationForm";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "../components/ui/dialog";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import { toast } from "sonner";
 import { getDashboards, deleteDashboard, type Dashboard as ApiDashboard } from "../services/api";
+
+const getErrorMessage = (error: any): string => {
+  if (!error) return "Something went wrong";
+  if (typeof error === "string") return error;
+  if (error instanceof Error && typeof error.message === "string") return error.message;
+  if (typeof error?.message === "string") return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Something went wrong";
+  }
+};
 
 // UI Dashboard type (extends API Dashboard with display fields)
 interface Dashboard {
@@ -209,33 +221,25 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
 
   const handleCreateDashboard = async (dashboard: {
     name: string;
-    description?: string;
-    enhancedDescription?: string;
+    dashboardId?: string;
   }) => {
     if (!projectId) {
       toast.error("Project ID is required to create a dashboard");
       return;
     }
 
-    // Dashboard creation is now handled through websocket events
-    // The websocket workflow creates the dashboard and sends the created dashboard data
-    // We just need to close the dialog and refresh the dashboards list
     try {
-      // Close the Dashboard Assistant dialog immediately
       setIsCreateDialogOpen(false);
-      
-      toast.success(`Dashboard "${dashboard.name}" created successfully!`);
-      
-      // Add a small delay to ensure the backend has saved the dashboard
-      // before we refresh the list
-      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Refresh dashboards to get the newly created one
       const updatedDashboards = await fetchDashboards();
       
-      // Find the newly created dashboard by name and navigate to it
+      // Find the newly created dashboard (prefer id) and navigate to it
       if (updatedDashboards) {
-        const newDashboard = updatedDashboards.find(d => d.name === dashboard.name);
+        const newDashboard = updatedDashboards.find(d =>
+          (dashboard.dashboardId && String(d.id) === String(dashboard.dashboardId)) ||
+          d.name === dashboard.name
+        );
         if (newDashboard) {
           // Navigate to the newly created dashboard
           handleViewDashboard(newDashboard.name, newDashboard.id);
@@ -246,7 +250,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
         }
       }
     } catch (err: any) {
-      toast.error(err.message || "An error occurred while fetching dashboard");
+      toast.error(getErrorMessage(err) || "An error occurred while creating dashboard");
     }
   };
 
@@ -350,22 +354,27 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
           <div className="sr-only">
             <DialogTitle>Create New Dashboard</DialogTitle>
             <DialogDescription>
-              Use the AI assistant to create a new dashboard by providing a name, selecting databases, and describing your requirements.
+              Create a new dashboard by providing a name and description.
             </DialogDescription>
           </div>
-          <DashboardCreationBot
-            isOpen={isCreateDialogOpen}
-            onClose={() => setIsCreateDialogOpen(false)}
-            projectId={projectId ? String(projectId) : undefined}
-            projectName={projectName}
-            onCreate={(data) => {
-              handleCreateDashboard({
-                name: data.name,
-                description: data.description,
-                enhancedDescription: data.enhancedDescription,
-              });
-            }}
-          />
+          {projectId ? (
+            <div className="p-6">
+              <DashboardCreationForm
+                projectId={String(projectId)}
+                onCancel={() => setIsCreateDialogOpen(false)}
+                onComplete={(data) => {
+                  handleCreateDashboard({
+                    name: data.name,
+                    dashboardId: data.dashboardId,
+                  });
+                }}
+              />
+            </div>
+          ) : (
+            <div className="p-10">
+              <LoadingSpinner size="lg" />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </>
