@@ -675,25 +675,6 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
             )}
           </DialogContent>
         </Dialog>
-
-        {/* Onboarding Tour */}
-        {showTour && dsGraphDialogOpen && currentGraph && (
-          <OnboardingTour
-            steps={tourSteps}
-            tourId="datasource_graph"
-            onComplete={() => {
-              setShowTour(false);
-            }}
-            onSkip={() => {
-              setShowTour(false);
-            }}
-            autoStart={true}
-            startDelay={800}
-            showOverlay={false}
-            containerSelector='[data-tour-container="ds-graph-dialog"]'
-            lockInteractions={true}
-          />
-        )}
       </div>
     </div>
   );
