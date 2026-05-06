@@ -6,7 +6,8 @@ import { Badge } from "../components/ui/badge";
 import { GradientButton } from "../components/shared/GradientButton";
 import { ChartCard } from "../components/features/charts/ChartCard";
 import { usePinnedCharts } from "../context/PinnedChartsContext";
-import { inferChartDataConfig, getDefaultChartDataConfig } from "../utils/chartData";
+import { inferChartDataConfig, getDefaultChartDataConfig, isExtendedChartType, inferExtendedChartConfig, extendedToChartDataConfig } from "../utils/chartData";
+import { ChartType } from "../components/features/charts/core/chartTypes";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -61,7 +62,7 @@ interface DashboardDetailViewProps {
   onBack: () => void;
   onDelete?: (dashboardId: string, dashboardName: string) => void;
   onOpenAIAssistant?: () => void;
-  onEditChart?: (chart: { name: string; type: 'line' | 'bar' | 'pie' | 'area'; description?: string }) => void;
+  onEditChart?: (chart: { name: string; type: ChartType; description?: string }) => void;
   refreshTrigger?: number;
 }
 
@@ -69,7 +70,7 @@ interface ChartCardData {
   id: string;
   title: string;
   description: string;
-  type: 'line' | 'bar' | 'pie' | 'area';
+  type: ChartType;
   query: string;
   databaseConnectionId: string;
   created_at: string;
@@ -284,14 +285,16 @@ export function DashboardDetailView({
       const response = await getDashboardCharts(dashboardId);
       if (response.success && response.data) {
         // Helper function to normalize chart type
-        const normalizeChartType = (chartType: string | null | undefined): 'line' | 'bar' | 'pie' | 'area' => {
+        const normalizeChartType = (chartType: string | null | undefined): ChartType => {
           if (!chartType) return 'line'; // Default to line if not provided
           const normalized = chartType.toLowerCase();
-          if (normalized === 'bar' || normalized === 'column') return 'bar';
-          if (normalized === 'pie' || normalized === 'donut') return 'pie';
-          if (normalized === 'area') return 'area';
-          if (normalized === 'line') return 'line';
-          return 'line'; // Default fallback
+          if (normalized === 'column') return 'bar';
+          if (normalized === 'donut') return 'donut';
+          if (normalized === 'stacked_line_chart') return 'stackedlinechart';
+          if (normalized === 'stacked_horizontal_bar') return 'stackedhorizontalbar';
+          if (normalized === 'cluster' || normalized === 'clustering_chart') return 'clustering';
+          if (normalized === 'multi_y_axis') return 'multiyaxischart';
+          return normalized as ChartType;
         };
 
         const mappedCharts: ChartCardData[] = response.data.map((chart) => ({
@@ -505,149 +508,50 @@ export function DashboardDetailView({
   // Prepare chart data for display using the same inference logic as ChartsView
   const getChartDisplayConfig = (chart: ChartCardData) => {
     if (!chart.chartData?.data || chart.chartData.data.length === 0) {
-      return getDefaultChartDataConfig();
+      return {
+        ...getDefaultChartDataConfig(),
+        effectiveType: chart.type,
+        axisConfig: undefined,
+      };
     }
 
-    // Use inferChartDataConfig to properly identify data keys and x-axis
-    // This ensures consistent behavior with ChartsView
-    const inferredConfig = inferChartDataConfig(chart.chartData.data, chart.type, {
+    if (isExtendedChartType(chart.type)) {
+      const ext = inferExtendedChartConfig(chart.chartData.data, chart.type, {
+        xAxisKey: chart.chartData?.metadata?.xAxis ?? chart.xAxis ?? undefined,
+        yAxisKey: chart.chartData?.metadata?.yAxis ?? chart.yAxis ?? undefined,
+      });
+      const config = extendedToChartDataConfig(ext);
+      return {
+        data: config.data,
+        dataKeys: config.dataKeys,
+        xAxisKey: config.xAxisKey,
+        axisConfig: ext.axisConfig,
+        effectiveType: ext.fallbackType ?? chart.type,
+      };
+    }
+
+    // Legacy standard charts
+    const inferredConfig = inferChartDataConfig(chart.chartData.data, chart.type as any, {
       xAxisHint: chart.chartData?.metadata?.xAxis ?? chart.xAxis ?? null,
       yAxisHint: chart.chartData?.metadata?.yAxis ?? chart.yAxis ?? null,
     });
 
-    // Override with explicit x_axis and y_axis from API if available (like DashboardDetailView used to do)
     const metadataYAxis = chart.chartData?.metadata?.yAxis;
     const metadataXAxis = chart.chartData?.metadata?.xAxis;
     
-    // Use explicit axis fields if provided, otherwise use inferred values
-    const finalDataKeys = {
-      primary: metadataYAxis || chart.yAxis || inferredConfig.dataKeys.primary,
-      secondary: inferredConfig.dataKeys.secondary, // Keep secondary from inference
-    };
-    
-    const finalXAxisKey = metadataXAxis || chart.xAxis || inferredConfig.xAxisKey;
-
     return {
       data: inferredConfig.data,
-      dataKeys: finalDataKeys,
-      xAxisKey: finalXAxisKey,
+      dataKeys: {
+        primary: metadataYAxis || chart.yAxis || inferredConfig.dataKeys.primary,
+        secondary: inferredConfig.dataKeys.secondary,
+      },
+      xAxisKey: metadataXAxis || chart.xAxis || inferredConfig.xAxisKey,
+      axisConfig: undefined,
+      effectiveType: chart.type,
     };
   };
 
-  const renderDateRangeButton = (chart: ChartCardData) => {
-    const chartKey = String(chart.id);
-    const isOpen = openDatePicker === chartKey;
 
-    return (
-      <div 
-        data-date-picker="true"
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        onMouseDown={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        onMouseUp={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        className="relative"
-      >
-        <DatePicker
-          selectsRange
-          open={isOpen}
-          onClickOutside={() => setOpenDatePicker(null)}
-          onInputClick={() => {
-            setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
-          }}
-          startDate={chartDateRanges[chartKey]?.startDate || null}
-          endDate={chartDateRanges[chartKey]?.endDate || null}
-          onChange={(dates) => {
-            const [start, end] = dates as [Date | null, Date | null];
-            setChartDateRanges(prev => ({
-              ...prev,
-              [chartKey]: { startDate: start, endDate: end }
-            }));
-            
-            // Fetch data if both dates are set or both are cleared
-            if ((start && end) || (!start && !end)) {
-              const dateRangeToUse = { startDate: start, endDate: end };
-              fetchChartData(chart, dateRangeToUse);
-            }
-          }}
-          placeholderText="Date range"
-          dateFormat="MMM d, yyyy"
-          showPopperArrow={false}
-          popperPlacement="top-end"
-          customInput={
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              className="h-8 pl-3 pr-3 text-xs bg-white shadow-md hover:bg-gray-50 text-foreground hover:text-foreground border-border relative inline-flex items-center gap-2"
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                // Toggle date picker
-                setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
-              }}
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-              }}
-              onMouseUp={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-              }}
-            >
-              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-foreground" />
-              <span className="text-xs whitespace-nowrap">
-                {(() => {
-                  const range = chartDateRanges[chartKey];
-                  const start = range?.startDate;
-                  const end = range?.endDate;
-                  if (start && end) {
-                    return `${formatDateForDisplay(start)} - ${formatDateForDisplay(end)}`;
-                  }
-                  if (start) {
-                    return `${formatDateForDisplay(start)} - End date`;
-                  }
-                  return "Date range";
-                })()}
-              </span>
-              {chartDateRanges[chartKey]?.startDate && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    setChartDateRanges(prev => ({
-                      ...prev,
-                      [chartKey]: { startDate: null, endDate: null }
-                    }));
-                    fetchChartData(chart, { startDate: null, endDate: null });
-                  }}
-                  className="w-5 h-5 flex items-center justify-center hover:bg-red-100 rounded transition-colors shrink-0"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                  onMouseUp={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                >
-                  <X className="h-3.5 w-3.5 text-red-600" strokeWidth={2.5} />
-                </button>
-              )}
-            </Button>
-          }
-        />
-      </div>
-    );
-  };
 
   return (
     <div className="px-12 py-10">
@@ -709,11 +613,20 @@ export function DashboardDetailView({
         {/* Quick Stats - Show chart count */}
         {(() => {
           // Chart type configuration
-          const chartTypeConfig: Record<'line' | 'bar' | 'pie' | 'area', { label: string; description: string }> = {
+          const chartTypeConfig: Record<string, { label: string; description: string }> = {
             line: { label: 'Line Charts', description: 'time-series data' },
             bar: { label: 'Bar Charts', description: 'comparison data' },
             pie: { label: 'Pie Charts', description: 'proportion data' },
-            area: { label: 'Area Charts', description: 'cumulative data' }
+            area: { label: 'Area Charts', description: 'cumulative data' },
+            donut: { label: 'Donut Charts', description: 'proportion data' },
+            scatter: { label: 'Scatter Charts', description: 'correlation data' },
+            heatmap: { label: 'Heatmaps', description: 'density data' },
+            funnel: { label: 'Funnel Charts', description: 'conversion data' },
+            map: { label: 'Map Charts', description: 'geospatial data' },
+            stackedlinechart: { label: 'Stacked Line Charts', description: 'cumulative time-series data' },
+            stackedhorizontalbar: { label: 'Stacked Horizontal Bars', description: 'comparison data' },
+            clustering: { label: 'Clustering Charts', description: 'grouped data' },
+            multiyaxischart: { label: 'Multi-Axis Charts', description: 'multi-metric data' },
           };
 
           // Count charts by type
@@ -723,7 +636,7 @@ export function DashboardDetailView({
           }, {} as Record<string, number>);
 
           // Get chart types that have at least one chart
-          const availableChartTypes = (Object.keys(chartCounts) as Array<'line' | 'bar' | 'pie' | 'area'>)
+          const availableChartTypes = Object.keys(chartCounts)
             .filter(type => chartCounts[type] > 0)
             .sort(); // Sort for consistent ordering
 
@@ -740,7 +653,10 @@ export function DashboardDetailView({
               
               {/* Dynamic Chart Type Cards - Only show types that have charts */}
               {availableChartTypes.map((chartType) => {
-                const config = chartTypeConfig[chartType];
+                const config = chartTypeConfig[chartType] || {
+                  label: `${chartType.charAt(0).toUpperCase() + chartType.slice(1)} Charts`,
+                  description: 'visualization data'
+                };
                 const count = chartCounts[chartType];
                 return (
                   <Card key={chartType} className="p-6 border border-border flex-1 min-w-[200px]">
@@ -853,14 +769,20 @@ export function DashboardDetailView({
                       <span className="ml-2 text-sm text-muted-foreground">Loading chart data...</span>
                     </div>
                   ) : chartConfig.data.length > 0 ? (
-                    <ChartCard
-                      type={chart.type}
-                      data={chartConfig.data}
-                      dataKeys={chartConfig.dataKeys}
-                      xAxisKey={chartConfig.xAxisKey}
-                      height={300}
-                      showLegend={!!chartConfig.dataKeys.secondary && chart.type !== 'pie'}
-                    />
+                      <ChartCard
+                        type={chartConfig.effectiveType}
+                        data={chartConfig.data}
+                        dataKeys={[
+                          chartConfig.dataKeys.primary,
+                          ...(chartConfig.dataKeys.secondary
+                            ? [chartConfig.dataKeys.secondary]
+                            : []),
+                        ]}
+                        xAxisKey={chartConfig.xAxisKey}
+                        axisConfig={chartConfig.axisConfig}
+                        height={300}
+                        showLegend={!!chartConfig.dataKeys.secondary && chartConfig.effectiveType !== 'pie'}
+                      />
                   ) : (
                     <div className="h-[300px] flex items-center justify-center border border-dashed border-border rounded-lg">
                       <div className="text-center">
@@ -876,12 +798,7 @@ export function DashboardDetailView({
                     </div>
                   )}
 
-                  {/* Date Range Picker - Bottom Right */}
-                  {chart.is_time_based === true && (
-                    <div className="mt-4 flex justify-end">
-                      {renderDateRangeButton(chart)}
-                    </div>
-                  )}
+
                 </Card>
               );
             })}

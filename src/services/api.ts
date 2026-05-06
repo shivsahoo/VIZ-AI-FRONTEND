@@ -5,6 +5,8 @@
  * Integrated with the FastAPI backend.
  */
 
+import type { ChartType } from "../components/features/charts/core/chartTypes";
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
@@ -991,7 +993,7 @@ export const deleteDashboard = async (projectId: string, dashboardId: string): P
 export interface Chart {
   id: string;
   name: string;
-  type: 'line' | 'bar' | 'pie' | 'area';
+  type: ChartType;
   projectId: string;
   databaseId?: string;
   query?: string;
@@ -999,6 +1001,8 @@ export interface Chart {
     xAxis?: string;
     yAxis?: string;
     color?: string;
+    /** Saved series/measure column names for stacked/multi-series charts. */
+    seriesKeys?: string[];
   };
   createdAt: string;
   updatedAt: string;
@@ -1035,10 +1039,12 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
         query: string;
         type: string; // Backend uses 'type' which is actually chart_type
         datasourceConnectionId: string | null; // Backend uses camelCase
+        data_connection_id?: string | null; // Alternative field name
         created_at: string;
         isFavorite?: boolean;
         x_axis?: string | null;
         y_axis?: string | null;
+        series_keys?: string[] | null;
         is_time_based?: boolean;
       }>;
     }>(`/api/v1/backend/charts?project_id=${projectId}`);
@@ -1049,22 +1055,30 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
     return {
       success: true,
       data: chartsArray
-        .filter((chart) => chart.datasourceConnectionId) // Filter charts with connections
-        .map((chart) => ({
-          id: chart.id,
-          name: chart.title,
-          type: mapChartType(chart.type), // Backend returns 'type' which is chart_type
-          projectId, // Will need to get from backend or context
-          databaseId: chart.datasourceConnectionId || undefined,
-          query: chart.query,
-          config: {
-            xAxis: chart.x_axis ?? undefined,
-            yAxis: chart.y_axis ?? undefined,
-          },
-          createdAt: chart.created_at,
-          updatedAt: chart.created_at,
-          is_time_based: chart.is_time_based ?? false,
-        })),
+        // Include all charts — don't drop charts that lack a connection ID here;
+        // ChartsView already handles "missing query/connection" gracefully.
+        .map((chart) => {
+          const connectionId = chart.datasourceConnectionId || chart.data_connection_id || undefined;
+          return {
+            id: chart.id,
+            name: chart.title,
+            type: mapChartType(chart.type), // Backend returns 'type' which is chart_type
+            projectId, // Will need to get from backend or context
+            databaseId: connectionId,
+            query: chart.query,
+            config: {
+              xAxis: chart.x_axis ?? undefined,
+              yAxis: chart.y_axis ?? undefined,
+              // Restore series keys for stacked/multi-series charts
+              ...(chart.series_keys && chart.series_keys.length > 0
+                ? { seriesKeys: chart.series_keys }
+                : {}),
+            },
+            createdAt: chart.created_at,
+            updatedAt: chart.created_at,
+            is_time_based: chart.is_time_based ?? false,
+          };
+        }),
     };
   } catch (error: any) {
     return {
@@ -1156,16 +1170,31 @@ export const getUserDashboardCharts = async (): Promise<ApiResponse<Array<{
 /**
  * Map backend chart type to frontend type
  */
-function mapChartType(backendType?: string | null): 'line' | 'bar' | 'pie' | 'area' {
+function mapChartType(backendType?: string | null): ChartType {
   if (!backendType) {
     return 'line';
   }
   const normalized = backendType.toString().toLowerCase();
-  const typeMap: Record<string, 'line' | 'bar' | 'pie' | 'area'> = {
+  const typeMap: Record<string, ChartType> = {
     line: 'line',
     bar: 'bar',
     pie: 'pie',
     area: 'area',
+    scatter: 'scatter',
+    heatmap: 'heatmap',
+    funnel: 'funnel',
+    map: 'map',
+    stackedlinechart: 'stackedlinechart',
+    stacked_line_chart: 'stackedlinechart',
+    stackedhorizontalbar: 'stackedhorizontalbar',
+    stacked_horizontal_bar: 'stackedhorizontalbar',
+    clustering: 'clustering',
+    cluster: 'clustering',
+    clustering_chart: 'clustering',
+    multiyaxischart: 'multiyaxischart',
+    multi_y_axis_chart: 'multiyaxischart',
+    multiyaxis: 'multiyaxischart',
+    donut: 'donut',
   };
   return typeMap[normalized] || 'line';
 }
@@ -1189,6 +1218,11 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
     }
     if (data.config?.yAxis) {
       requestBody.y_axis = data.config.yAxis;
+    }
+    // Send series keys so stacked-chart layout can be restored on reload
+    const seriesKeys = (data.config as any)?.seriesKeys;
+    if (Array.isArray(seriesKeys) && seriesKeys.length > 0) {
+      requestBody.series_keys = seriesKeys;
     }
 
     const response = await apiRequest<{
@@ -1235,6 +1269,10 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
           xAxis: data.config?.xAxis,
           yAxis: data.config?.yAxis,
           color: data.config?.color,
+          // Preserve series keys so stacked chart layout survives a refresh
+          ...((data.config as any)?.seriesKeys?.length
+            ? { seriesKeys: (data.config as any).seriesKeys }
+            : {}),
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -1258,7 +1296,7 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
 export const addChartToDashboard = async (data: {
   title: string;
   query: string;
-  chart_type: 'line' | 'bar' | 'pie' | 'area';
+  chart_type: ChartType;
   dashboard_id: string;
   data_connection_id: string; // Required - must be a valid UUID
   report?: string;
@@ -1267,6 +1305,7 @@ export const addChartToDashboard = async (data: {
   is_time_based?: boolean;
   x_axis?: string | null;
   y_axis?: string | null;
+  series_keys?: string[];
 }): Promise<ApiResponse<{ chart_id: string }>> => {
   try {
     // Prepare request body - only include fields that have values
@@ -1299,6 +1338,9 @@ export const addChartToDashboard = async (data: {
     }
     if (data.y_axis) {
       requestBody.y_axis = data.y_axis;
+    }
+    if (Array.isArray(data.series_keys) && data.series_keys.length > 0) {
+      requestBody.series_keys = data.series_keys;
     }
 
     const response = await apiRequest<{

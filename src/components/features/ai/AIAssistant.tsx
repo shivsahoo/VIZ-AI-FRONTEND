@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw, Microscope } from "lucide-react";
+import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, ChartScatter, Grid3x3, Funnel, Globe, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw, Microscope } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { Badge } from "../../ui/badge";
@@ -13,6 +13,69 @@ import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
 import { useChartGenerationStore } from "../../../store/chartGenerationStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../ui/dialog";
+import type { ChartAxisConfig, ChartType } from "../charts/core/chartTypes";
+import { normalizeChartSpec } from "../../../utils/chartSpecNormalizer";
+
+/** Maps WebSocket `chart_spec` → preview model; all `x_axis` / `y_axis` reads go through `normalizeChartSpec`. */
+function chartSuggestionFromWebSocketSpec(
+  spec: ChartSpec,
+  index: number,
+): ChartSuggestion {
+  const n = normalizeChartSpec({
+    title: spec.title ?? "",
+    query: spec.query ?? "",
+    chart_type: spec.chart_type ?? "line",
+    x_axis: spec.x_axis,
+    y_axis: spec.y_axis,
+    report: spec.report,
+    relevance: typeof spec.relevance === "number" ? spec.relevance : undefined,
+    is_time_based: spec.is_time_based,
+    data_connection_id: spec.data_connection_id ?? "",
+    value_key: spec.value_key,
+    category_key: spec.category_key,
+    region_key: spec.region_key,
+    metric_key: spec.metric_key,
+  });
+
+  const primarySeriesKey =
+    n.chartType === "pie"
+      ? n.axisConfig.valueKey ?? n.yAxisKey
+      : n.chartType === "map"
+        ? n.axisConfig.metricKey ?? n.yAxisKey
+        : n.chartType === "funnel"
+          ? n.axisConfig.valueKey ?? n.yAxisKey
+          : n.chartType === "heatmap"
+            ? n.axisConfig.valueKey ?? n.yAxisKey
+            : n.yAxisKey ??
+              n.axisConfig.yAxisKey ??
+              n.axisConfig.valueKey ??
+              n.axisConfig.metricKey;
+
+  return {
+    id: `${spec.data_connection_id || "chart"}-${index}-${Date.now()}`,
+    name: n.title || `Generated Chart ${index + 1}`,
+    type: n.chartType,
+    description: spec.report || n.title || "AI-generated chart suggestion",
+    query: n.query,
+    reasoning: spec.report || "Generated based on your request.",
+    interaction: (spec as { interaction?: string }).interaction,
+    dataSource: n.dataConnectionId ? `Database ${n.dataConnectionId}` : undefined,
+    dataConnectionId: n.dataConnectionId,
+    databaseId: n.dataConnectionId,
+    relevance: n.relevance,
+    spec,
+    axisConfig: n.axisConfig,
+    xAxisField: n.axisConfig.xAxisKey ?? null,
+    yAxisField:
+      n.axisConfig.yAxisKey ??
+      n.axisConfig.valueKey ??
+      n.axisConfig.metricKey ??
+      null,
+    minMaxDates: spec.min_max_dates ?? null,
+    xAxisKey: n.xAxisKey,
+    dataKeys: primarySeriesKey ? { primary: primarySeriesKey } : undefined,
+  };
+}
 
 interface Message {
   id: number;
@@ -24,7 +87,7 @@ interface Message {
 interface ChartSuggestion {
   id: string;
   name: string;
-  type: 'line' | 'bar' | 'pie' | 'area';
+  type: ChartType;
   description: string;
   query: string;
   reasoning: string;
@@ -34,6 +97,8 @@ interface ChartSuggestion {
   databaseId?: string;
   relevance?: number;
   spec?: ChartSpec;
+  /** Normalized axis keys from `normalizeChartSpec` — required for scatter / heatmap / funnel / map. */
+  axisConfig?: ChartAxisConfig;
   data?: any[];
   dataKeys?: {
     primary: string;
@@ -69,7 +134,7 @@ interface AIAssistantProps {
   onChartCreated?: (chart: {
     id?: string;
     name: string;
-    type: 'line' | 'bar' | 'pie' | 'area';
+    type: ChartType;
     dataSource: string;
     query: string;
     status: 'draft' | 'published';
@@ -77,7 +142,7 @@ interface AIAssistantProps {
   }) => void;
   editingChart?: {
     name: string;
-    type: 'line' | 'bar' | 'pie' | 'area';
+    type: ChartType;
     description?: string;
   } | null;
 }
@@ -86,14 +151,32 @@ const chartTypeIcons = {
   line: LineChart,
   bar: BarChart3,
   pie: PieChart,
-  area: AreaChart
+  donut: PieChart,
+  area: AreaChart,
+  scatter: ChartScatter,
+  heatmap: Grid3x3,
+  funnel: Funnel,
+  map: Globe,
+  stackedlinechart: LineChart,
+  stackedhorizontalbar: BarChart3,
+  clustering: ChartScatter,
+  multiyaxischart: BarChart3,
 };
 
 const chartTypeColors = {
   line: "bg-blue-500/10 text-blue-500 border-blue-500/20",
   bar: "bg-purple-500/10 text-purple-500 border-purple-500/20",
   pie: "bg-green-500/10 text-green-500 border-green-500/20",
-  area: "bg-orange-500/10 text-orange-500 border-orange-500/20"
+  donut: "bg-teal-500/10 text-teal-500 border-teal-500/20",
+  area: "bg-orange-500/10 text-orange-500 border-orange-500/20",
+  scatter: "bg-cyan-500/10 text-cyan-500 border-cyan-500/20",
+  heatmap: "bg-pink-500/10 text-pink-500 border-pink-500/20",
+  funnel: "bg-violet-500/10 text-violet-500 border-violet-500/20",
+  map: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+  stackedlinechart: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
+  stackedhorizontalbar: "bg-amber-500/10 text-amber-500 border-amber-500/20",
+  clustering: "bg-sky-500/10 text-sky-500 border-sky-500/20",
+  multiyaxischart: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
 };
 
 const mapDatabaseMetadataToAssistantState = (entry: DatabaseMetadataEntry) => ({
@@ -103,13 +186,28 @@ const mapDatabaseMetadataToAssistantState = (entry: DatabaseMetadataEntry) => ({
   schema: entry.schema ?? null,
 });
 
-const normalizeChartType = (type?: string): 'line' | 'bar' | 'pie' | 'area' => {
-  if (!type) return 'line';
+const normalizeChartType = (type?: string): ChartType => {
+  if (!type) return "line";
   const lower = type.toLowerCase();
-  if (lower.includes('bar')) return 'bar';
-  if (lower.includes('pie') || lower.includes('donut')) return 'pie';
-  if (lower.includes('area')) return 'area';
-  return 'line';
+  if (lower.includes("scatter")) return "scatter";
+  if (lower.includes("heatmap")) return "heatmap";
+  if (lower.includes("funnel")) return "funnel";
+  if (lower.includes("map") && !lower.includes("heatmap")) return "map";
+  if (lower.includes("stackedlinechart") || lower.includes("stacked_line_chart")) return "stackedlinechart";
+  if (lower.includes("stackedhorizontalbar") || lower.includes("stacked_horizontal_bar"))
+    return "stackedhorizontalbar";
+  if (lower.includes("clustering") || lower.includes("cluster")) return "clustering";
+  if (
+    lower.includes("multiyaxischart") ||
+    lower.includes("multi_y_axis_chart") ||
+    lower.includes("multiyaxis")
+  )
+    return "multiyaxischart";
+  if (lower.includes("bar")) return "bar";
+  if (lower.includes("donut")) return "donut";
+  if (lower.includes("pie")) return "pie";
+  if (lower.includes("area")) return "area";
+  return "line";
 };
 
 const normalizeDbType = (type?: string): 'postgres' | 'mysql' | 'sqlite' | 'oracledb' | 'salesforce' | 'databricks' => {
@@ -126,14 +224,22 @@ const normalizeDbType = (type?: string): 'postgres' | 'mysql' | 'sqlite' | 'orac
 
 const ensureSchemaString = (schema?: string | null): string => {
   if (!schema) {
-    return JSON.stringify({ tables: [] });
+    return "";
   }
   try {
-    JSON.parse(schema);
+    const parsed = JSON.parse(schema);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray((parsed as { tables?: unknown[] }).tables) &&
+      (parsed as { tables?: unknown[] }).tables!.length === 0
+    ) {
+      return "";
+    }
     return schema;
   } catch (error) {
-    console.warn('AIAssistant: Received invalid schema JSON, falling back to empty schema', { error });
-    return JSON.stringify({ tables: [] });
+    console.warn('AIAssistant: Received invalid schema JSON, omitting schema from payload', { error });
+    return "";
   }
 };
 
@@ -379,28 +485,9 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         return;
       }
 
-      const suggestions: ChartSuggestion[] = chartSpecs.map((spec, index) => {
-        const chartType = normalizeChartType(spec.chart_type);
-        return {
-          id: `${spec.data_connection_id || 'chart'}-${index}-${Date.now()}`,
-          name: spec.title || `Generated Chart ${index + 1}`,
-          type: chartType,
-          description: spec.report || spec.title || "AI-generated chart suggestion",
-          query: spec.query,
-          reasoning: spec.report || "Generated based on your request.",
-          interaction: (spec as any).interaction,
-          dataSource: spec.data_connection_id ? `Database ${spec.data_connection_id}` : undefined,
-          dataConnectionId: spec.data_connection_id,
-          databaseId: spec.data_connection_id,
-          relevance: typeof spec.relevance === 'number' ? spec.relevance : undefined,
-          spec,
-          xAxisField: spec.x_axis ?? null,
-          yAxisField: spec.y_axis ?? null,
-          minMaxDates: spec.min_max_dates ?? null,
-          xAxisKey: spec.x_axis || undefined,
-          dataKeys: spec.y_axis ? { primary: spec.y_axis } : undefined,
-        };
-      });
+      const suggestions: ChartSuggestion[] = chartSpecs.map(
+        chartSuggestionFromWebSocketSpec,
+      );
 
       const contentMessage =
         message ||
@@ -481,28 +568,9 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         const chartSpecs = (response.state?.chart_specs as ChartSpec[]) || [];
         if (chartSpecs.length > 0) {
           const processChartSpecs = (chartSpecs: ChartSpec[], message?: string) => {
-            const suggestions: ChartSuggestion[] = chartSpecs.map((spec, index) => {
-              const chartType = normalizeChartType(spec.chart_type);
-              return {
-                id: `${spec.data_connection_id || 'chart'}-${index}-${Date.now()}`,
-                name: spec.title || `Generated Chart ${index + 1}`,
-                type: chartType,
-                description: spec.report || spec.title || "AI-generated chart suggestion",
-                query: spec.query,
-                reasoning: spec.report || "Generated based on your request.",
-                interaction: (spec as any).interaction,
-                dataSource: spec.data_connection_id ? `Database ${spec.data_connection_id}` : undefined,
-                dataConnectionId: spec.data_connection_id,
-                databaseId: spec.data_connection_id,
-                relevance: typeof spec.relevance === 'number' ? spec.relevance : undefined,
-                spec,
-                xAxisField: spec.x_axis ?? null,
-                yAxisField: spec.y_axis ?? null,
-                minMaxDates: spec.min_max_dates ?? null,
-                xAxisKey: spec.x_axis || undefined,
-                dataKeys: spec.y_axis ? { primary: spec.y_axis } : undefined,
-              };
-            });
+            const suggestions: ChartSuggestion[] = chartSpecs.map(
+              chartSuggestionFromWebSocketSpec,
+            );
 
             const contentMessage = message || `I've generated ${suggestions.length} new chart suggestion${suggestions.length > 1 ? 's' : ''}.`;
 
@@ -947,10 +1015,17 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       return;
     }
 
-    const fallbackXAxis = suggestion.xAxisField || suggestion.xAxisKey;
+    const fallbackXAxis =
+      suggestion.xAxisKey ??
+      suggestion.axisConfig?.xAxisKey ??
+      suggestion.xAxisField;
     const fallbackDataKeys =
       suggestion.dataKeys ||
-      (suggestion.yAxisField ? { primary: suggestion.yAxisField } : undefined);
+      (suggestion.axisConfig?.yAxisKey
+        ? { primary: suggestion.axisConfig.yAxisKey }
+        : suggestion.yAxisField
+          ? { primary: suggestion.yAxisField }
+          : undefined);
 
     const chartWithDataSource: ChartSuggestion = {
       ...suggestion,
@@ -1010,7 +1085,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     onChartCreated?.({
       id: savedChart?.id,
       name: probeModeChart.name,
-      type: (savedChart?.type ?? probeModeChart.type) as "line" | "bar" | "pie" | "area",
+      type: (savedChart?.type ?? probeModeChart.type) as ChartType,
       dataSource: `Database ${selectedDb.id}`,
       query: savedChart?.query ?? probeModeChart.query ?? "",
       status: "draft",

@@ -3,7 +3,8 @@ import { Sparkles, Send, TrendingUp, Calendar, Users } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { ChartCard } from "../components/features/charts/ChartCard";
+import { inferChartDataConfig } from "../utils/chartData";
 
 const mockChartData = [
   { month: 'Jan', revenue: 45000, customers: 120 },
@@ -15,6 +16,8 @@ const mockChartData = [
 ];
 
 export function AskVizAIView() {
+  const lineChartConfig = inferChartDataConfig(mockChartData, "line");
+
   const [query, setQuery] = useState("");
   const [hasResults, setHasResults] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -130,21 +133,18 @@ export function AskVizAIView() {
               {/* Visualization */}
               <Card className="p-6 border border-border">
                 <h3 className="text-lg text-foreground mb-6">Revenue Trend</h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={mockChartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="month" stroke="#6b7280" />
-                    <YAxis stroke="#6b7280" />
-                    <Tooltip />
-                    <Line 
-                      type="monotone" 
-                      dataKey="revenue" 
-                      stroke="#06B6D4" 
-                      strokeWidth={3}
-                      dot={{ fill: '#06B6D4', r: 4 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                <ChartCard
+                  type="line"
+                  data={lineChartConfig.data}
+                  dataKeys={[
+                    lineChartConfig.dataKeys.primary,
+                    ...(lineChartConfig.dataKeys.secondary
+                      ? [lineChartConfig.dataKeys.secondary]
+                      : []),
+                  ]}
+                  xAxisKey={lineChartConfig.xAxisKey}
+                  height={300}
+                />
               </Card>
 
               {/* AI Insights */}

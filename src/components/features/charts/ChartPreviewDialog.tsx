@@ -21,9 +21,18 @@ import {
 import { ChartCard } from "./ChartCard";
 import { toast } from "sonner";
 import { addChartToDashboard, createChart, getChartData, type Chart as SavedChart, type ChartData as ApiChartData } from "../../../services/api";
-import { getDefaultChartDataConfig, inferChartDataConfig, type ChartDataConfig } from "../../../utils/chartData";
+import {
+  getDefaultChartDataConfig,
+  inferChartDataConfig,
+  inferExtendedChartConfig,
+  extendedToChartDataConfig,
+  isExtendedChartType,
+  type ChartDataConfig,
+} from "../../../utils/chartData";
+import type { ChartAxisConfig, ChartType } from "./core/chartTypes";
 import * as React from "react";
 import type { ChartSpec } from "../../../services/websocket";
+import { isDateStringSample } from "./core/pieHelpers";
 
 interface PreviewChart {
   id?: string;
@@ -49,6 +58,7 @@ interface PreviewChart {
   xAxisField?: string | null;
   yAxisField?: string | null;
   minMaxDates?: [string, string] | null;
+  axisConfig?: ChartAxisConfig;
 }
 
 interface ChartPreviewDialogProps {
@@ -87,6 +97,10 @@ export function ChartPreviewDialog({
   const isAddingToDashboardRef = React.useRef(false);
   const pendingDashboardCallbackRef = React.useRef<number | string | null>(null);
   const [chartDataConfig, setChartDataConfig] = React.useState<ChartDataConfig>(() => getDefaultChartDataConfig());
+  const [derivedAxisConfig, setDerivedAxisConfig] = React.useState<ChartAxisConfig>({});
+  /** After inferring extended charts (e.g. scatter→bar fallback). */
+  const [resolvedChartDisplayType, setResolvedChartDisplayType] =
+    React.useState<ChartType | undefined>(undefined);
   const [chartDataMetadata, setChartDataMetadata] = React.useState<ApiChartData['metadata'] | undefined>(undefined);
   const [chartDataError, setChartDataError] = React.useState<string | undefined>(undefined);
   const [isExecutingQuery, setIsExecutingQuery] = React.useState(false);
@@ -151,6 +165,8 @@ export function ChartPreviewDialog({
   React.useEffect(() => {
     if (!chart) {
       setChartDataConfig(getDefaultChartDataConfig());
+      setDerivedAxisConfig({});
+      setResolvedChartDisplayType(undefined);
       setChartDataMetadata(undefined);
       setChartDataError(undefined);
       setIsExecutingQuery(false);
@@ -159,6 +175,8 @@ export function ChartPreviewDialog({
 
     if (isConversational) {
       setChartDataConfig(getDefaultChartDataConfig());
+      setDerivedAxisConfig({});
+      setResolvedChartDisplayType(undefined);
       setIsExecutingQuery(false);
       return;
     }
@@ -171,29 +189,68 @@ export function ChartPreviewDialog({
           const bVal = b[chart.xAxisKey!];
           
           if (typeof aVal === 'string' && typeof bVal === 'string') {
-            const aDate = new Date(aVal).getTime();
-            const bDate = new Date(bVal).getTime();
-            if (!isNaN(aDate) && !isNaN(bDate)) {
+            if (isDateStringSample(aVal) && isDateStringSample(bVal)) {
+              const aDate = new Date(aVal).getTime();
+              const bDate = new Date(bVal).getTime();
               return aDate - bDate;
             }
-            return aVal.localeCompare(bVal);
+            return aVal.localeCompare(bVal, undefined, { numeric: true });
           }
           
           if (typeof aVal === 'number' && typeof bVal === 'number') {
             return aVal - bVal;
           }
           
-          return String(aVal).localeCompare(String(bVal));
+          return String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
         });
       }
-      
-      setChartDataConfig({
-        data: processedData,
-        dataKeys: chart.dataKeys,
-        xAxisKey: chart.xAxisKey,
-      });
+
+      if (isExtendedChartType(chart.type)) {
+        const ext = inferExtendedChartConfig(
+          processedData,
+          chart.type as ChartType,
+          {
+            ...chart.axisConfig,
+            xAxisKey:
+              chart.axisConfig?.xAxisKey ??
+              chart.xAxisField ??
+              chart.spec?.x_axis ??
+              undefined,
+            yAxisKey:
+              chart.axisConfig?.yAxisKey ??
+              chart.yAxisField ??
+              chart.spec?.y_axis ??
+              undefined,
+            valueKey:
+              chart.axisConfig?.valueKey ?? chart.spec?.value_key ?? undefined,
+            categoryKey:
+              chart.axisConfig?.categoryKey ??
+              chart.spec?.category_key ??
+              undefined,
+            regionKey:
+              chart.axisConfig?.regionKey ?? chart.spec?.region_key ?? undefined,
+            metricKey:
+              chart.axisConfig?.metricKey ?? chart.spec?.metric_key ?? undefined,
+          },
+        );
+        setChartDataConfig(extendedToChartDataConfig(ext));
+        setDerivedAxisConfig(ext.axisConfig);
+        setResolvedChartDisplayType(
+          (ext.fallbackType ?? chart.type) as ChartType,
+        );
+      } else {
+        setChartDataConfig({
+          data: processedData,
+          dataKeys: chart.dataKeys,
+          xAxisKey: chart.xAxisKey,
+        });
+        setDerivedAxisConfig(chart.axisConfig ?? {});
+        setResolvedChartDisplayType(undefined);
+      }
     } else {
       setChartDataConfig(getDefaultChartDataConfig());
+      setDerivedAxisConfig({});
+      setResolvedChartDisplayType(undefined);
     }
 
     setChartDataMetadata(undefined);
@@ -244,37 +301,105 @@ export function ChartPreviewDialog({
           undefined,
           false,
           {
-            xAxis: chart.xAxisField ?? chart.spec?.x_axis ?? null,
-            yAxis: chart.yAxisField ?? chart.spec?.y_axis ?? null,
+            xAxis:
+              chart.axisConfig?.xAxisKey ??
+              chart.xAxisField ??
+              chart.spec?.x_axis ??
+              null,
+            yAxis:
+              chart.axisConfig?.yAxisKey ??
+              chart.axisConfig?.valueKey ??
+              chart.yAxisField ??
+              chart.spec?.y_axis ??
+              null,
           }
         );
 
         if (cancelled) return;
 
         if (response.success && response.data) {
-          const config = inferChartDataConfig(response.data.data, chart.type as any, {
-            xAxisHint:
-              response.data.metadata?.xAxis ??
-              chart.xAxisField ??
-              chart.spec?.x_axis ??
-              null,
-            yAxisHint:
-              response.data.metadata?.yAxis ??
-              chart.yAxisField ??
-              chart.spec?.y_axis ??
-              null,
-          });
-          setChartDataConfig(config);
+          const meta = response.data.metadata;
+          const xHint =
+            meta?.xAxis ??
+            chart.axisConfig?.xAxisKey ??
+            chart.xAxisField ??
+            chart.spec?.x_axis ??
+            null;
+          const yHint =
+            meta?.yAxis ??
+            chart.axisConfig?.yAxisKey ??
+            chart.axisConfig?.valueKey ??
+            chart.yAxisField ??
+            chart.spec?.y_axis ??
+            null;
+
+          if (isExtendedChartType(chart.type)) {
+            const ext = inferExtendedChartConfig(
+              response.data.data,
+              chart.type as ChartType,
+              {
+                ...chart.axisConfig,
+                xAxisKey:
+                  chart.axisConfig?.xAxisKey ?? (xHint ?? undefined),
+                yAxisKey:
+                  chart.axisConfig?.yAxisKey ?? (yHint ?? undefined),
+                valueKey:
+                  chart.axisConfig?.valueKey ??
+                  chart.spec?.value_key ??
+                  undefined,
+                categoryKey:
+                  chart.axisConfig?.categoryKey ??
+                  chart.spec?.category_key ??
+                  undefined,
+                regionKey:
+                  chart.axisConfig?.regionKey ??
+                  chart.spec?.region_key ??
+                  undefined,
+                metricKey:
+                  chart.axisConfig?.metricKey ??
+                  chart.spec?.metric_key ??
+                  undefined,
+              },
+            );
+            setChartDataConfig(extendedToChartDataConfig(ext));
+            setDerivedAxisConfig(ext.axisConfig);
+            setResolvedChartDisplayType(
+              (ext.fallbackType ?? chart.type) as ChartType,
+            );
+          } else {
+            const config = inferChartDataConfig(
+              response.data.data,
+              chart.type as
+                | "line"
+                | "bar"
+                | "pie"
+                | "donut"
+                | "area"
+                | "stackedlinechart"
+                | "stackedhorizontalbar",
+              {
+                xAxisHint: xHint,
+                yAxisHint: yHint,
+              },
+            );
+            setChartDataConfig(config);
+            setDerivedAxisConfig({});
+            setResolvedChartDisplayType(undefined);
+          }
           setChartDataMetadata(response.data.metadata);
           setChartDataError(undefined);
         } else {
           setChartDataConfig(getDefaultChartDataConfig());
+          setDerivedAxisConfig({});
+          setResolvedChartDisplayType(undefined);
           setChartDataMetadata(undefined);
           setChartDataError(response.error?.message || "Failed to fetch chart data");
         }
       } catch (error: any) {
         if (cancelled) return;
         setChartDataConfig(getDefaultChartDataConfig());
+        setDerivedAxisConfig({});
+        setResolvedChartDisplayType(undefined);
         setChartDataMetadata(undefined);
         setChartDataError(error?.message || "Failed to fetch chart data");
       } finally {
@@ -289,7 +414,17 @@ export function ChartPreviewDialog({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, chart?.id, chart?.query, chart?.type, chart?.databaseId, chart?.dataConnectionId, chart?.dataSource, isConversational]);
+  }, [
+    isOpen,
+    chart?.id,
+    chart?.query,
+    chart?.type,
+    chart?.axisConfig,
+    chart?.databaseId,
+    chart?.dataConnectionId,
+    chart?.dataSource,
+    isConversational,
+  ]);
   
   const extractDatabaseId = () => {
     if (chart?.databaseId) return String(chart.databaseId);
@@ -332,10 +467,23 @@ export function ChartPreviewDialog({
 
   const resolveAxisFields = () => {
     const resolvedXAxis =
-      chart?.xAxisKey || chart?.xAxisField || chart?.spec?.x_axis || chartDataMetadata?.xAxis || chartDataConfig.xAxisKey;
+      chart?.axisConfig?.xAxisKey ??
+      chart?.axisConfig?.regionKey ??
+      chart?.xAxisKey ??
+      chart?.xAxisField ??
+      chart?.spec?.x_axis ??
+      chartDataMetadata?.xAxis ??
+      chartDataConfig.xAxisKey;
 
     const resolvedYAxis =
-      chart?.dataKeys?.primary || chart?.yAxisField || chart?.spec?.y_axis || chartDataMetadata?.yAxis || chartDataConfig.dataKeys.primary;
+      chart?.axisConfig?.yAxisKey ??
+      chart?.axisConfig?.valueKey ??
+      chart?.axisConfig?.metricKey ??
+      chart?.dataKeys?.primary ??
+      chart?.yAxisField ??
+      chart?.spec?.y_axis ??
+      chartDataMetadata?.yAxis ??
+      chartDataConfig.dataKeys.primary;
 
     return {
       xAxis: resolvedXAxis ?? null,
@@ -371,6 +519,18 @@ export function ChartPreviewDialog({
                          chart.spec?.type === 'aggregate' ? false :
                          chart.spec?.is_time_based ?? false;
 
+      const allSeriesKeys: string[] = [];
+      if (chartDataConfig?.dataKeys?.primary) {
+        allSeriesKeys.push(chartDataConfig.dataKeys.primary);
+      }
+      if (chartDataConfig?.dataKeys?.secondary) {
+        allSeriesKeys.push(chartDataConfig.dataKeys.secondary);
+      }
+      if (chartDataConfig?.extraKeys) {
+        allSeriesKeys.push(...chartDataConfig.extraKeys);
+      }
+      const uniqueSeriesKeys = Array.from(new Set(allSeriesKeys));
+
       const response = await addChartToDashboard({
         title: chart.name,
         query: chart.query || "",
@@ -383,6 +543,7 @@ export function ChartPreviewDialog({
         data_connection_id: databaseId,
         x_axis: axisFields.xAxis || undefined,
         y_axis: axisFields.yAxis || undefined,
+        series_keys: uniqueSeriesKeys.length > 0 ? uniqueSeriesKeys : undefined,
       });
 
       if (response.success) {
@@ -516,7 +677,7 @@ export function ChartPreviewDialog({
                 
                 {!isConversational && (
                   <Badge variant="outline" className="capitalize w-fit text-xs flex-shrink-0">
-                    {chart.type} Chart
+                    {resolvedChartDisplayType ?? chart.type} Chart
                   </Badge>
                 )}
               </div>
@@ -547,8 +708,11 @@ export function ChartPreviewDialog({
 
         {/* Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto px-3 sm:px-4 md:px-5 min-h-0">
-          <div className="bg-muted/30 rounded-lg border border-border p-2 sm:p-3 md:p-4 mb-4">
-            <div className="relative w-full" style={{ height: `${getChartHeight()}px` }}>
+          <div className="bg-muted/30 rounded-lg border border-border p-2 sm:p-3 md:p-4 mb-4 overflow-hidden">
+            <div
+              className="relative w-full overflow-hidden"
+              style={{ height: `${getChartHeight()}px` }}
+            >
               
               {isConversational ? (
                 <div className="absolute inset-0 flex items-center justify-center p-6">
@@ -593,11 +757,23 @@ export function ChartPreviewDialog({
                   )}
                   {!isExecutingQuery && !chartDataError && !noDataReturned && (
                     <ChartCard
-                      type={chart.type as any}
+                      type={
+                        (resolvedChartDisplayType ??
+                          (chart.type as ChartType)) as ChartType
+                      }
                       data={chartDataConfig.data}
-                      dataKeys={chartDataConfig.dataKeys}
+                      dataKeys={[
+                        chartDataConfig.dataKeys.primary,
+                        ...(chartDataConfig.dataKeys.secondary
+                          ? [chartDataConfig.dataKeys.secondary]
+                          : []),
+                      ]}
                       xAxisKey={chartDataConfig.xAxisKey}
-                      showLegend={!!chartDataConfig.dataKeys.secondary && chart.type !== 'pie'}
+                      axisConfig={derivedAxisConfig}
+                      showLegend={
+                        !!chartDataConfig.dataKeys.secondary &&
+                        (resolvedChartDisplayType ?? chart.type) !== "pie"
+                      }
                       height={getChartHeight()}
                     />
                   )}

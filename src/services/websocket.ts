@@ -55,13 +55,35 @@ export interface ChartSpec {
   title: string;
   query: string;
   type: "time_series" | "aggregate";
-  chart_type: "bar" | "line" | "area" | "pie" | "donut" | "scatter";
+  chart_type:
+    | "bar"
+    | "line"
+    | "area"
+    | "pie"
+    | "donut"
+    | "scatter"
+    | "heatmap"
+    | "funnel"
+    | "map"
+    | "stackedlinechart"
+    | "StackedLineChart"
+    | "stackedhorizontalbar"
+    | "StackedHorizontalBar"
+    | "clustering"
+    | "Clustering"
+    | "multiyaxischart"
+    | "MultiYAxisChart";
   report?: string;
   relevance: number;
   is_time_based: boolean;
   data_connection_id: string;
   x_axis?: string | null;
   y_axis?: string | null;
+  /** Optional extended axis metadata (heatmap / funnel / map / etc.) */
+  value_key?: string | null;
+  category_key?: string | null;
+  region_key?: string | null;
+  metric_key?: string | null;
   min_max_dates?: [string, string] | null;
 }
 

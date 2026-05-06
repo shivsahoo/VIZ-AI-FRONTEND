@@ -26,12 +26,85 @@ import {
   getCurrentUser,
   type Chart as SavedChart,
 } from "../../../services/api";
-import { inferChartDataConfig, getDefaultChartDataConfig, type ChartDataConfig } from "../../../utils/chartData";
+import {
+  inferChartDataConfig,
+  getDefaultChartDataConfig,
+  inferExtendedChartConfig,
+  extendedToChartDataConfig,
+  isExtendedChartType,
+  mapApiAxisConfigToChart,
+  type ChartDataConfig,
+} from "../../../utils/chartData";
+import type { ChartAxisConfig, ChartType } from "./core/chartTypes";
 import { VizAIWebSocket, type ChartSpec } from "../../../services/websocket";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+function normalizeProbeChartType(t: string | undefined): ChartType {
+  const s = (t ?? "bar").toLowerCase();
+  const allowed: ChartType[] = [
+    "line",
+    "bar",
+    "area",
+    "pie",
+    "scatter",
+    "heatmap",
+    "funnel",
+    "map",
+    "stackedlinechart",
+    "stackedhorizontalbar",
+    "clustering",
+    "multiyaxischart",
+  ];
+  return (allowed.includes(s as ChartType) ? s : "bar") as ChartType;
+}
+
+function buildChartPreviewConfig(
+  rows: any[],
+  typeStr: string,
+  xHint: string | undefined,
+  yHint: string | undefined,
+  apiAxis: unknown,
+): {
+  config: ChartDataConfig;
+  axisConfig: ChartAxisConfig;
+  /** Effective renderer type after `inferExtendedChartConfig` (e.g. bar fallback for degenerate scatter). */
+  effectiveChartType?: ChartType;
+} {
+  if (!rows.length) {
+    return { config: getDefaultChartDataConfig(), axisConfig: {} };
+  }
+
+  const baseAxis: ChartAxisConfig = {
+    ...mapApiAxisConfigToChart(apiAxis),
+  };
+  if (xHint) baseAxis.xAxisKey = baseAxis.xAxisKey ?? xHint;
+  if (yHint) baseAxis.yAxisKey = baseAxis.yAxisKey ?? yHint;
+
+  const resolved = normalizeProbeChartType(typeStr);
+
+  if (isExtendedChartType(resolved)) {
+    const ext = inferExtendedChartConfig(rows, resolved, baseAxis);
+    return {
+      config: extendedToChartDataConfig(ext),
+      axisConfig: ext.axisConfig,
+      effectiveChartType: ext.fallbackType ?? resolved,
+    };
+  }
+
+  const legacy = resolved as "bar" | "line" | "pie" | "area";
+
+  return {
+    config: inferChartDataConfig(
+      rows,
+      resolved as Parameters<typeof inferChartDataConfig>[1],
+      { xAxisHint: xHint, yAxisHint: yHint }
+    ),
+    axisConfig: baseAxis,
+  };
+}
 
 interface ProbeMessage {
   id: number;
@@ -44,12 +117,14 @@ interface ProbeMessage {
   /** Pre-fetched chart data for the modified query */
   chartPreview?: {
     config: ChartDataConfig;
+    axisConfig?: ChartAxisConfig;
     spec: Partial<ChartSpec>;
     isLoading: boolean;
     error?: string;
+    effectiveChartType?: ChartType;
   };
   /** Resolved visualization type for this preview (kept when only SQL changes after a type switch) */
-  previewChartType?: "bar" | "line" | "pie" | "area";
+  previewChartType?: ChartType;
   /** Name of dashboard this was saved to */
   savedToDashboard?: string;
   /** User saved this variant as a project draft */
@@ -253,19 +328,12 @@ export function ProbeModeDialog({
           // Rows + axis hints from the LLM service (tabular format)
           const rawRows = state.query_data ?? state.queryData;
           const queryData: any[] | undefined =
-            Array.isArray(rawRows) && rawRows.length > 0 ? rawRows : undefined;
-          const queryXAxis: string | undefined =
-            (state.query_x_axis ?? state.queryXAxis) ?? undefined;
-          const queryYAxis: string | undefined =
-            (state.query_y_axis ?? state.queryYAxis) ?? undefined;
-          const queryLabelColumns: string[] = Array.isArray(
-            state.query_label_columns ?? state.queryLabelColumns
-          )
-            ? (state.query_label_columns ?? state.queryLabelColumns)
-            : [];
-          const queryYAxes: string[] = Array.isArray(state.query_y_axes ?? state.queryYAxes)
-            ? (state.query_y_axes ?? state.queryYAxes)
-            : [];
+            Array.isArray(state.query_data) && state.query_data.length > 0
+              ? state.query_data
+              : undefined;
+          const queryXAxis: string | undefined = state.query_x_axis ?? undefined;
+          const queryYAxis: string | undefined = state.query_y_axis ?? undefined;
+          const axisPayload: unknown = state.axis_config;
 
           // Show a visual preview when SQL/type changed, or when the server already returned rows
           const hasQueryRows = Boolean(queryData?.length);
@@ -297,73 +365,30 @@ export function ProbeModeDialog({
             modifiedChartType: hasVisualChange ? modifiedChartType : undefined,
           };
 
-          /** Build ChartDataConfig using axis hints when available, auto-detect otherwise */
-          const buildConfig = (
-            rows: any[],
-            type: "bar" | "line" | "pie" | "area",
-            xHint?: string,
-            yHint?: string,
-            labelHints: string[] = [],
-            valueHints: string[] = [],
-          ) => {
-            if (!rows.length) return getDefaultChartDataConfig();
-            // If probe returned multiple label columns (e.g., category + name),
-            // compose a readable x-axis label so secondary dimensions are not dropped visually.
-            if (type !== "pie" && labelHints.length > 1) {
-              const measureKey = yHint || valueHints[0] || queryYAxis || "value";
-              const withCompositeLabel = rows.map((r) => ({
-                ...r,
-                __viz_label: labelHints
-                  .map((k) => r?.[k])
-                  .filter((v) => v !== null && v !== undefined && String(v).trim() !== "")
-                  .join(" | "),
-              }));
-              return {
-                data: withCompositeLabel,
-                dataKeys: { primary: measureKey },
-                xAxisKey: "__viz_label",
-              };
-            }
-            if (xHint && yHint) {
-              // Backend already detected the best axes — use them directly
-              if (type === "pie") {
-                return {
-                  data: rows.map((r) => ({ name: r[xHint] ?? "", value: Number(r[yHint]) || 0 })),
-                  dataKeys: { primary: "value" },
-                  xAxisKey: "name",
-                };
-              }
-              return {
-                data: rows,
-                dataKeys: { primary: yHint },
-                xAxisKey: xHint,
-              };
-            }
-            return inferChartDataConfig(rows, type);
-          };
-
           if (hasVisualChange) {
-            const resolvedType = (
+            const resolvedType = normalizeProbeChartType(
               modifiedChartType ??
-              (priorChartType === "pie" ? "bar" : priorChartType) ??
-              (chart.type === "pie" ? "bar" : chart.type) ??
-              "bar"
-            ) as "bar" | "line" | "pie" | "area";
+                (priorChartType === "pie" ? "bar" : priorChartType) ??
+                (chart.type === "pie" ? "bar" : chart.type) ??
+                "bar",
+            );
             newMsg.previewChartType = resolvedType;
 
             if (queryData) {
               // ── Fast path: LLM service already executed the query ──────────
+              const built = buildChartPreviewConfig(
+                queryData,
+                resolvedType,
+                queryXAxis,
+                queryYAxis,
+                axisPayload,
+              );
               newMsg.chartPreview = {
-                config: buildConfig(
-                  queryData,
-                  resolvedType,
-                  queryXAxis,
-                  queryYAxis,
-                  queryLabelColumns,
-                  queryYAxes,
-                ),
+                config: built.config,
+                axisConfig: built.axisConfig,
                 spec: modifiedSpec ?? {},
                 isLoading: false,
+                effectiveChartType: built.effectiveChartType,
               };
               setMessages((prev) => [...prev, newMsg]);
               setIsLoading(false);
@@ -382,25 +407,32 @@ export function ProbeModeDialog({
               getChartData("probe-preview", connectionId, sqlToRun, undefined, undefined, false)
                 .then((res) => {
                   if (cancelled) return;
-                  const config =
+                  const built =
                     res.success && res.data
-                      ? buildConfig(
+                      ? buildChartPreviewConfig(
                           res.data.data,
                           resolvedType,
                           res.data.metadata?.xAxis ?? undefined,
                           res.data.metadata?.yAxis ?? undefined,
+                          axisPayload,
                         )
-                      : getDefaultChartDataConfig();
+                      : {
+                          config: getDefaultChartDataConfig(),
+                          axisConfig: {} as ChartAxisConfig,
+                          effectiveChartType: undefined as ChartType | undefined,
+                        };
                   setMessages((prev) =>
                     prev.map((m) =>
                       m.id === newMsg.id
                         ? {
                             ...m,
                             chartPreview: {
-                              config,
+                              config: built.config,
+                              axisConfig: built.axisConfig,
                               spec: modifiedSpec ?? {},
                               isLoading: false,
                               error: res.success ? undefined : res.error?.message,
+                              effectiveChartType: built.effectiveChartType,
                             },
                           }
                         : m
@@ -430,6 +462,7 @@ export function ProbeModeDialog({
             setIsLoading(false);
           }
 
+          // Update working SQL/type refs (error case already returned early above)
           if (modifiedSql) workingSqlRef.current = modifiedSql;
           if (modifiedChartType) workingChartTypeRef.current = modifiedChartType;
         });
@@ -547,10 +580,31 @@ export function ProbeModeDialog({
     setSavingMap((prev) => ({ ...prev, [msg.id]: true }));
 
     try {
-      const chartType = (msg.previewChartType ??
-        msg.modifiedChartType ??
-        chart.type ??
-        "bar") as "line" | "bar" | "pie" | "area";
+      const chartType = normalizeProbeChartType(
+        msg.previewChartType ?? msg.modifiedChartType ?? chart.type ?? "bar",
+      );
+
+      // Resolve axis fields from the preview config
+      const savedXAxis =
+        msg.chartPreview?.config.xAxisKey ??
+        msg.chartPreview?.spec?.x_axis ??
+        undefined;
+      const savedYAxis =
+        msg.chartPreview?.config.dataKeys?.primary ??
+        msg.chartPreview?.spec?.y_axis ??
+        undefined;
+
+      const allSeriesKeys: string[] = [];
+      if (msg.chartPreview?.config.dataKeys?.primary) {
+        allSeriesKeys.push(msg.chartPreview.config.dataKeys.primary);
+      }
+      if (msg.chartPreview?.config.dataKeys?.secondary) {
+        allSeriesKeys.push(msg.chartPreview.config.dataKeys.secondary);
+      }
+      if (msg.chartPreview?.config.extraKeys) {
+        allSeriesKeys.push(...msg.chartPreview.config.extraKeys);
+      }
+      const uniqueSeriesKeys = Array.from(new Set(allSeriesKeys));
 
       const response = await addChartToDashboard({
         title: chart.name,
@@ -560,6 +614,9 @@ export function ProbeModeDialog({
         dashboard_id: String(dashboardId),
         data_connection_id: connectionId,
         report: msg.content,
+        x_axis: savedXAxis,
+        y_axis: savedYAxis,
+        series_keys: uniqueSeriesKeys.length > 0 ? uniqueSeriesKeys : undefined,
       });
 
       if (response.success) {
@@ -593,19 +650,28 @@ export function ProbeModeDialog({
 
     if (draftSavingMap[msg.id]) return;
 
-    const chartType = (msg.previewChartType ??
-      msg.modifiedChartType ??
-      chart.type ??
-      "bar") as "line" | "bar" | "pie" | "area";
+    const chartType = normalizeProbeChartType(
+      msg.previewChartType ?? msg.modifiedChartType ?? chart.type ?? "bar",
+    );
 
     const xAxis =
       msg.chartPreview?.config.xAxisKey ??
       msg.chartPreview?.spec?.x_axis ??
       undefined;
-    const yAxis =
-      msg.chartPreview?.config.dataKeys?.primary ??
-      msg.chartPreview?.spec?.y_axis ??
-      undefined;
+
+    // Collect ALL series keys so multi-measure stacked charts can be restored
+    const allSeriesKeys: string[] = [];
+    if (msg.chartPreview?.config.dataKeys?.primary) {
+      allSeriesKeys.push(msg.chartPreview.config.dataKeys.primary);
+    }
+    if (msg.chartPreview?.config.dataKeys?.secondary) {
+      allSeriesKeys.push(msg.chartPreview.config.dataKeys.secondary);
+    }
+    if ((msg.chartPreview?.config as any)?.extraKeys?.length) {
+      allSeriesKeys.push(...(msg.chartPreview!.config as any).extraKeys);
+    }
+
+    const yAxis = allSeriesKeys[0] ?? msg.chartPreview?.spec?.y_axis ?? undefined;
 
     const isTimeBased =
       chart.spec?.type === "time_series"
@@ -629,6 +695,8 @@ export function ProbeModeDialog({
         config: {
           xAxis: xAxis || undefined,
           yAxis: yAxis || undefined,
+          // Store all series keys so the stacked layout can be restored on reload
+          ...(allSeriesKeys.length > 1 ? { seriesKeys: allSeriesKeys } as any : {}),
         },
       });
 
@@ -790,13 +858,22 @@ export function ProbeModeDialog({
                           </div>
                         ) : (
                           <ChartCard
-                            type={(msg.previewChartType ??
-                              msg.modifiedChartType ??
-                              (chart.type === "pie" ? "bar" : chart.type) ??
-                              "bar") as any}
+                            type={normalizeProbeChartType(
+                              msg.chartPreview?.effectiveChartType ??
+                                msg.previewChartType ??
+                                msg.modifiedChartType ??
+                                (chart.type === "pie" ? "bar" : chart.type) ??
+                                "bar",
+                            )}
                             data={msg.chartPreview!.config.data}
-                            dataKeys={msg.chartPreview!.config.dataKeys}
+                            dataKeys={[
+                              msg.chartPreview!.config.dataKeys.primary,
+                              ...(msg.chartPreview!.config.dataKeys.secondary
+                                ? [msg.chartPreview!.config.dataKeys.secondary]
+                                : []),
+                            ]}
                             xAxisKey={msg.chartPreview!.config.xAxisKey}
+                            axisConfig={msg.chartPreview?.axisConfig}
                             showLegend
                             height={200}
                           />

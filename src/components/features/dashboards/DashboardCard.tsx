@@ -2,7 +2,7 @@ import React, { type MouseEvent } from "react";
 import { LayoutDashboard, Clock, BarChart3, Users, Trash2 } from "lucide-react";
 import { Card } from "../../ui/card";
 import { ActionButtonGroup } from "../../shared/ActionButtonGroup";
-import { LineChart, Line, BarChart, Bar, AreaChart, Area, ResponsiveContainer } from "recharts";
+import { MiniChart } from "../charts/MiniChart";
 
 interface Dashboard {
   id: number | string;
@@ -34,44 +34,22 @@ const chartData = [
 // Mini chart preview component
 function MiniChartPreview({ index }: { index: number }) {
   const chartType = index % 3;
-  
+  const type =
+    chartType === 0 ? "line" : chartType === 1 ? "bar" : "area";
+  const accent = [
+    "hsl(var(--chart-1))",
+    "hsl(var(--chart-2))",
+    "hsl(var(--chart-3))",
+  ][chartType];
+
   return (
-    <div className="w-full h-full bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden border border-border/40">
-      <ResponsiveContainer width="100%" height="100%">
-        {chartType === 0 ? (
-          <LineChart data={chartData}>
-            <Line 
-              type="monotone" 
-              dataKey="value" 
-              stroke="hsl(var(--chart-1))" 
-              strokeWidth={1.5} 
-              dot={false}
-              isAnimationActive={false}
-            />
-          </LineChart>
-        ) : chartType === 1 ? (
-          <BarChart data={chartData}>
-            <Bar 
-              dataKey="value" 
-              fill="hsl(var(--chart-2))" 
-              radius={[2, 2, 0, 0]}
-              isAnimationActive={false}
-            />
-          </BarChart>
-        ) : (
-          <AreaChart data={chartData}>
-            <Area 
-              type="monotone" 
-              dataKey="value" 
-              stroke="hsl(var(--chart-3))" 
-              fill="hsl(var(--chart-3))" 
-              fillOpacity={0.3}
-              isAnimationActive={false}
-            />
-          </AreaChart>
-        )}
-      </ResponsiveContainer>
-    </div>
+    <MiniChart
+      type={type}
+      data={chartData}
+      dataKeys={["value"]}
+      xAxisKey="name"
+      colors={[accent]}
+    />
   );
 }
 
