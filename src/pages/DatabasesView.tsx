@@ -1,4 +1,4 @@
-import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye } from "lucide-react";
+import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye, BarChart3, LayoutDashboard, Sparkles } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -34,6 +34,7 @@ import {
 import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
 import { DSGraphViewer } from "../components/features/databases/DSGraphViewer";
+
 import { getDatabases, deleteConnection, updateConnection, getDatabaseDSGraph, type DSGraphPayload } from "../services/api";
 import { storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 
@@ -50,10 +51,9 @@ interface DatabaseConnection {
 
 interface DatabasesViewProps {
   projectId?: string | number;
-  onTabChange?: (tab: string) => void;
 }
 
-export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
+export function DatabasesView({ projectId }: DatabasesViewProps) {
   const [databases, setDatabases] = useState<DatabaseConnection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showConnectionFlow, setShowConnectionFlow] = useState(false);
@@ -64,7 +64,8 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
   const [isGraphLoading, setIsGraphLoading] = useState(false);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [currentGraph, setCurrentGraph] = useState<DSGraphPayload | null>(null);
-  
+  const [showTour, setShowTour] = useState(false);
+
   // Edit form state (for editing existing connections)
   const [connectionName, setConnectionName] = useState("");
   const [dbType, setDbType] = useState("postgresql");
@@ -87,9 +88,9 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
     return date.toLocaleDateString();
   };
 
-  const fetchDatabases = useCallback(async () => {
-    if (!projectId) return;
-    
+  const fetchDatabases = useCallback(async (): Promise<DatabaseConnection[]> => {
+    if (!projectId) return [];
+
     setIsLoading(true);
     try {
       const response = await getDatabases(String(projectId));
@@ -130,13 +131,16 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
           };
         });
         setDatabases(mappedDatabases);
+        return mappedDatabases;
       } else {
         toast.error(response.error?.message || "Failed to load databases");
         setDatabases([]);
+        return [];
       }
     } catch (error: any) {
       toast.error(error.message || "An error occurred while fetching databases");
       setDatabases([]);
+      return [];
     } finally {
       setIsLoading(false);
     }
@@ -151,7 +155,7 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
     }
   }, [projectId, fetchDatabases]);
 
-  const handleConnectionFlowComplete = (connectionData: {
+  const handleConnectionFlowComplete = async (connectionData: {
     database: any;
     selectedTables: string[];
     databaseContext: Record<string, string>;
@@ -160,14 +164,28 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
     toast.success(`Database "${dbName}" connected successfully!`);
 
     // Refresh the database list from API
-    if (projectId) {
-      fetchDatabases();
-    }
+    const refreshedDatabases = projectId ? await fetchDatabases() : [];
     setShowConnectionFlow(false);
 
-    // Redirect directly to the charts page
-    if (onTabChange) {
-      onTabChange('charts');
+    // Open Data Source preview (DS Graph) immediately after successful connection
+    const connectedDbId = connectionData.database.id || connectionData.database.connectionId;
+    const connectedDb =
+      refreshedDatabases.find((db) => db.id === connectedDbId || db.name === dbName) ||
+      (connectedDbId
+        ? {
+          id: String(connectedDbId),
+          name: dbName,
+          type: connectionData.database.dbType || "Database",
+          rawType: connectionData.database.dbType || "",
+          host: connectionData.database.host || "N/A",
+          status: "connected",
+          lastChecked: "just now",
+          hasDsGraph: true,
+        }
+        : null);
+
+    if (connectedDb) {
+      await handleViewDSGraph(connectedDb, { startTour: true });
     }
   };
 
@@ -176,7 +194,10 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
     setViewDialogOpen(true);
   };
 
-  const handleViewDSGraph = async (db: DatabaseConnection) => {
+  const handleViewDSGraph = async (
+    db: DatabaseConnection,
+    options?: { startTour?: boolean }
+  ) => {
     setSelectedDatabase(db);
     setDsGraphDialogOpen(true);
     setIsGraphLoading(true);
@@ -186,6 +207,11 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
       const response = await getDatabaseDSGraph(db.id);
       if (response.success && response.data) {
         setCurrentGraph(response.data);
+        // Trigger tour only when connection flow explicitly requests it
+        const tourCompleted = localStorage.getItem('vizai_tour_datasource_graph_completed');
+        if (options?.startTour && tourCompleted !== 'true') {
+          setShowTour(true);
+        }
       } else {
         setGraphError(response.error?.message || "Unable to load datasource graph");
       }
@@ -234,14 +260,14 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
         dbType === "postgresql"
           ? "postgres"
           : dbType === "oracle"
-          ? "oracledb"
-          : dbType === "oracledb"
-          ? "oracledb"
-          : dbType === "mysql"
-          ? "mysql"
-          : dbType === "databricks"
-          ? "databricks"
-          : dbType;
+            ? "oracledb"
+            : dbType === "oracledb"
+              ? "oracledb"
+              : dbType === "mysql"
+                ? "mysql"
+                : dbType === "databricks"
+                  ? "databricks"
+                  : dbType;
 
       const response = await updateConnection(selectedDatabase.id, {
         connection_name: connectionName,
@@ -272,12 +298,12 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
   const handleDeleteConnection = async (db: DatabaseConnection) => {
     try {
       const response = await deleteConnection(db.id);
-      
+
       if (response.success) {
         // Remove from local state
         setDatabases(databases.filter(d => d.id !== db.id));
         toast.success(`Connection "${db.name}" deleted successfully`);
-        
+
         // Refresh the database list to ensure consistency
         if (projectId) {
           fetchDatabases();
@@ -293,7 +319,6 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
   const handleConnectionFlowCancel = () => {
     setShowConnectionFlow(false);
   };
-
   if (showConnectionFlow) {
     return (
       <div className="min-h-full bg-background">
@@ -315,7 +340,7 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
             <h2 className="text-2xl text-foreground mb-1">Database Connections</h2>
             <p className="text-muted-foreground">Manage your database connections</p>
           </div>
-          <GradientButton 
+          <GradientButton
             onClick={() => setShowConnectionFlow(true)}
             className="shadow-lg hover:shadow-xl transition-all"
           >
@@ -323,77 +348,77 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
             Add Connection
           </GradientButton>
         </div>
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <Card className="p-6 border border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-success/10 flex items-center justify-center">
-                  <Check className="w-6 h-6 text-success" />
-                </div>
-                <div>
-                  <p className="text-2xl text-foreground mb-1">
-                    {databases.filter(db => db.status === 'connected').length}
-                  </p>
-                  <p className="text-sm text-muted-foreground">Active Connections</p>
-                </div>
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <Card className="p-6 border border-border">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-success/10 flex items-center justify-center">
+                <Check className="w-6 h-6 text-success" />
               </div>
-            </Card>
-
-            <Card className="p-6 border border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-destructive/10 flex items-center justify-center">
-                  <X className="w-6 h-6 text-destructive" />
-                </div>
-                <div>
-                  <p className="text-2xl text-foreground mb-1">
-                    {databases.filter(db => db.status === 'error' || db.status === 'disconnected').length}
-                  </p>
-                  <p className="text-sm text-muted-foreground">Connection Errors</p>
-                </div>
+              <div>
+                <p className="text-2xl text-foreground mb-1">
+                  {databases.filter(db => db.status === 'connected').length}
+                </p>
+                <p className="text-sm text-muted-foreground">Active Connections</p>
               </div>
-            </Card>
+            </div>
+          </Card>
 
-            <Card className="p-6 border border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center">
-                  <Database className="w-6 h-6 text-accent" />
-                </div>
-                <div>
-                  <p className="text-2xl text-foreground mb-1">{databases.length}</p>
-                  <p className="text-sm text-muted-foreground">Total Databases</p>
-                </div>
+          <Card className="p-6 border border-border">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-destructive/10 flex items-center justify-center">
+                <X className="w-6 h-6 text-destructive" />
               </div>
-            </Card>
-          </div>
+              <div>
+                <p className="text-2xl text-foreground mb-1">
+                  {databases.filter(db => db.status === 'error' || db.status === 'disconnected').length}
+                </p>
+                <p className="text-sm text-muted-foreground">Connection Errors</p>
+              </div>
+            </div>
+          </Card>
 
-          {/* Databases Table */}
-          <Card className="border border-border">
-            <Table>
-              <TableHeader>
+          <Card className="p-6 border border-border">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center">
+                <Database className="w-6 h-6 text-accent" />
+              </div>
+              <div>
+                <p className="text-2xl text-foreground mb-1">{databases.length}</p>
+                <p className="text-sm text-muted-foreground">Total Databases</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Databases Table */}
+        <Card className="border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Host</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Last Checked</TableHead>
+                <TableHead className="w-12"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Host</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last Checked</TableHead>
-                  <TableHead className="w-12"></TableHead>
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    Loading databases...
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                      Loading databases...
-                    </TableCell>
-                  </TableRow>
-                ) : databases.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                      No database connections found. Click "Add Connection" to get started.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  databases.map((db) => (
+              ) : databases.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    No database connections found. Click "Add Connection" to get started.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                databases.map((db) => (
                   <TableRow key={db.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
@@ -410,7 +435,7 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
                     </TableCell>
                     <TableCell className="text-muted-foreground">{db.host}</TableCell>
                     <TableCell>
-                      <StatusBadge 
+                      <StatusBadge
                         status={db.status === 'connected' ? 'connected' : 'disconnected'}
                       />
                     </TableCell>
@@ -436,7 +461,7 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
                             Edit Connection
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem 
+                          <DropdownMenuItem
                             onClick={() => handleDeleteConnection(db)}
                             className="text-destructive focus:text-destructive"
                           >
@@ -447,11 +472,11 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </Card>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </Card>
 
         {/* Database Connection Flow */}
         {/* View Connection Dialog */}
@@ -491,10 +516,10 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
                   <div className="space-y-2">
                     <Label>Status</Label>
                     <div className="p-3 rounded-md bg-muted/30 border border-border">
-                      <Badge 
+                      <Badge
                         className={
-                          selectedDatabase.status === 'connected' 
-                            ? 'bg-success/10 text-success border-success/20' 
+                          selectedDatabase.status === 'connected'
+                            ? 'bg-success/10 text-success border-success/20'
                             : 'bg-destructive/10 text-destructive border-destructive/20'
                         }
                       >
@@ -585,7 +610,7 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
               <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
                 Cancel
               </Button>
-              <GradientButton 
+              <GradientButton
                 onClick={handleUpdateConnection}
                 disabled={isUpdatingConnection}
               >
@@ -596,17 +621,47 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={dsGraphDialogOpen} onOpenChange={setDsGraphDialogOpen}>
+        <Dialog open={dsGraphDialogOpen} onOpenChange={(open) => {
+          setDsGraphDialogOpen(open);
+          if (!open) {
+            setShowTour(false);
+          }
+        }}>
           <DialogContent
             className="!w-[82vw] !max-w-[82vw] sm:!max-w-[82vw] h-[84vh] max-h-[84vh] p-4 flex flex-col overflow-hidden"
             style={{ width: "82vw", maxWidth: "82vw", height: "84vh", maxHeight: "84vh" }}
+            data-tour-container="ds-graph-dialog"
+            hideCloseButton={showTour}
+            onInteractOutside={(event) => {
+              if (showTour) {
+                event.preventDefault();
+              }
+            }}
+            onPointerDownOutside={(event) => {
+              if (showTour) {
+                event.preventDefault();
+              }
+            }}
+            onEscapeKeyDown={(event) => {
+              if (showTour) {
+                event.preventDefault();
+              }
+            }}
           >
-            <DialogHeader>
-              <DialogTitle>Datasource Graph</DialogTitle>
-              <DialogDescription>
-                {selectedDatabase ? `Visual schema graph for ${selectedDatabase.name}` : "Visual schema graph"}
-              </DialogDescription>
-            </DialogHeader>
+            <div className="flex items-start justify-between pr-8">
+              <DialogHeader>
+                <DialogTitle>Datasource Graph</DialogTitle>
+                <DialogDescription>
+                  {selectedDatabase ? `Visual schema graph for ${selectedDatabase.name}` : "Visual schema graph"}
+                </DialogDescription>
+              </DialogHeader>
+              <GradientButton
+                onClick={() => { }}
+                data-tour-target="enrich-datasource-btn"
+              >
+                Enrich Datasource
+              </GradientButton>
+            </div>
             {isGraphLoading ? (
               <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Loading graph...</div>
             ) : graphError ? (
@@ -620,7 +675,26 @@ export function DatabasesView({ projectId, onTabChange }: DatabasesViewProps) {
             )}
           </DialogContent>
         </Dialog>
-        </div>
+
+        {/* Onboarding Tour */}
+        {showTour && dsGraphDialogOpen && currentGraph && (
+          <OnboardingTour
+            steps={tourSteps}
+            tourId="datasource_graph"
+            onComplete={() => {
+              setShowTour(false);
+            }}
+            onSkip={() => {
+              setShowTour(false);
+            }}
+            autoStart={true}
+            startDelay={800}
+            showOverlay={false}
+            containerSelector='[data-tour-container="ds-graph-dialog"]'
+            lockInteractions={true}
+          />
+        )}
       </div>
+    </div>
   );
 }

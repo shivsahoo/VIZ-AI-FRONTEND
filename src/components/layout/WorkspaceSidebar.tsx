@@ -30,7 +30,7 @@ export function WorkspaceSidebar({ activeTab, onTabChange, onOpenAIAssistant }: 
           {workspaceNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
-            
+
             return (
               <Tooltip key={item.id}>
                 <TooltipTrigger asChild>
@@ -38,8 +38,8 @@ export function WorkspaceSidebar({ activeTab, onTabChange, onOpenAIAssistant }: 
                     onClick={() => onTabChange(item.id)}
                     className={`
                       w-12 h-12 rounded-xl flex items-center justify-center transition-smooth relative group
-                      ${isActive 
-                        ? 'bg-primary/15 text-primary shadow-lg shadow-primary/20' 
+                      ${isActive
+                        ? 'bg-primary/15 text-primary shadow-lg shadow-primary/20'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                       }
                     `}
@@ -64,7 +64,7 @@ export function WorkspaceSidebar({ activeTab, onTabChange, onOpenAIAssistant }: 
         {/* Bottom Navigation Items */}
         <div className="flex flex-col items-center gap-3">
           <Separator className="w-10 mb-1" />
-          
+
           {/* Ask VizAI Button */}
           {/* {onOpenAIAssistant && (
             <Tooltip>
@@ -89,7 +89,7 @@ export function WorkspaceSidebar({ activeTab, onTabChange, onOpenAIAssistant }: 
           {bottomNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
-            
+
             return (
               <Tooltip key={item.id}>
                 <TooltipTrigger asChild>
@@ -97,8 +97,8 @@ export function WorkspaceSidebar({ activeTab, onTabChange, onOpenAIAssistant }: 
                     onClick={() => onTabChange(item.id)}
                     className={`
                       w-12 h-12 rounded-xl flex items-center justify-center transition-smooth relative group
-                      ${isActive 
-                        ? 'bg-primary/15 text-primary shadow-lg shadow-primary/20' 
+                      ${isActive
+                        ? 'bg-primary/15 text-primary shadow-lg shadow-primary/20'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                       }
                     `}

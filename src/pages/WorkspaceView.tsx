@@ -318,7 +318,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
       case 'charts':
         return <ChartsView currentUser={currentUser} projectId={projectId} key={chartCreatedTrigger} pendingChartFromAI={pendingChartFromAI} onChartFromAIProcessed={onChartFromAIProcessed} onOpenAIAssistant={onOpenAIAssistant} onEditChart={onEditChart} />;
       case 'databases':
-        return <DatabasesView projectId={projectId} onTabChange={onTabChange} />;
+        return <DatabasesView projectId={projectId} />;
       case 'insights':
         return <InsightsView projectId={projectId} />;
       case 'team':
