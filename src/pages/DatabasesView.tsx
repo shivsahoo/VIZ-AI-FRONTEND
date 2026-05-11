@@ -1,4 +1,4 @@
-import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye, BarChart3, LayoutDashboard, Sparkles } from "lucide-react";
+import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -34,6 +34,7 @@ import {
 import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
 import { DSGraphViewer } from "../components/features/databases/DSGraphViewer";
+import { OnboardingTour, type TourOutcome } from "../components/shared/OnboardingTour";
 
 import { getDatabases, deleteConnection, updateConnection, getDatabaseDSGraph, type DSGraphPayload } from "../services/api";
 import { storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
@@ -185,7 +186,10 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
         : null);
 
     if (connectedDb) {
-      await handleViewDSGraph(connectedDb, { startTour: true });
+      // Database-driven tour trigger: the refreshed list already includes the
+      // just-added connection, so length === 1 means this was the first one.
+      const isFirstConnection = refreshedDatabases.length <= 1;
+      await handleViewDSGraph(connectedDb, { startTour: isFirstConnection });
     }
   };
 
@@ -207,9 +211,9 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
       const response = await getDatabaseDSGraph(db.id);
       if (response.success && response.data) {
         setCurrentGraph(response.data);
-        // Trigger tour only when connection flow explicitly requests it
-        const tourCompleted = localStorage.getItem('vizai_tour_datasource_graph_completed');
-        if (options?.startTour && tourCompleted !== 'true') {
+        // Start the tour only when the caller explicitly requests it
+        // (determined by connection count in handleConnectionFlowComplete)
+        if (options?.startTour) {
           setShowTour(true);
         }
       } else {
@@ -673,6 +677,23 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
             ) : (
               <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Graph not available.</div>
             )}
+
+            {/* Guided onboarding tour – rendered inside the dialog so
+                react-joyride's portal sits above it */}
+            <OnboardingTour
+              run={showTour}
+              onTourEnd={(outcome: TourOutcome) => {
+                setShowTour(false);
+                if (outcome === 'skipped') {
+                  // Fully reset: close the DS Graph dialog to restore
+                  // the pre-tour state (databases list view)
+                  setDsGraphDialogOpen(false);
+                  setCurrentGraph(null);
+                  setSelectedDatabase(null);
+                }
+                // 'finished' → keep DS Graph dialog open, no extra action
+              }}
+            />
           </DialogContent>
         </Dialog>
       </div>
