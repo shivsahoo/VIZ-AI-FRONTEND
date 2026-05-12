@@ -528,6 +528,8 @@ export function ProbeModeDialog({
         original_chart_type: chart?.type ?? "bar",
         original_chart_spec: chart?.spec,
         db_schema: chart?.db_schema ?? "",
+        ontology_context: (chart as any)?.ontology_context,
+        ontology_constraints: (chart as any)?.ontology_constraints,
         db_type: (chart?.db_type ?? "postgres") as
           | "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce" | "databricks",
         current_working_sql: workingSqlRef.current,

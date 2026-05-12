@@ -34,8 +34,22 @@ import {
 import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
 import { DSGraphViewer } from "../components/features/databases/DSGraphViewer";
+import { OntologyViewer } from "../components/features/databases/OntologyViewer";
 
-import { getDatabases, deleteConnection, updateConnection, getDatabaseDSGraph, type DSGraphPayload } from "../services/api";
+import {
+  getDatabases,
+  deleteConnection,
+  updateConnection,
+  getDatabaseDSGraph,
+  getLatestOntology,
+  bootstrapOntology,
+  downloadLatestOntologyTTL,
+  startOntologyEnrichment,
+  sendOntologyEnrichmentChat,
+  applyOntologyEnrichment,
+  type DSGraphPayload,
+  type OntologyVersionPayload,
+} from "../services/api";
 import { storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 
 interface DatabaseConnection {
@@ -65,6 +79,18 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   const [graphError, setGraphError] = useState<string | null>(null);
   const [currentGraph, setCurrentGraph] = useState<DSGraphPayload | null>(null);
   const [showTour, setShowTour] = useState(false);
+
+  // Ontology dialog state
+  const [ontologyDialogOpen, setOntologyDialogOpen] = useState(false);
+  const [isOntologyLoading, setIsOntologyLoading] = useState(false);
+  const [ontologyError, setOntologyError] = useState<string | null>(null);
+  const [currentOntology, setCurrentOntology] = useState<OntologyVersionPayload | null>(null);
+  const [enrichChatOpen, setEnrichChatOpen] = useState(false);
+  const [isEnriching, setIsEnriching] = useState(false);
+  const [enrichmentSessionId, setEnrichmentSessionId] = useState<string | null>(null);
+  const [enrichmentInput, setEnrichmentInput] = useState("");
+  const [enrichmentChat, setEnrichmentChat] = useState<Array<{ role: "assistant" | "user"; text: string }>>([]);
+  const [enrichmentUpdates, setEnrichmentUpdates] = useState<Record<string, any>>({});
 
   // Edit form state (for editing existing connections)
   const [connectionName, setConnectionName] = useState("");
@@ -219,6 +245,133 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
       setGraphError(error.message || "Unable to load datasource graph");
     } finally {
       setIsGraphLoading(false);
+    }
+  };
+
+  const handleEnrichDatasource = async (db: DatabaseConnection) => {
+    setSelectedDatabase(db);
+    setOntologyDialogOpen(true);
+    setIsOntologyLoading(true);
+    setOntologyError(null);
+    setCurrentOntology(null);
+    try {
+      // Try to fetch the latest ontology first
+      let response = await getLatestOntology(db.id);
+      if (!response.success || !response.data) {
+        // No ontology yet — bootstrap one from the DS graph (silent UX)
+        response = await bootstrapOntology(db.id);
+      }
+      if (response.success && response.data) {
+        setCurrentOntology(response.data);
+      } else {
+        setOntologyError(response.error?.message || "Unable to load ontology");
+        toast.error(response.error?.message || "Unable to load ontology");
+      }
+    } catch (error: any) {
+      setOntologyError(error.message || "Unable to load ontology");
+      toast.error(error.message || "Unable to load ontology");
+    } finally {
+      setIsOntologyLoading(false);
+    }
+  };
+
+  const handleDownloadOntologyTTL = async () => {
+    if (!selectedDatabase) return;
+    try {
+      const response = await downloadLatestOntologyTTL(selectedDatabase.id);
+      if (!response.success || !response.data) {
+        toast.error(response.error?.message || "Unable to download ontology");
+        return;
+      }
+      const ttl = response.data;
+      const blob = new Blob([ttl], { type: "text/turtle;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${selectedDatabase.name || "ontology"}.ttl`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Ontology file downloaded");
+    } catch (error: any) {
+      toast.error(error.message || "Unable to download ontology");
+    }
+  };
+
+  const handleStartEnriching = async () => {
+    if (!selectedDatabase) return;
+    setIsEnriching(true);
+    try {
+      const response = await startOntologyEnrichment(selectedDatabase.id);
+      if (!response.success || !response.data) {
+        toast.error(response.error?.message || "Unable to start enrichment");
+        return;
+      }
+      setEnrichmentSessionId(response.data.session_id);
+      setEnrichmentUpdates({});
+      setEnrichmentChat([
+        {
+          role: "assistant",
+          text: response.data.initial_message || "Let's enrich your ontology. Share business rules, default metrics, and status definitions.",
+        },
+      ]);
+      setEnrichChatOpen(true);
+    } catch (error: any) {
+      toast.error(error.message || "Unable to start enrichment");
+    } finally {
+      setIsEnriching(false);
+    }
+  };
+
+  const handleSendEnrichmentMessage = async () => {
+    if (!selectedDatabase || !enrichmentSessionId) return;
+    const message = enrichmentInput.trim();
+    if (!message) return;
+    setEnrichmentInput("");
+    setEnrichmentChat((prev) => [...prev, { role: "user", text: message }]);
+    setIsEnriching(true);
+    try {
+      const response = await sendOntologyEnrichmentChat(selectedDatabase.id, enrichmentSessionId, message);
+      if (!response.success || !response.data) {
+        toast.error(response.error?.message || "Unable to send message");
+        return;
+      }
+      setEnrichmentUpdates(response.data.extracted_updates || {});
+      setEnrichmentChat((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: response.data.assistant_message || "Noted.",
+        },
+      ]);
+    } catch (error: any) {
+      toast.error(error.message || "Unable to send message");
+    } finally {
+      setIsEnriching(false);
+    }
+  };
+
+  const handleApplyEnrichment = async () => {
+    if (!selectedDatabase || !enrichmentSessionId) return;
+    setIsEnriching(true);
+    try {
+      const answers = Object.entries(enrichmentUpdates).map(([question_id, answer]) => ({
+        question_id,
+        answer: Array.isArray(answer) ? answer : String(answer ?? ""),
+      }));
+      const response = await applyOntologyEnrichment(selectedDatabase.id, enrichmentSessionId, answers);
+      if (!response.success || !response.data) {
+        toast.error(response.error?.message || "Unable to apply enrichment");
+        return;
+      }
+      setCurrentOntology(response.data);
+      setEnrichChatOpen(false);
+      toast.success("Ontology enriched successfully");
+    } catch (error: any) {
+      toast.error(error.message || "Unable to apply enrichment");
+    } finally {
+      setIsEnriching(false);
     }
   };
 
@@ -628,8 +781,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
           }
         }}>
           <DialogContent
-            className="!w-[82vw] !max-w-[82vw] sm:!max-w-[82vw] h-[84vh] max-h-[84vh] p-4 flex flex-col overflow-hidden"
-            style={{ width: "82vw", maxWidth: "82vw", height: "84vh", maxHeight: "84vh" }}
+            className="!w-[92vw] !max-w-[92vw] sm:!max-w-[92vw] h-[88vh] max-h-[88vh] p-4 flex flex-col overflow-hidden"
+            style={{ width: "92vw", maxWidth: "92vw", height: "88vh", maxHeight: "88vh" }}
             data-tour-container="ds-graph-dialog"
             hideCloseButton={showTour}
             onInteractOutside={(event) => {
@@ -656,7 +809,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                 </DialogDescription>
               </DialogHeader>
               <GradientButton
-                onClick={() => { }}
+                onClick={() => selectedDatabase && handleEnrichDatasource(selectedDatabase)}
                 data-tour-target="enrich-datasource-btn"
               >
                 Enrich Datasource
@@ -673,6 +826,107 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
             ) : (
               <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Graph not available.</div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* ── Ontology Explorer Dialog ── */}
+        <Dialog open={ontologyDialogOpen} onOpenChange={setOntologyDialogOpen}>
+          <DialogContent
+            className="!w-[92vw] !max-w-[92vw] sm:!max-w-[92vw] h-[88vh] max-h-[88vh] p-4 flex flex-col overflow-hidden"
+            style={{ width: "92vw", maxWidth: "92vw", height: "88vh", maxHeight: "88vh" }}
+          >
+            <div className="flex items-start justify-between pr-8 shrink-0">
+              <DialogHeader>
+                <DialogTitle>Ontology Explorer</DialogTitle>
+                <DialogDescription>
+                  {selectedDatabase
+                    ? `Knowledge graph ontology for ${selectedDatabase.name}`
+                    : "Knowledge graph ontology"}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => setOntologyDialogOpen(false)}>
+                  Close
+                </Button>
+                <Button variant="outline" onClick={handleDownloadOntologyTTL} disabled={isOntologyLoading || !currentOntology}>
+                  Download RDF/OWL
+                </Button>
+                <GradientButton onClick={handleStartEnriching} disabled={isEnriching || isOntologyLoading || !currentOntology}>
+                  {isEnriching ? "Preparing..." : "Start Enriching"}
+                </GradientButton>
+              </div>
+            </div>
+            {isOntologyLoading ? (
+              <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                <div className="w-6 h-6 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+                <span className="text-sm">Loading ontology…</span>
+              </div>
+            ) : ontologyError ? (
+              <div className="flex-1 min-h-0 flex items-center justify-center text-destructive text-sm">
+                {ontologyError}
+              </div>
+            ) : currentOntology ? (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <OntologyViewer ontology={currentOntology} />
+              </div>
+            ) : (
+              <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground text-sm">
+                Ontology not available.
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={enrichChatOpen} onOpenChange={setEnrichChatOpen}>
+          <DialogContent className="sm:!max-w-3xl !w-[78vw] h-[78vh] max-h-[78vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>Ontology Enrichment Chat</DialogTitle>
+              <DialogDescription>
+                Chat with the assistant to enrich business semantics for this ontology.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+              {enrichmentChat.map((msg, index) => (
+                <div
+                  key={`${msg.role}-${index}`}
+                  className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
+                    msg.role === "assistant"
+                      ? "bg-muted/40 border border-border mr-10"
+                      : "bg-primary/10 border border-primary/20 ml-10"
+                  }`}
+                >
+                  {msg.text}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-[1fr_auto] gap-2 pt-2">
+              <Input
+                placeholder="Type your answer or business rule..."
+                value={enrichmentInput}
+                onChange={(e) => setEnrichmentInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSendEnrichmentMessage();
+                  }
+                }}
+                disabled={isEnriching}
+              />
+              <Button onClick={handleSendEnrichmentMessage} disabled={isEnriching || !enrichmentInput.trim()}>
+                Send
+              </Button>
+            </div>
+
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setEnrichChatOpen(false)} disabled={isEnriching}>
+                Close
+              </Button>
+              <GradientButton onClick={handleApplyEnrichment} disabled={isEnriching || !enrichmentSessionId}>
+                {isEnriching ? "Applying..." : "Apply Enrichment"}
+              </GradientButton>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

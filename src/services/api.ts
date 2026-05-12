@@ -1718,6 +1718,60 @@ export interface DSGraphPayload {
   };
 }
 
+export interface OntologyNode {
+  id: string;
+  label: string;
+  type: string;
+  meta?: Record<string, any>;
+}
+
+export interface OntologyEdge {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  type: string;
+  meta?: Record<string, any>;
+}
+
+export interface OntologyGraphPayload {
+  nodes: OntologyNode[];
+  edges: OntologyEdge[];
+  stats: Record<string, number>;
+}
+
+export interface OntologyQuestion {
+  question_id: string;
+  target_term: string;
+  question: string;
+  reason: string;
+  answer_type: "single_select" | "multi_select" | "text";
+  options: string[];
+  priority: number;
+}
+
+export interface OntologyVersionPayload {
+  ontology_version_id: string;
+  version_label: string;
+  status: string;
+  is_base: boolean;
+  graph: OntologyGraphPayload;
+  ontology: Record<string, any>;
+}
+
+export interface StartOntologyEnrichmentPayload {
+  session_id: string;
+  ontology_version_id: string;
+  initial_message: string;
+}
+
+export interface EnrichmentChatPayload {
+  session_id: string;
+  assistant_message: string;
+  extracted_updates: Record<string, any>;
+  chat_history: Array<{ role: string; content: string }>;
+}
+
 export interface DatabaseSchema {
   tables: {
     name: string;
@@ -2085,6 +2139,124 @@ export const getDatabaseDSGraph = async (
         code: "FETCH_DS_GRAPH_FAILED",
         message: error.message || "Failed to fetch datasource graph",
       },
+    };
+  }
+};
+
+export const bootstrapOntology = async (
+  connectionId: string
+): Promise<ApiResponse<OntologyVersionPayload>> => {
+  try {
+    const response = await apiRequest<OntologyVersionPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/bootstrap`,
+      { method: "POST" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "BOOTSTRAP_ONTOLOGY_FAILED", message: error.message || "Failed to bootstrap ontology" },
+    };
+  }
+};
+
+export const getLatestOntology = async (
+  connectionId: string
+): Promise<ApiResponse<OntologyVersionPayload>> => {
+  try {
+    const response = await apiRequest<OntologyVersionPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/latest`,
+      { method: "GET" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GET_LATEST_ONTOLOGY_FAILED", message: error.message || "Failed to fetch latest ontology" },
+    };
+  }
+};
+
+export const downloadLatestOntologyTTL = async (connectionId: string): Promise<ApiResponse<string>> => {
+  try {
+    const token = localStorage.getItem('vizai_access_token');
+    const url = `${API_BASE_URL}/api/v1/backend/connections/${connectionId}/ontology/latest.ttl`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "include",
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || "Failed to fetch ontology TTL");
+    }
+    const ttl = await response.text();
+    return { success: true, data: ttl };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "DOWNLOAD_ONTOLOGY_TTL_FAILED", message: error.message || "Failed to download ontology TTL" },
+    };
+  }
+};
+
+export const startOntologyEnrichment = async (
+  connectionId: string
+): Promise<ApiResponse<StartOntologyEnrichmentPayload>> => {
+  try {
+    const response = await apiRequest<StartOntologyEnrichmentPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/enrichment/start`,
+      { method: "POST" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "START_ONTOLOGY_ENRICHMENT_FAILED", message: error.message || "Failed to start ontology enrichment" },
+    };
+  }
+};
+
+export const applyOntologyEnrichment = async (
+  connectionId: string,
+  sessionId: string,
+  answers: Array<{ question_id: string; answer: string | string[] }>
+): Promise<ApiResponse<OntologyVersionPayload>> => {
+  try {
+    const response = await apiRequest<OntologyVersionPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/enrichment/${sessionId}/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify({ answers }),
+      }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "APPLY_ONTOLOGY_ENRICHMENT_FAILED", message: error.message || "Failed to apply ontology enrichment" },
+    };
+  }
+};
+
+export const sendOntologyEnrichmentChat = async (
+  connectionId: string,
+  sessionId: string,
+  message: string
+): Promise<ApiResponse<EnrichmentChatPayload>> => {
+  try {
+    const response = await apiRequest<EnrichmentChatPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/enrichment/${sessionId}/chat`,
+      {
+        method: "POST",
+        body: JSON.stringify({ message }),
+      }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "ONTOLOGY_ENRICHMENT_CHAT_FAILED", message: error.message || "Failed to send enrichment message" },
     };
   }
 };
