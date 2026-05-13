@@ -68,7 +68,7 @@ export function DatabaseConnectionFlow({ projectId, onComplete, onCancel }: Data
               <div className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center bg-gradient-to-r from-primary to-accent text-white shadow-lg">
                 <Database className="w-4 h-4 md:w-5 md:h-5" />
               </div>
-              <p className="text-xs text-foreground hidden md:block">Connect Database</p>
+              <p className="text-xs text-foreground hidden md:block">Connect Datasource</p>
             </div>
           </div>
         </div>
