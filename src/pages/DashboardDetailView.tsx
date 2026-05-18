@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2, Calendar as CalendarIcon, Users } from "lucide-react";
+import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2, Calendar as CalendarIcon, Link2, Globe } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -18,20 +18,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../components/ui/dialog";
-import { Checkbox } from "../components/ui/checkbox";
-import { Label } from "../components/ui/label";
 import { toast } from "sonner";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { getDashboardCharts, getChartData, deleteChart, getTeamMembers, addUserToDashboard, type ChartData, type TeamMember } from "../services/api";
+import { getDashboardCharts, getChartData, deleteChart, type ChartData } from "../services/api";
+import { ShareLinkModal } from "../components/features/dashboards/ShareLinkModal";
+import { AllowedDomainsSection } from "../components/features/dashboards/AllowedDomainsSection";
 
 // Custom styles for date picker to hide default clear button
 if (typeof document !== 'undefined') {
@@ -116,12 +108,9 @@ export function DashboardDetailView({
   const [chartDateRanges, setChartDateRanges] = useState<Record<string, { startDate: Date | null; endDate: Date | null }>>({});
   const [openDatePicker, setOpenDatePicker] = useState<string | null>(null);
   
-  // Member addition state
-  const [addMemberDialogOpen, setAddMemberDialogOpen] = useState(false);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [isLoadingMembers, setIsLoadingMembers] = useState(false);
-  const [isAddingMembers, setIsAddingMembers] = useState(false);
+  // Share link modal state
+  const [shareLinkModalOpen, setShareLinkModalOpen] = useState(false);
+  const [allowedDomainsCount, setAllowedDomainsCount] = useState(0);
   const lastRefreshTriggerRef = useRef<number>(0);
 
   // Helper to format date as YYYY-MM-DD for API calls
@@ -203,78 +192,7 @@ export function DashboardDetailView({
     }
   };
 
-  // Fetch team members for adding to dashboard
-  const fetchTeamMembers = useCallback(async () => {
-    if (!_projectId) {
-      toast.error("Project ID is required to add members");
-      return;
-    }
 
-    setIsLoadingMembers(true);
-    try {
-      const response = await getTeamMembers(String(_projectId));
-      if (response.success && response.data) {
-        setTeamMembers(response.data);
-      } else {
-        toast.error(response.error?.message || "Failed to load team members");
-        setTeamMembers([]);
-      }
-    } catch (error: any) {
-      toast.error(error.message || "An error occurred while fetching team members");
-      setTeamMembers([]);
-    } finally {
-      setIsLoadingMembers(false);
-    }
-  }, [_projectId]);
-
-  // Handle opening add member dialog
-  const handleOpenAddMemberDialog = () => {
-    setSelectedUserIds([]);
-    setAddMemberDialogOpen(true);
-    fetchTeamMembers();
-  };
-
-  // Handle adding users to dashboard
-  const handleAddMembers = async () => {
-    if (!_projectId) {
-      toast.error("Project ID is required");
-      return;
-    }
-
-    if (selectedUserIds.length === 0) {
-      toast.error("Please select at least one user");
-      return;
-    }
-
-    setIsAddingMembers(true);
-    try {
-      const response = await addUserToDashboard(String(_projectId), {
-        user_ids: selectedUserIds,
-        dashboard_id: dashboardId,
-      });
-
-      if (response.success) {
-        toast.success(`Successfully added ${selectedUserIds.length} user(s) to dashboard`);
-        setAddMemberDialogOpen(false);
-        setSelectedUserIds([]);
-      } else {
-        toast.error(response.error?.message || "Failed to add users to dashboard");
-      }
-    } catch (error: any) {
-      toast.error(error.message || "An error occurred while adding users");
-    } finally {
-      setIsAddingMembers(false);
-    }
-  };
-
-  // Toggle user selection
-  const toggleUserSelection = (userId: string) => {
-    setSelectedUserIds(prev => 
-      prev.includes(userId)
-        ? prev.filter(id => id !== userId)
-        : [...prev, userId]
-    );
-  };
 
   // Fetch charts for the dashboard
   const fetchDashboardCharts = useCallback(async () => {
@@ -587,14 +505,41 @@ export function DashboardDetailView({
           </div>
           
           <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              onClick={handleOpenAddMemberDialog}
-              className="border-border"
-            >
-              <Users className="w-4 h-4 mr-2" />
-              Add Members
-            </Button>
+            {/* Allowed Domains */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Globe className="w-3.5 h-3.5" />
+                Domains:
+              </span>
+              <AllowedDomainsSection
+                dashboardId={dashboardId}
+                onDomainsChanged={setAllowedDomainsCount}
+              />
+            </div>
+
+            <div className="w-px h-6 bg-border" />
+
+            <div className="relative group">
+              <Button
+                id="create-shareable-link-btn"
+                variant="outline"
+                onClick={() => {
+                  if (allowedDomainsCount === 0) return;
+                  setShareLinkModalOpen(true);
+                  console.log(`[EMBED][STEP 6] Shareable link requested — dashboard ${dashboardId}, allowed domains: ${allowedDomainsCount}`);
+                }}
+                className="border-border"
+                disabled={allowedDomainsCount === 0}
+              >
+                <Link2 className="w-4 h-4 mr-2" />
+                Create shareable link
+              </Button>
+              {allowedDomainsCount === 0 && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-popover border border-border rounded-md shadow-lg text-xs text-muted-foreground whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                  Add at least one allowed domain first
+                </div>
+              )}
+            </div>
             <GradientButton 
               onClick={() => {
                 if (onOpenAIAssistant) {
@@ -827,91 +772,13 @@ export function DashboardDetailView({
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Add Members Dialog */}
-        <Dialog open={addMemberDialogOpen} onOpenChange={setAddMemberDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add Members to Dashboard</DialogTitle>
-              <DialogDescription>
-                Select team members to add to this dashboard. Only users with a role in this project can be added.
-              </DialogDescription>
-            </DialogHeader>
-            
-            <div className="py-4">
-              {isLoadingMembers ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                  <span className="ml-3 text-muted-foreground">Loading team members...</span>
-                </div>
-              ) : teamMembers.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-muted-foreground">No team members found in this project.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {teamMembers.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                    >
-                      <Checkbox
-                        id={`member-${member.id}`}
-                        checked={selectedUserIds.includes(member.id)}
-                        onCheckedChange={() => toggleUserSelection(member.id)}
-                      />
-                      <Label
-                        htmlFor={`member-${member.id}`}
-                        className="flex-1 cursor-pointer flex items-center justify-between"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
-                            <span className="text-sm font-medium text-foreground">
-                              {member.name.charAt(0).toUpperCase()}
-                            </span>
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-foreground">{member.name}</p>
-                            <p className="text-xs text-muted-foreground">{member.email}</p>
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="ml-2">
-                          {member.role}
-                        </Badge>
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setAddMemberDialogOpen(false);
-                  setSelectedUserIds([]);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleAddMembers}
-                disabled={selectedUserIds.length === 0 || isAddingMembers || isLoadingMembers}
-              >
-                {isAddingMembers ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Adding...
-                  </>
-                ) : (
-                  <>
-                    Add {selectedUserIds.length > 0 ? `${selectedUserIds.length} ` : ''}Member{selectedUserIds.length !== 1 ? 's' : ''}
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {/* Share Link Modal */}
+        <ShareLinkModal
+          open={shareLinkModalOpen}
+          onOpenChange={setShareLinkModalOpen}
+          dashboardId={dashboardId}
+          dashboardName={dashboardName}
+        />
       </div>
     </div>
   );

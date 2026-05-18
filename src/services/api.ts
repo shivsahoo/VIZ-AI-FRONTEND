@@ -3152,3 +3152,310 @@ export const deleteHomeInsight = async (insightId: string): Promise<ApiResponse<
     };
   }
 };
+
+// ============================================================================
+// SHARE TOKEN / EMBED
+// ============================================================================
+
+export interface ShareTokenDetail {
+  token_id: string;
+  dashboard_id: string;
+  embed_url: string;
+  iframe_snippet: string;
+  is_active: boolean;
+  created_at: string;
+  expires_at: string | null;
+  access_count: number;
+  allowed_domains_snapshot: string[] | null;
+}
+
+/**
+ * Create or retrieve a share token for a dashboard
+ */
+export const createShareToken = async (
+  dashboardId: string,
+  expiresInDays: number | null = null
+): Promise<ApiResponse<ShareTokenDetail>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      token: ShareTokenDetail;
+    }>(`/api/v1/backend/dashboards/${dashboardId}/share-token`, {
+      method: 'POST',
+      body: JSON.stringify({ expires_in_days: expiresInDays }),
+    });
+
+    return {
+      success: true,
+      data: response.token,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'CREATE_SHARE_TOKEN_FAILED',
+        message: error.message || 'Failed to create share token',
+      },
+    };
+  }
+};
+
+/**
+ * Get the existing active share token for a dashboard
+ */
+export const getShareToken = async (
+  dashboardId: string
+): Promise<ApiResponse<ShareTokenDetail | null>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      token: ShareTokenDetail | null;
+    }>(`/api/v1/backend/dashboards/${dashboardId}/share-token`);
+
+    return {
+      success: true,
+      data: response.token,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GET_SHARE_TOKEN_FAILED',
+        message: error.message || 'Failed to get share token',
+      },
+    };
+  }
+};
+
+/**
+ * Revoke the active share token for a dashboard
+ */
+export const revokeShareToken = async (
+  dashboardId: string
+): Promise<ApiResponse<{ message: string; dashboard_id: string }>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      dashboard_id: string;
+    }>(`/api/v1/backend/dashboards/${dashboardId}/share-token`, {
+      method: 'DELETE',
+    });
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'REVOKE_SHARE_TOKEN_FAILED',
+        message: error.message || 'Failed to revoke share token',
+      },
+    };
+  }
+};
+
+
+// ============================================================================
+// APP REGISTRATION
+// ============================================================================
+
+export interface AppDetail {
+  app_id: string;
+  company_name: string;
+  domain_url: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+/**
+ * Create a new app registration
+ */
+export const createApp = async (
+  companyName: string,
+  domainUrl: string
+): Promise<ApiResponse<AppDetail>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      app: AppDetail;
+    }>('/api/v1/apps', {
+      method: 'POST',
+      body: JSON.stringify({
+        company_name: companyName,
+        domain_url: domainUrl,
+      }),
+    });
+
+    return {
+      success: true,
+      data: response.app,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'CREATE_APP_FAILED',
+        message: error.message || 'Failed to create app',
+      },
+    };
+  }
+};
+
+/**
+ * List all active apps for the current user
+ */
+export const listApps = async (): Promise<ApiResponse<AppDetail[]>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      apps: AppDetail[];
+    }>('/api/v1/apps');
+
+    return {
+      success: true,
+      data: response.apps,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'LIST_APPS_FAILED',
+        message: error.message || 'Failed to list apps',
+      },
+    };
+  }
+};
+
+/**
+ * Soft-delete an app
+ */
+export const deleteApp = async (
+  appId: string
+): Promise<ApiResponse<{ message: string; app_id: string }>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      app_id: string;
+    }>(`/api/v1/apps/${appId}`, {
+      method: 'DELETE',
+    });
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'DELETE_APP_FAILED',
+        message: error.message || 'Failed to delete app',
+      },
+    };
+  }
+};
+
+
+// ============================================================================
+// DASHBOARD ALLOWED DOMAINS
+// ============================================================================
+
+export interface AllowedDomainDetail {
+  app_id: string;
+  company_name: string;
+  domain_url: string;
+  added_at: string;
+}
+
+/**
+ * Set allowed domains for a dashboard (replaces existing)
+ */
+export const setAllowedDomains = async (
+  dashboardId: string,
+  appIds: string[]
+): Promise<ApiResponse<AllowedDomainDetail[]>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      dashboard_id: string;
+      allowed_domains: AllowedDomainDetail[];
+    }>(`/api/v1/dashboards/${dashboardId}/allowed-domains`, {
+      method: 'POST',
+      body: JSON.stringify({ app_ids: appIds }),
+    });
+
+    return {
+      success: true,
+      data: response.allowed_domains,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'SET_ALLOWED_DOMAINS_FAILED',
+        message: error.message || 'Failed to set allowed domains',
+      },
+    };
+  }
+};
+
+/**
+ * Get allowed domains for a dashboard
+ */
+export const getAllowedDomains = async (
+  dashboardId: string
+): Promise<ApiResponse<AllowedDomainDetail[]>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      dashboard_id: string;
+      allowed_domains: AllowedDomainDetail[];
+    }>(`/api/v1/dashboards/${dashboardId}/allowed-domains`);
+
+    return {
+      success: true,
+      data: response.allowed_domains,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GET_ALLOWED_DOMAINS_FAILED',
+        message: error.message || 'Failed to get allowed domains',
+      },
+    };
+  }
+};
+
+/**
+ * Remove an allowed domain from a dashboard
+ */
+export const removeAllowedDomain = async (
+  dashboardId: string,
+  appId: string
+): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      dashboard_id: string;
+      app_id: string;
+    }>(`/api/v1/dashboards/${dashboardId}/allowed-domains/${appId}`, {
+      method: 'DELETE',
+    });
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'REMOVE_ALLOWED_DOMAIN_FAILED',
+        message: error.message || 'Failed to remove allowed domain',
+      },
+    };
+  }
+};
