@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  BookOpen,
   ChevronRight,
+  Clock,
   Database,
+  Filter,
   GitFork,
   KeyRound,
   LayoutGrid,
@@ -12,6 +15,8 @@ import {
   Search,
   Shuffle,
   Star,
+  Tag,
+  TrendingUp,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -23,6 +28,7 @@ interface OntologyViewerProps {
 
 type Direction = "both" | "outgoing" | "incoming";
 type ActiveTab = "overview" | "properties";
+type GlobalTab = "graph" | "business";
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 3;
@@ -57,6 +63,16 @@ export function OntologyViewer({ ontology }: OntologyViewerProps) {
   const { graph, version_label, status } = ontology;
   const nodes = graph.nodes;
   const edges = graph.edges;
+
+  // Pull business context from the raw ontology JSON
+  const rawOntology = ontology.ontology ?? {};
+  const metrics: Array<{ name: string; description?: string; formula?: string }> =
+    Array.isArray(rawOntology.metrics) ? rawOntology.metrics : [];
+  const rules: Record<string, any> = rawOntology.rules && typeof rawOntology.rules === "object" ? rawOntology.rules : {};
+  const aliases: Array<{ term: string; maps_to: string }> =
+    Array.isArray(rawOntology.aliases) ? rawOntology.aliases : [];
+
+  const [globalTab, setGlobalTab] = useState<GlobalTab>("graph");
 
   const [selectedNodeId, setSelectedNodeId] = useState<string>(nodes[0]?.id ?? "");
   const [direction, setDirection] = useState<Direction>("both");
@@ -187,8 +203,185 @@ export function OntologyViewer({ ontology }: OntologyViewerProps) {
   const totalNodes = nodes.length;
   const totalEdges = edges.length;
 
+  // A rule key counts only if it has a meaningful (non-empty) value
+  const hasRealValue = (v: unknown): boolean => {
+    if (v === null || v === undefined || v === false || v === "") return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === "object") return Object.keys(v as object).length > 0;
+    return true;
+  };
+  const meaningfulRuleKeys = Object.keys(rules).filter((k) => hasRealValue(rules[k]));
+  const businessContextCount = metrics.length + meaningfulRuleKeys.length + aliases.length;
+  const hasBusinessContext = businessContextCount > 0;
+
   return (
-    <div className="flex h-full min-h-0 overflow-hidden rounded-lg border border-border bg-card">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden rounded-lg border border-border bg-card">
+
+      {/* Global tab bar */}
+      <div className="flex items-center border-b border-border shrink-0 bg-card px-2 gap-1 pt-1">
+        <button
+          onClick={() => setGlobalTab("graph")}
+          className={`flex items-center gap-1.5 px-3 py-2 text-xs rounded-t border-b-2 transition-colors ${
+            globalTab === "graph"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <GitFork className="w-3.5 h-3.5" />
+          Schema Graph
+        </button>
+        <button
+          onClick={() => setGlobalTab("business")}
+          className={`flex items-center gap-1.5 px-3 py-2 text-xs rounded-t border-b-2 transition-colors ${
+            globalTab === "business"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5" />
+          Business Context
+          {hasBusinessContext && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-primary/20 text-primary text-[9px] font-semibold">
+              {businessContextCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Business Context panel */}
+      {globalTab === "business" && (
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-5">
+          {!hasBusinessContext && (
+            <div className="flex flex-col items-center justify-center h-40 text-center">
+              <BookOpen className="w-8 h-8 text-muted-foreground/40 mb-3" />
+              <p className="text-sm font-medium text-muted-foreground">No business context yet</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                Use the Enrich Datasource chat to define metrics, granularity, aliases, and rules.
+              </p>
+            </div>
+          )}
+
+          {/* Metrics */}
+          {metrics.length > 0 && (
+            <div>
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground mb-2">
+                <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                Business Metrics ({metrics.length})
+              </p>
+              <div className="space-y-2">
+                {metrics.map((m, i) => (
+                  <div key={i} className="rounded-md border border-border/60 bg-muted/20 p-3">
+                    <p className="text-xs font-semibold text-foreground mb-0.5">{m.name}</p>
+                    {m.description && (
+                      <p className="text-[11px] text-muted-foreground mb-1.5">{m.description}</p>
+                    )}
+                    {m.formula && (
+                      <code className="block text-[11px] bg-[#0a0f1a] border border-border/40 rounded px-2 py-1.5 text-emerald-400 font-mono break-all">
+                        {m.formula}
+                      </code>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Rules */}
+          {Object.keys(rules).length > 0 && (
+            <div>
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground mb-2">
+                <Filter className="w-3.5 h-3.5 text-sky-400" />
+                Business Rules
+              </p>
+              <div className="rounded-md border border-border/60 bg-muted/20 divide-y divide-border/40">
+                {rules.default_time_granularity && (
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span className="text-xs text-muted-foreground">Default Granularity</span>
+                    </div>
+                    <span className="text-xs font-semibold text-sky-300 capitalize px-2 py-0.5 bg-sky-400/10 border border-sky-400/20 rounded">
+                      {rules.default_time_granularity}
+                    </span>
+                  </div>
+                )}
+                {rules.default_time_dimension && (
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span className="text-xs text-muted-foreground">Default Date Column</span>
+                    </div>
+                    <code className="text-[11px] font-mono text-sky-300 px-2 py-0.5 bg-sky-400/10 border border-sky-400/20 rounded">
+                      {rules.default_time_dimension}
+                    </code>
+                  </div>
+                )}
+                {rules.status_success_values && Array.isArray(rules.status_success_values) && rules.status_success_values.length > 0 && (
+                  <div className="px-3 py-2">
+                    <span className="text-xs text-muted-foreground">Success Status Values</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {rules.status_success_values.map((v: string, i: number) => (
+                        <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-400/10 border border-emerald-400/20 text-emerald-300">
+                          {v}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {rules.status_failure_values && Array.isArray(rules.status_failure_values) && rules.status_failure_values.length > 0 && (
+                  <div className="px-3 py-2">
+                    <span className="text-xs text-muted-foreground">Failure Status Values</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {rules.status_failure_values.map((v: string, i: number) => (
+                        <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-red-400/10 border border-red-400/20 text-red-300">
+                          {v}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {rules.default_filters && typeof rules.default_filters === "object" && Object.keys(rules.default_filters).length > 0 && (
+                  <div className="px-3 py-2">
+                    <span className="text-xs text-muted-foreground">Default Filters</span>
+                    <div className="mt-1 space-y-0.5">
+                      {Object.entries(rules.default_filters).map(([col, val]) => (
+                        <div key={col} className="flex gap-1.5 text-[11px]">
+                          <code className="text-sky-300 font-mono">{col}</code>
+                          <span className="text-muted-foreground">=</span>
+                          <code className="text-amber-300 font-mono">{String(val)}</code>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Aliases */}
+          {aliases.length > 0 && (
+            <div>
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground mb-2">
+                <Tag className="w-3.5 h-3.5 text-violet-400" />
+                Business Term Aliases ({aliases.length})
+              </p>
+              <div className="rounded-md border border-border/60 bg-muted/20 divide-y divide-border/40">
+                {aliases.map((a, i) => (
+                  <div key={i} className="flex items-center gap-2 px-3 py-2">
+                    <span className="text-xs font-medium text-violet-300">"{a.term}"</span>
+                    <span className="text-[10px] text-muted-foreground">→</span>
+                    <code className="text-[11px] font-mono text-foreground">{a.maps_to}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Graph view */}
+      {globalTab === "graph" && (
+    <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* ──────────── LEFT: Entity List ──────────── */}
       <div className="w-52 shrink-0 flex flex-col border-r border-border bg-card overflow-hidden">
         <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
@@ -688,6 +881,8 @@ export function OntologyViewer({ ontology }: OntologyViewerProps) {
           </div>
         )}
       </div>
+    </div>
+      )}
     </div>
   );
 }

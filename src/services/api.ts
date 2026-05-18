@@ -2228,7 +2228,8 @@ export const applyOntologyEnrichment = async (
       {
         method: "POST",
         body: JSON.stringify({ answers }),
-      }
+      },
+      120000 // 120 seconds — LLM enrichment + DB save can take up to 30s
     );
     return { success: true, data: response };
   } catch (error: any) {

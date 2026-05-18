@@ -1,5 +1,5 @@
-import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye, BarChart3, LayoutDashboard, Sparkles } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye, TrendingUp, Clock, Tag, Filter } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -35,6 +35,7 @@ import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
 import { DSGraphViewer } from "../components/features/databases/DSGraphViewer";
 import { OntologyViewer } from "../components/features/databases/OntologyViewer";
+import { OnboardingTour, type TourOutcome } from "../components/shared/OnboardingTour";
 
 import {
   getDatabases,
@@ -91,6 +92,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   const [enrichmentInput, setEnrichmentInput] = useState("");
   const [enrichmentChat, setEnrichmentChat] = useState<Array<{ role: "assistant" | "user"; text: string }>>([]);
   const [enrichmentUpdates, setEnrichmentUpdates] = useState<Record<string, any>>({});
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   // Edit form state (for editing existing connections)
   const [connectionName, setConnectionName] = useState("");
@@ -211,7 +213,10 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
         : null);
 
     if (connectedDb) {
-      await handleViewDSGraph(connectedDb, { startTour: true });
+      // Database-driven tour trigger: the refreshed list already includes the
+      // just-added connection, so length === 1 means this was the first one.
+      const isFirstConnection = refreshedDatabases.length <= 1;
+      await handleViewDSGraph(connectedDb, { startTour: isFirstConnection });
     }
   };
 
@@ -233,9 +238,9 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
       const response = await getDatabaseDSGraph(db.id);
       if (response.success && response.data) {
         setCurrentGraph(response.data);
-        // Trigger tour only when connection flow explicitly requests it
-        const tourCompleted = localStorage.getItem('vizai_tour_datasource_graph_completed');
-        if (options?.startTour && tourCompleted !== 'true') {
+        // Start the tour only when the caller explicitly requests it
+        // (determined by connection count in handleConnectionFlowComplete)
+        if (options?.startTour) {
           setShowTour(true);
         }
       } else {
@@ -324,6 +329,13 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
     }
   };
 
+  // Auto-scroll chat to bottom whenever a new message is added
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [enrichmentChat]);
+
   const handleSendEnrichmentMessage = async () => {
     if (!selectedDatabase || !enrichmentSessionId) return;
     const message = enrichmentInput.trim();
@@ -337,7 +349,29 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
         toast.error(response.error?.message || "Unable to send message");
         return;
       }
-      setEnrichmentUpdates(response.data.extracted_updates || {});
+      // Deep-merge new extracted_updates into accumulated updates.
+      // When the LLM is asking a clarification question (needs_clarification=true)
+      // it intentionally leaves incomplete/empty metrics out of extracted_updates,
+      // so we skip the merge in that case to avoid writing partial data.
+      const needsClarification = response.data.needs_clarification === true;
+      if (!needsClarification) {
+        const incoming = response.data.extracted_updates || {};
+        setEnrichmentUpdates((prev) => {
+          const next = { ...prev };
+          for (const [key, value] of Object.entries(incoming)) {
+            if (key in next && typeof next[key] === "object" && !Array.isArray(next[key]) && typeof value === "object" && !Array.isArray(value)) {
+              next[key] = { ...(next[key] as Record<string, any>), ...(value as Record<string, any>) };
+            } else if (key in next && Array.isArray(next[key]) && Array.isArray(value)) {
+              const existingTerms = new Set((next[key] as any[]).filter(i => i?.term).map((i: any) => i.term));
+              const newItems = (value as any[]).filter(i => !existingTerms.has(i?.term));
+              next[key] = [...(next[key] as any[]), ...newItems];
+            } else {
+              next[key] = value;
+            }
+          }
+          return next;
+        });
+      }
       setEnrichmentChat((prev) => [
         ...prev,
         {
@@ -356,18 +390,38 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
     if (!selectedDatabase || !enrichmentSessionId) return;
     setIsEnriching(true);
     try {
-      const answers = Object.entries(enrichmentUpdates).map(([question_id, answer]) => ({
-        question_id,
-        answer: Array.isArray(answer) ? answer : String(answer ?? ""),
-      }));
-      const response = await applyOntologyEnrichment(selectedDatabase.id, enrichmentSessionId, answers);
+      // Send empty answers — the backend uses the session's accumulated updates from chat
+      // (stored in session.answers_json.updates) as the authoritative source.
+      // Sending enrichmentUpdates as flat strings ([object Object]) overwrites the
+      // correctly-typed nested dicts the backend already has from the chat phase.
+      const response = await applyOntologyEnrichment(selectedDatabase.id, enrichmentSessionId, []);
       if (!response.success || !response.data) {
         toast.error(response.error?.message || "Unable to apply enrichment");
         return;
       }
       setCurrentOntology(response.data);
       setEnrichChatOpen(false);
-      toast.success("Ontology enriched successfully");
+
+      // Surface any metric formula validation issues so the user knows their
+      // business metric was rejected because it referenced a non-existent column.
+      const metricWarnings = (response.data as any)?.metric_warnings as
+        | Array<{ metric_name: string; missing_columns: string[]; formula: string }>
+        | undefined;
+      if (metricWarnings && metricWarnings.length > 0) {
+        for (const w of metricWarnings) {
+          toast.error(
+            `Metric "${w.metric_name}" was dropped: column(s) ${w.missing_columns
+              .map((c) => `"${c}"`)
+              .join(", ")} do not exist in your schema. Formula: ${w.formula}`,
+            { duration: 12000 }
+          );
+        }
+        toast.success(
+          `Ontology saved with ${metricWarnings.length} metric(s) skipped. Re-enrich with valid column names to include them.`
+        );
+      } else {
+        toast.success("Ontology enriched successfully");
+      }
     } catch (error: any) {
       toast.error(error.message || "Unable to apply enrichment");
     } finally {
@@ -826,6 +880,23 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
             ) : (
               <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Graph not available.</div>
             )}
+
+            {/* Guided onboarding tour – rendered inside the dialog so
+                react-joyride's portal sits above it */}
+            <OnboardingTour
+              run={showTour}
+              onTourEnd={(outcome: TourOutcome) => {
+                setShowTour(false);
+                if (outcome === 'skipped') {
+                  // Fully reset: close the DS Graph dialog to restore
+                  // the pre-tour state (databases list view)
+                  setDsGraphDialogOpen(false);
+                  setCurrentGraph(null);
+                  setSelectedDatabase(null);
+                }
+                // 'finished' → keep DS Graph dialog open, no extra action
+              }}
+            />
           </DialogContent>
         </Dialog>
 
@@ -878,7 +949,10 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
         </Dialog>
 
         <Dialog open={enrichChatOpen} onOpenChange={setEnrichChatOpen}>
-          <DialogContent className="sm:!max-w-3xl !w-[78vw] h-[78vh] max-h-[78vh] flex flex-col">
+          <DialogContent
+            className="!w-[98vw] !max-w-[98vw] sm:!max-w-[98vw] h-[90vh] max-h-[90vh] flex flex-col"
+            style={{ width: "98vw", maxWidth: "98vw", height: "90vh", maxHeight: "90vh" }}
+          >
             <DialogHeader>
               <DialogTitle>Ontology Enrichment Chat</DialogTitle>
               <DialogDescription>
@@ -886,40 +960,139 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
-              {enrichmentChat.map((msg, index) => (
-                <div
-                  key={`${msg.role}-${index}`}
-                  className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
-                    msg.role === "assistant"
-                      ? "bg-muted/40 border border-border mr-10"
-                      : "bg-primary/10 border border-primary/20 ml-10"
-                  }`}
-                >
-                  {msg.text}
+            <div className="flex flex-1 min-h-0 gap-3 overflow-hidden">
+              {/* Chat area */}
+              <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-2">
+                <div ref={chatScrollRef} className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+                  {enrichmentChat.map((msg, index) => (
+                    <div
+                      key={`${msg.role}-${index}`}
+                      className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
+                        msg.role === "assistant"
+                          ? "bg-muted/40 border border-border mr-10"
+                          : "bg-primary/10 border border-primary/20 ml-10"
+                      }`}
+                    >
+                      {msg.text}
+                    </div>
+                  ))}
                 </div>
-              ))}
+
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <Input
+                    placeholder="Type your answer or business rule..."
+                    value={enrichmentInput}
+                    onChange={(e) => setEnrichmentInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleSendEnrichmentMessage();
+                      }
+                    }}
+                    disabled={isEnriching}
+                  />
+                  <Button onClick={handleSendEnrichmentMessage} disabled={isEnriching || !enrichmentInput.trim()}>
+                    Send
+                  </Button>
+                </div>
+              </div>
+
+              {/* Captured so far panel */}
+              <div className="w-80 shrink-0 flex flex-col rounded-lg border border-border bg-muted/20 overflow-hidden">
+                <div className="px-3 py-2.5 border-b border-border shrink-0">
+                  <p className="text-xs font-semibold text-foreground">Captured so far</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Updated as you chat</p>
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-4">
+                  {Object.keys(enrichmentUpdates).length === 0 && (
+                    <p className="text-[11px] text-muted-foreground text-center pt-4">
+                      Nothing captured yet. Start chatting to define metrics, granularity, and rules.
+                    </p>
+                  )}
+
+                  {/* Metrics */}
+                  {enrichmentUpdates.metrics && Object.keys(enrichmentUpdates.metrics).length > 0 && (
+                    <div>
+                      <p className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 mb-1.5">
+                        <TrendingUp className="w-3 h-3" /> Metrics
+                      </p>
+                      <div className="space-y-2">
+                        {Object.entries(enrichmentUpdates.metrics).map(([name, val]: [string, any]) => (
+                          <div key={name} className="rounded border border-border/50 bg-background/40 p-2">
+                            <p className="text-[11px] font-semibold text-foreground">{name}</p>
+                            {val?.formula && (
+                              <code className="block text-[10px] text-emerald-400 font-mono mt-1 break-all">
+                                {val.formula}
+                              </code>
+                            )}
+                            {typeof val === "string" && (
+                              <p className="text-[10px] text-muted-foreground mt-0.5">{val}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Rules */}
+                  {enrichmentUpdates.rules && Object.keys(enrichmentUpdates.rules).length > 0 && (
+                    <div>
+                      <p className="flex items-center gap-1 text-[10px] font-semibold text-sky-400 mb-1.5">
+                        <Clock className="w-3 h-3" /> Rules
+                      </p>
+                      <div className="rounded border border-border/50 bg-background/40 divide-y divide-border/40">
+                        {enrichmentUpdates.rules.default_time_granularity && (
+                          <div className="flex items-center justify-between px-2 py-1.5">
+                            <span className="text-[10px] text-muted-foreground">Granularity</span>
+                            <span className="text-[10px] font-semibold text-sky-300 capitalize">
+                              {enrichmentUpdates.rules.default_time_granularity}
+                            </span>
+                          </div>
+                        )}
+                        {enrichmentUpdates.rules.default_time_dimension && (
+                          <div className="flex items-center justify-between px-2 py-1.5">
+                            <span className="text-[10px] text-muted-foreground">Date Column</span>
+                            <code className="text-[10px] font-mono text-sky-300">
+                              {enrichmentUpdates.rules.default_time_dimension}
+                            </code>
+                          </div>
+                        )}
+                        {enrichmentUpdates.rules.status_success_values?.length > 0 && (
+                          <div className="px-2 py-1.5">
+                            <span className="text-[10px] text-muted-foreground">Success values</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {enrichmentUpdates.rules.status_success_values.map((v: string) => (
+                                <span key={v} className="text-[9px] px-1 py-0.5 rounded bg-emerald-400/10 text-emerald-300 border border-emerald-400/20">{v}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Aliases */}
+                  {enrichmentUpdates.aliases?.length > 0 && (
+                    <div>
+                      <p className="flex items-center gap-1 text-[10px] font-semibold text-violet-400 mb-1.5">
+                        <Tag className="w-3 h-3" /> Aliases
+                      </p>
+                      <div className="rounded border border-border/50 bg-background/40 divide-y divide-border/40">
+                        {enrichmentUpdates.aliases.map((a: any, i: number) => (
+                          <div key={i} className="flex items-center gap-1.5 px-2 py-1.5">
+                            <span className="text-[10px] text-violet-300">"{a.term}"</span>
+                            <span className="text-[9px] text-muted-foreground">→</span>
+                            <code className="text-[10px] font-mono text-foreground">{a.maps_to}</code>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-[1fr_auto] gap-2 pt-2">
-              <Input
-                placeholder="Type your answer or business rule..."
-                value={enrichmentInput}
-                onChange={(e) => setEnrichmentInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleSendEnrichmentMessage();
-                  }
-                }}
-                disabled={isEnriching}
-              />
-              <Button onClick={handleSendEnrichmentMessage} disabled={isEnriching || !enrichmentInput.trim()}>
-                Send
-              </Button>
-            </div>
-
-            <DialogFooter className="gap-2">
+            <DialogFooter className="gap-2 shrink-0">
               <Button variant="outline" onClick={() => setEnrichChatOpen(false)} disabled={isEnriching}>
                 Close
               </Button>
@@ -929,6 +1102,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
       </div>
     </div>
   );

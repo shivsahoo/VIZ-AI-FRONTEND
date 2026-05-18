@@ -114,10 +114,6 @@ export default function App() {
             role: response.data.role === 'admin' ? 'super_admin' : 'project_user', // Map role
           });
           setIsAuthenticated(true);
-          
-          // Check onboarding status
-          const hasCompletedOnboardingBefore = localStorage.getItem('vizai_onboarding_completed') === 'true';
-          setHasCompletedOnboarding(hasCompletedOnboardingBefore);
           setShowOnboarding(false);
           
           // Note: Project restoration will happen after projects are fetched
@@ -316,8 +312,6 @@ export default function App() {
   }) => {
     setShowOnboarding(false);
     setHasCompletedOnboarding(true);
-    // Mark onboarding as completed in localStorage
-    localStorage.setItem('vizai_onboarding_completed', 'true');
     // In production, you would save the project data to the backend here
     console.log("Project created:", projectData);
     
@@ -339,8 +333,6 @@ export default function App() {
   const handleOnboardingCancel = () => {
     setShowOnboarding(false);
     setHasCompletedOnboarding(true);
-    // Mark onboarding as completed to prevent showing it again
-    localStorage.setItem('vizai_onboarding_completed', 'true');
     setCurrentView('home');
     toast.info("Setup cancelled. You can create a project anytime from the home page.");
   };

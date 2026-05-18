@@ -956,8 +956,12 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         });
         setIsAwaitingClarification(false);
       } else {
+        // If the user previously generated charts in this session, pass the
+        // last known state so the backend can restore conversation history
+        // even if its in-memory session was lost (e.g. server restart).
         wsClient.chartCreation({
           ...payload,
+          ...(chartWorkflowState ? { existing_state: chartWorkflowState } : {}),
         });
       }
     } catch (error: any) {

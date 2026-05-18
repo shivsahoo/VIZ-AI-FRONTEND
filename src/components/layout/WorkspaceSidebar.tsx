@@ -35,6 +35,7 @@ export function WorkspaceSidebar({ activeTab, onTabChange, onOpenAIAssistant }: 
               <Tooltip key={item.id}>
                 <TooltipTrigger asChild>
                   <button
+                    id={item.id === 'charts' ? 'tour-sidebar-charts' : item.id === 'dashboards' ? 'tour-sidebar-dashboard' : undefined}
                     onClick={() => onTabChange(item.id)}
                     className={`
                       w-12 h-12 rounded-xl flex items-center justify-center transition-smooth relative group
