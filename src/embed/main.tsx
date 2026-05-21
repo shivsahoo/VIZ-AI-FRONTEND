@@ -22,6 +22,9 @@ function boot() {
       apiBase={config.apiBase}
       dashboardTitle={config.dashboardTitle}
       charts={config.charts}
+      initialAccessToken={config.accessToken}
+      initialRefreshToken={config.refreshToken}
+      initialExpiresIn={config.expiresIn}
     />,
   );
 }

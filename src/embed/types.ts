@@ -15,6 +15,12 @@ export interface VizAiEmbedConfig {
   dashboardTitle: string;
   charts: EmbedChartMeta[];
   assetsBase: string;
+  /** Short-lived access token for data requests */
+  accessToken?: string;
+  /** Refresh token to silently renew access tokens */
+  refreshToken?: string;
+  /** Access token TTL in seconds */
+  expiresIn?: number;
 }
 
 declare global {
@@ -33,4 +39,18 @@ export interface EmbedChartState {
   rows: Record<string, unknown>[] | null;
   isLoading: boolean;
   error: string | null;
+}
+
+/** Response shape from the dashboard metadata endpoint */
+export interface DashboardMetaResponse {
+  dashboard_title: string;
+  dashboard_id: string;
+  charts: EmbedChartMeta[];
+}
+
+/** Response shape from the token refresh endpoint */
+export interface TokenRefreshResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
 }

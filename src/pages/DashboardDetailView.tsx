@@ -90,13 +90,13 @@ const formatTimeAgo = (dateString: string): string => {
   return date.toLocaleDateString();
 };
 
-export function DashboardDetailView({ 
-  dashboardId, 
-  dashboardName, 
+export function DashboardDetailView({
+  dashboardId,
+  dashboardName,
   projectId: _projectId,
   onBack,
   onDelete: _onDelete,
-  onOpenAIAssistant, 
+  onOpenAIAssistant,
   onEditChart,
   refreshTrigger
 }: DashboardDetailViewProps) {
@@ -107,7 +107,7 @@ export function DashboardDetailView({
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [chartDateRanges, setChartDateRanges] = useState<Record<string, { startDate: Date | null; endDate: Date | null }>>({});
   const [openDatePicker, setOpenDatePicker] = useState<string | null>(null);
-  
+
   // Share link modal state
   const [shareLinkModalOpen, setShareLinkModalOpen] = useState(false);
   const [allowedDomainsCount, setAllowedDomainsCount] = useState(0);
@@ -148,7 +148,7 @@ export function DashboardDetailView({
     const dateRange = dateRangeOverride || chartDateRanges[chartKey];
 
     // Update chart loading state
-    setCharts(prev => prev.map(c => 
+    setCharts(prev => prev.map(c =>
       c.id === chart.id ? { ...c, isLoadingData: true } : c
     ));
 
@@ -163,8 +163,8 @@ export function DashboardDetailView({
         : undefined;
 
       const response = await getChartData(
-        chart.id, 
-        chart.databaseConnectionId, 
+        chart.id,
+        chart.databaseConnectionId,
         chart.query,
         fromDate,
         toDate,
@@ -172,20 +172,20 @@ export function DashboardDetailView({
         { xAxis: chart.xAxis ?? null, yAxis: chart.yAxis ?? null }
       );
       if (response.success && response.data) {
-        setCharts(prev => prev.map(c => 
+        setCharts(prev => prev.map(c =>
           c.id === chart.id ? { ...c, chartData: response.data, isLoadingData: false } : c
         ));
         return response.data;
       } else {
         toast.error(response.error?.message || "Failed to load chart data");
-        setCharts(prev => prev.map(c => 
+        setCharts(prev => prev.map(c =>
           c.id === chart.id ? { ...c, isLoadingData: false } : c
         ));
         return null;
       }
     } catch (error: any) {
       toast.error(error.message || "An error occurred while fetching chart data");
-      setCharts(prev => prev.map(c => 
+      setCharts(prev => prev.map(c =>
         c.id === chart.id ? { ...c, isLoadingData: false } : c
       ));
       return null;
@@ -228,10 +228,10 @@ export function DashboardDetailView({
           is_time_based: chart.is_time_based ?? false,
         }));
         setCharts(mappedCharts);
-        
+
         // Set last updated to the most recent chart's created_at
         if (mappedCharts.length > 0) {
-          const mostRecent = mappedCharts.reduce((latest, chart) => 
+          const mostRecent = mappedCharts.reduce((latest, chart) =>
             new Date(chart.created_at) > new Date(latest.created_at) ? chart : latest
           );
           setLastUpdated(formatTimeAgo(mostRecent.created_at));
@@ -295,7 +295,7 @@ export function DashboardDetailView({
 
     try {
       const response = await deleteChart(chartId, dashboardId);
-      
+
       if (response.success) {
         setCharts(prev => prev.filter(chart => chart.id !== chartId));
         toast.success(response.data?.message || `Chart removed from dashboard`);
@@ -322,9 +322,9 @@ export function DashboardDetailView({
       dashboardName: dashboardName,
       dataSource: chartData.databaseConnectionId || 'Unknown Data Source'
     };
-    
+
     togglePin(pinnedChartData);
-    
+
     if (isPinned(numericId)) {
       toast.success(`"${chartData.title}" unpinned from Home Dashboard`);
     } else {
@@ -456,7 +456,7 @@ export function DashboardDetailView({
 
     const metadataYAxis = chart.chartData?.metadata?.yAxis;
     const metadataXAxis = chart.chartData?.metadata?.xAxis;
-    
+
     return {
       data: inferredConfig.data,
       dataKeys: {
@@ -503,7 +503,7 @@ export function DashboardDetailView({
               </div>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-3">
             {/* Allowed Domains */}
             <div className="flex items-center gap-2">
@@ -540,7 +540,7 @@ export function DashboardDetailView({
                 </div>
               )}
             </div>
-            <GradientButton 
+            <GradientButton
               onClick={() => {
                 if (onOpenAIAssistant) {
                   onOpenAIAssistant();
@@ -595,7 +595,7 @@ export function DashboardDetailView({
                   <span className="text-muted-foreground">in this dashboard</span>
                 </div>
               </Card>
-              
+
               {/* Dynamic Chart Type Cards - Only show types that have charts */}
               {availableChartTypes.map((chartType) => {
                 const config = chartTypeConfig[chartType] || {
@@ -633,7 +633,7 @@ export function DashboardDetailView({
               <p className="text-muted-foreground mb-6 max-w-md">
                 Add charts to this dashboard to visualize your data
               </p>
-              <GradientButton 
+              <GradientButton
                 onClick={() => {
                   if (onOpenAIAssistant) {
                     onOpenAIAssistant();
@@ -661,11 +661,10 @@ export function DashboardDetailView({
                     <Button
                       variant="outline"
                       size="icon"
-                      className={`h-8 w-8 border-border ${
-                        isChartPinned
+                      className={`h-8 w-8 border-border ${isChartPinned
                           ? 'bg-primary/10 text-primary hover:bg-primary/20'
                           : 'hover:bg-muted'
-                      }`}
+                        }`}
                       onClick={() => handleTogglePin(chart)}
                       title={isChartPinned ? "Unpin from Home" : "Pin to Home"}
                     >
@@ -714,20 +713,20 @@ export function DashboardDetailView({
                       <span className="ml-2 text-sm text-muted-foreground">Loading chart data...</span>
                     </div>
                   ) : chartConfig.data.length > 0 ? (
-                      <ChartCard
-                        type={chartConfig.effectiveType}
-                        data={chartConfig.data}
-                        dataKeys={[
-                          chartConfig.dataKeys.primary,
-                          ...(chartConfig.dataKeys.secondary
-                            ? [chartConfig.dataKeys.secondary]
-                            : []),
-                        ]}
-                        xAxisKey={chartConfig.xAxisKey}
-                        axisConfig={chartConfig.axisConfig}
-                        height={300}
-                        showLegend={!!chartConfig.dataKeys.secondary && chartConfig.effectiveType !== 'pie'}
-                      />
+                    <ChartCard
+                      type={chartConfig.effectiveType}
+                      data={chartConfig.data}
+                      dataKeys={[
+                        chartConfig.dataKeys.primary,
+                        ...(chartConfig.dataKeys.secondary
+                          ? [chartConfig.dataKeys.secondary]
+                          : []),
+                      ]}
+                      xAxisKey={chartConfig.xAxisKey}
+                      axisConfig={chartConfig.axisConfig}
+                      height={300}
+                      showLegend={!!chartConfig.dataKeys.secondary && chartConfig.effectiveType !== 'pie'}
+                    />
                   ) : (
                     <div className="h-[300px] flex items-center justify-center border border-dashed border-border rounded-lg">
                       <div className="text-center">
@@ -756,7 +755,7 @@ export function DashboardDetailView({
             <AlertDialogHeader>
               <AlertDialogTitle>Remove Chart from Dashboard</AlertDialogTitle>
               <AlertDialogDescription>
-                Are you sure you want to remove "{chartToRemove?.title}" from this dashboard? 
+                Are you sure you want to remove "{chartToRemove?.title}" from this dashboard?
                 The chart will still be available in your Charts library.
               </AlertDialogDescription>
             </AlertDialogHeader>

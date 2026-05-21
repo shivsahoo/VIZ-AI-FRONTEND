@@ -172,9 +172,9 @@ function sanitizeErrorMessage(errorText: string, statusCode: number): string {
     // Extract title from HTML if possible
     const titleMatch = errorText.match(/<title>(.*?)<\/title>/i);
     const h1Match = errorText.match(/<h1>(.*?)<\/h1>/i);
-    
+
     const extractedTitle = titleMatch?.[1] || h1Match?.[1] || '';
-    
+
     // Map common HTTP error codes to user-friendly messages
     const errorMessages: Record<number, string> = {
       400: 'Invalid request. Please check your input and try again.',
@@ -188,12 +188,12 @@ function sanitizeErrorMessage(errorText: string, statusCode: number): string {
       503: 'Service unavailable. The server is temporarily down for maintenance.',
       504: 'Request timeout. The server took too long to respond. Please try again.',
     };
-    
+
     // Use specific message for status code, or generic message
     if (errorMessages[statusCode]) {
       return errorMessages[statusCode];
     }
-    
+
     // If we extracted a title, try to make it user-friendly
     if (extractedTitle) {
       const cleanTitle = extractedTitle
@@ -203,13 +203,13 @@ function sanitizeErrorMessage(errorText: string, statusCode: number): string {
         .replace(/Not Found/i, 'Resource not found')
         .replace(/Unauthorized/i, 'Authentication required')
         .replace(/Forbidden/i, 'Access denied');
-      
+
       return cleanTitle + '. Please try again later.';
     }
-    
+
     return 'An unexpected error occurred. Please try again later.';
   }
-  
+
   // If it's not HTML, return as-is (but limit length)
   return errorText.length > 500 ? errorText.substring(0, 500) + '...' : errorText;
 }
@@ -219,7 +219,7 @@ function sanitizeErrorMessage(errorText: string, statusCode: number): string {
  */
 async function handleResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get('content-type');
-  
+
   if (!response.ok) {
     let errorMessage = `HTTP error! status: ${response.status}`;
     try {
@@ -241,7 +241,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
   if (contentType?.includes('application/json')) {
     return await response.json();
   }
-  
+
   return {} as T;
 }
 
@@ -836,8 +836,8 @@ export const getDashboards = async (projectId: string): Promise<ApiResponse<Dash
       created_by: string;
       is_favorite?: boolean;
     }> = Array.isArray(response)
-      ? response
-      : (response as any).dashboards || [];
+        ? response
+        : (response as any).dashboards || [];
 
     return {
       success: true,
@@ -1310,13 +1310,13 @@ export const addChartToDashboard = async (data: {
   try {
     // Prepare request body - only include fields that have values
     const requestBody: any = {
-        title: data.title,
-        query: data.query,
-        type: data.type || data.chart_type,
-        is_time_based: data.is_time_based ?? false,
-        chart_type: data.chart_type,
-        dashboard_id: data.dashboard_id,
-        data_connection_id: data.data_connection_id,
+      title: data.title,
+      query: data.query,
+      type: data.type || data.chart_type,
+      is_time_based: data.is_time_based ?? false,
+      chart_type: data.chart_type,
+      dashboard_id: data.dashboard_id,
+      data_connection_id: data.data_connection_id,
     };
 
     // Only include report if it has a value (not empty string)
@@ -1374,8 +1374,8 @@ export const addChartToDashboard = async (data: {
  * @param bypassCache - If true, bypasses cache and always fetches fresh data
  */
 export const getChartData = async (
-  chartId: string, 
-  datasourceConnectionId: string, 
+  chartId: string,
+  datasourceConnectionId: string,
   query: string,
   fromDate?: string,
   toDate?: string,
@@ -1384,7 +1384,7 @@ export const getChartData = async (
 ): Promise<ApiResponse<ChartData>> => {
   // Import cache utilities
   const { getCachedChartData, setCachedChartData, clearChartCache } = await import('../utils/chartDataCache');
-  
+
   // Check cache first (unless bypassing)
   if (!bypassCache) {
     const cachedData = getCachedChartData(chartId, datasourceConnectionId, query, fromDate, toDate);
@@ -1398,7 +1398,7 @@ export const getChartData = async (
     // Clear cache if bypassing to ensure fresh data
     clearChartCache(chartId, datasourceConnectionId, query, fromDate, toDate);
   }
-  
+
   try {
     const requestBody: {
       query: string;
@@ -1411,7 +1411,7 @@ export const getChartData = async (
       query: query,
       response_format: 'tabular',
     };
-    
+
     if (fromDate) {
       requestBody.from_date = fromDate;
     }
@@ -1426,7 +1426,7 @@ export const getChartData = async (
     if (yHint) {
       requestBody.y_axis = yHint;
     }
-    
+
     const response = await apiRequest<{
       data?: any[];
       row_count?: number;
@@ -1641,7 +1641,7 @@ export const deleteChart = async (chartId: string, dashboardId?: number | string
         },
       };
     }
-    
+
     // Delete chart directly using general delete endpoint
     const response = await apiRequest<{
       message: string;
@@ -1870,10 +1870,10 @@ export const createDatabase = async (
       } else if (dbType === 'databricks') {
         dbType = 'databricks';
       }
-      
+
       requestBody.connection_name = data.connectionName || '';
       requestBody.db_type = dbType;
-      
+
       // Handle Salesforce connections (OAuth2 session-based authentication only)
       if (dbType === 'salesforce') {
         // Salesforce uses session_id (OAuth access_token) and instance_url
@@ -1899,7 +1899,7 @@ export const createDatabase = async (
             const portNum = parseInt(portStr);
             if (!isNaN(portNum)) {
               const defaultPort = dbType === 'postgres' ? 5432 : dbType === 'mysql' ? 3306 : 1521;
-              
+
               // Only append port if it's different from default and not already in host
               if (portNum !== defaultPort && !hostWithPort.includes(':')) {
                 hostWithPort = `${hostWithPort}:${portNum}`;
@@ -1907,7 +1907,7 @@ export const createDatabase = async (
             }
           }
         }
-        
+
         requestBody.host = hostWithPort;
         requestBody.db_name = data.database || '';
         // Backend accepts both 'username' and 'name', send 'username' to match expected payload format
@@ -2387,7 +2387,7 @@ export const getLatestBusinessInsight = async (
     const queryParams = new URLSearchParams({
       project_id: projectId,
     });
-    
+
     if (userId) {
       queryParams.append('user_id', userId);
     }
@@ -2623,12 +2623,12 @@ export const inviteUser = async (
       email: data.email,
       role_id: data.role_id,
     };
-    
+
     // Only include password if provided
     if (data.password) {
       requestBody.password = data.password;
     }
-    
+
     const response = await apiRequest<{
       message: string;
       user_id: string;
@@ -2939,21 +2939,21 @@ const api = {
   login,
   register,
   logout,
-  
+
   // Projects
   getProjects,
   createProject,
   getProject,
   updateProject,
   deleteProject,
-  
+
   // Dashboards
   getDashboards,
   createDashboard,
   deleteDashboard,
   getDashboardCharts,
   getFavorites,
-  
+
   // Charts
   getCharts,
   filterCharts,
@@ -2965,29 +2965,29 @@ const api = {
   updateFavoriteChart,
   deleteChart,
   getUserDashboardCharts,
-  
+
   // Databases
   getDatabases,
   createDatabase,
   testDatabaseConnection,
   getDatabaseSchema,
   updateConnection,
-  
+
   // AI/Insights
   naturalLanguageQuery,
   generateInsights,
   createDashboardFromPrompt,
-  
+
   // Users/Teams
   getTeamMembers,
   inviteUser,
   addUserToDashboard,
-  
+
   // Roles
   getRoles,
   createRole,
   getPermissions,
-  
+
   // Audit
   getAuditLogs,
 };
@@ -3459,3 +3459,4 @@ export const removeAllowedDomain = async (
     };
   }
 };
+
