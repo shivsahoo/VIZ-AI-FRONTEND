@@ -135,13 +135,19 @@ export function ChartCard(props: ChartCardProps) {
     );
   }
 
-  const rendererProps: ChartCardProps = { ...props, axisConfig, isDark };
-
   const option = React.useMemo(
     () => {
       if (type === "map" && !mapReady) {
         return {};
       }
+      // Guard: unknown chart type — fall back to empty option instead of throwing
+      const builder = OPTION_BUILDERS[type];
+      if (!builder) {
+        console.warn(`[ChartCard] No option builder for chart type: ${type}`);
+        return {};
+      }
+      // Compose rendererProps inside useMemo so all deps are captured correctly
+      const rendererProps: ChartCardProps = { ...props, axisConfig, isDark };
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console -- temporary scatter pipeline debug
         console.log("[ChartCard] rendering", {
@@ -152,15 +158,22 @@ export function ChartCard(props: ChartCardProps) {
           rowCount: data?.length,
         });
       }
-      return OPTION_BUILDERS[type](rendererProps);
+      try {
+        return builder(rendererProps);
+      } catch (err) {
+        console.error("[ChartCard] option builder threw:", type, err);
+        return {};
+      }
     },
     [
       type,
       mapReady,
       isDark,
+      data,
       props.data,
       props.dataKeys,
       props.xAxisKey,
+      axisConfig,
       props.axisConfig,
       props.title,
       props.height,

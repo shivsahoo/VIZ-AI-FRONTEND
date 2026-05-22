@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { ReactNode } from "react";
 
 import { ChartCard } from "../components/features/charts/ChartCard";
 import type { ChartType } from "../components/features/charts/core/chartTypes";
@@ -13,6 +21,7 @@ import type {
 } from "./types";
 
 const REFRESH_INTERVAL_MS = 60_000;
+const JWT_REFRESH_INTERVAL_MS = 25 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15_000;
 
 function normalizeEmbedChartType(raw: string | null | undefined): ChartType {
@@ -56,14 +65,119 @@ function applyTheme(theme: EmbedTheme) {
   }
 }
 
+// ── Chart-level Error Boundary ────────────────────────────────────────────────
+
+interface ChartErrorBoundaryProps {
+  chartTitle: string;
+  children: ReactNode;
+}
+interface ChartErrorBoundaryState {
+  hasError: boolean;
+  message: string;
+}
+
+class ChartErrorBoundary extends Component<
+  ChartErrorBoundaryProps,
+  ChartErrorBoundaryState
+> {
+  constructor(props: ChartErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+
+  static getDerivedStateFromError(error: unknown): ChartErrorBoundaryState {
+    return {
+      hasError: true,
+      message:
+        error instanceof Error ? error.message : "Chart render failed",
+    };
+  }
+
+  componentDidCatch(error: unknown, info: unknown) {
+    console.error(
+      "[EMBED][ChartErrorBoundary] Chart render error:",
+      this.props.chartTitle,
+      error,
+      info,
+    );
+  }
+
+  override render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-state">
+          Chart could not be rendered.
+          {import.meta.env.DEV && (
+            <span style={{ display: "block", fontSize: 11, marginTop: 4, opacity: 0.7 }}>
+              {this.state.message}
+            </span>
+          )}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ── EmbedChartCard — memoised per-chart render ────────────────────────────────
+
+interface EmbedChartCardProps {
+  chart: EmbedChartState;
+  index: number;
+}
+
+function EmbedChartCard({ chart, index }: EmbedChartCardProps) {
+  const display = useMemo(
+    () =>
+      buildEmbedChartDisplayConfig(
+        chart.rows,
+        chart.type,
+        chart.xAxis,
+        chart.yAxis,
+      ),
+    [chart.rows, chart.type, chart.xAxis, chart.yAxis],
+  );
+
+  return (
+    <div className="chart-card" key={chart.meta.id}>
+      <h3>{chart.meta.title || "Chart"}</h3>
+      <div className="chart-container" id={`chart-${index}`}>
+        {chart.isLoading ? (
+          <div className="skeleton" />
+        ) : chart.error ? (
+          <div className="error-state">{chart.error}</div>
+        ) : display.data.length > 0 ? (
+          <ChartErrorBoundary chartTitle={chart.meta.title || "Chart"}>
+            <ChartCard
+              type={display.effectiveType}
+              data={display.data}
+              dataKeys={display.dataKeys}
+              xAxisKey={display.xAxisKey}
+              axisConfig={display.axisConfig}
+              height={320}
+              showLegend={
+                display.dataKeys.length > 1 &&
+                display.effectiveType !== "pie" &&
+                display.effectiveType !== "donut"
+              }
+            />
+          </ChartErrorBoundary>
+        ) : (
+          <div className="error-state">No data available</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── EmbedApp ──────────────────────────────────────────────────────────────────
+
 interface EmbedAppProps {
   tokenId: string;
   apiBase: string;
   dashboardTitle: string;
   charts: EmbedChartMeta[];
   initialAccessToken?: string;
-  initialRefreshToken?: string;
-  initialExpiresIn?: number;
 }
 
 export function EmbedApp({
@@ -72,12 +186,9 @@ export function EmbedApp({
   dashboardTitle: initialTitle,
   charts: initialChartMetas,
   initialAccessToken,
-  initialRefreshToken,
-  initialExpiresIn,
 }: EmbedAppProps) {
   const [theme, setTheme] = useState<EmbedTheme>("dark");
   const [dashboardTitle, setDashboardTitle] = useState(initialTitle);
-  const [chartMetas, setChartMetas] = useState<EmbedChartMeta[]>(initialChartMetas);
   const [charts, setCharts] = useState<EmbedChartState[]>(() =>
     initialChartMetas.map((meta) => ({
       meta,
@@ -89,14 +200,18 @@ export function EmbedApp({
       error: null,
     })),
   );
-  const [renderGeneration, setRenderGeneration] = useState(0);
+
   const refreshTimerRef = useRef<number | null>(null);
+  const jwtRefreshTimerRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
 
-  //Token state 
   const accessTokenRef = useRef<string | undefined>(initialAccessToken);
-  const refreshTokenRef = useRef<string | undefined>(initialRefreshToken);
   const isRefreshingRef = useRef(false);
+
+  // ── Keep a ref to the latest chart metas to avoid stale closures ──────────
+  // This is the key fix: instead of putting chartMetas in useCallback deps
+  // (which causes cascading recreations), we keep a ref that's always current.
+  const chartMetasRef = useRef<EmbedChartMeta[]>(initialChartMetas);
 
   useEffect(() => {
     applyTheme(theme);
@@ -141,23 +256,24 @@ export function EmbedApp({
 
   // Token helpers
 
-  /** Build Authorization headers using the current access token */
+  /** Build Authorization headers using the embed session JWT */
   const getAuthHeaders = useCallback((): Record<string, string> => {
-    const token = accessTokenRef.current || tokenId;
+    const token = accessTokenRef.current;
+    if (!token) {
+      return { "Content-Type": "application/json" };
+    }
     return {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     };
-  }, [tokenId]);
+  }, []);
 
   /**
-   * Attempt to refresh the access token using the refresh token.
-   * Returns true if successful, false otherwise.
-   * Guards against concurrent calls via isRefreshingRef.
+   * Refresh embed JWT (~25m). Verifies current JWT + rechecks share token server-side.
    */
   const doRefresh = useCallback(async (): Promise<boolean> => {
     if (isRefreshingRef.current) return false;
-    if (!refreshTokenRef.current) return false;
+    if (!accessTokenRef.current) return false;
 
     isRefreshingRef.current = true;
     try {
@@ -165,27 +281,26 @@ export function EmbedApp({
         `${apiBase}/api/v1/embed/token/refresh`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            refresh_token: refreshTokenRef.current,
-            share_token: tokenId,
-          }),
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessTokenRef.current}`,
+          },
+          body: JSON.stringify({ share_token: tokenId }),
         },
         FETCH_TIMEOUT_MS,
       );
 
       if (!res.ok) {
-        console.warn("[EMBED] Token refresh failed:", res.status);
+        console.warn("[EMBED] JWT refresh failed:", res.status);
         return false;
       }
 
       const payload: TokenRefreshResponse = await res.json();
       accessTokenRef.current = payload.access_token;
-      refreshTokenRef.current = payload.refresh_token;
-      console.log("[EMBED] Access token refreshed successfully");
+      console.log("[EMBED] Embed JWT refreshed successfully");
       return true;
     } catch (err) {
-      console.error("[EMBED] Token refresh error:", err);
+      console.error("[EMBED] JWT refresh error:", err);
       return false;
     } finally {
       isRefreshingRef.current = false;
@@ -219,8 +334,10 @@ export function EmbedApp({
             const body = await response.json().catch(() => ({}));
             const errorCode = body?.detail?.error;
 
-            // If access token expired and we haven't retried yet, refresh
-            if (errorCode === "access_token_expired" && !isRetry) {
+            if (
+              (errorCode === "jwt_expired" || errorCode === "access_token_expired") &&
+              !isRetry
+            ) {
               const refreshed = await doRefresh();
               if (refreshed) {
                 return doFetch(true);
@@ -286,7 +403,11 @@ export function EmbedApp({
 
         if (res.status === 403) {
           const body = await res.json().catch(() => ({}));
-          if (body?.detail?.error === "access_token_expired" && !isRetry) {
+          const errCode = body?.detail?.error;
+          if (
+            (errCode === "jwt_expired" || errCode === "access_token_expired") &&
+            !isRetry
+          ) {
             const refreshed = await doRefresh();
             if (refreshed) return doFetch(true);
           }
@@ -302,83 +423,6 @@ export function EmbedApp({
 
     return doFetch(false);
   }, [apiBase, tokenId, getAuthHeaders, doRefresh]);
-
-  /**
-   * Reconcile newly fetched chart metadata with existing state.
-   * Handles: new charts, removed charts, renamed charts,
-   * chart type changes, axis changes.
-   */
-  const reconcileCharts = useCallback(
-    (newMetas: EmbedChartMeta[]) => {
-      setChartMetas(newMetas);
-
-      const newIds = new Set(newMetas.map((m) => m.id));
-      const existingIds = new Set(chartMetas.map((m) => m.id));
-
-      // Charts to add (newly discovered)
-      const added = newMetas.filter((m) => !existingIds.has(m.id));
-      // Charts to remove (no longer in dashboard)
-      const removed = new Set(
-        chartMetas.filter((m) => !newIds.has(m.id)).map((m) => m.id),
-      );
-
-      setCharts((prev) => {
-        // Remove charts no longer in dashboard
-        let updated = prev.filter((c) => !removed.has(c.meta.id));
-
-        // Update metadata for existing charts
-        updated = updated.map((c) => {
-          const freshMeta = newMetas.find((m) => m.id === c.meta.id);
-          if (!freshMeta) return c;
-          const typeChanged = freshMeta.chart_type !== c.meta.chart_type;
-          const axisChanged =
-            freshMeta.x_axis !== c.meta.x_axis ||
-            freshMeta.y_axis !== c.meta.y_axis;
-          const titleChanged = freshMeta.title !== c.meta.title;
-
-          if (typeChanged || axisChanged || titleChanged) {
-            return {
-              ...c,
-              meta: freshMeta,
-              type: normalizeEmbedChartType(freshMeta.chart_type),
-              xAxis: freshMeta.x_axis,
-              yAxis: freshMeta.y_axis,
-            };
-          }
-          return c;
-        });
-
-        // Append newly discovered charts
-        const newEntries: EmbedChartState[] = added.map((meta) => ({
-          meta,
-          type: normalizeEmbedChartType(meta.chart_type),
-          xAxis: meta.x_axis,
-          yAxis: meta.y_axis,
-          rows: null,
-          isLoading: true,
-          error: null,
-        }));
-
-        return [...updated, ...newEntries];
-      });
-
-      // Load data for newly added charts
-      if (added.length > 0) {
-        console.log(
-          `[EMBED] Dynamic chart discovery — ${added.length} new chart(s) found`,
-        );
-        void loadChartsById(added.map((m) => m.id));
-      }
-
-      if (removed.size > 0) {
-        console.log(
-          `[EMBED] Dynamic chart removal — ${removed.size} chart(s) removed`,
-        );
-        sendEmbedHeight();
-      }
-    },
-    [chartMetas],
-  );
 
   // Chart loading
 
@@ -418,19 +462,26 @@ export function EmbedApp({
         }),
       );
 
-      setRenderGeneration((g) => g + 1);
       sendEmbedHeight();
     },
     [fetchChartData],
   );
 
+  /**
+   * Load all charts.
+   * CRITICAL FIX: reads current metas from ref (not stale closure) so
+   * this callback's identity never needs to change when metas update —
+   * eliminating the useEffect([loadAllCharts]) re-trigger loop.
+   */
   const loadAllCharts = useCallback(async () => {
+    // Read latest metas from ref to avoid stale-closure dependency
+    const currentMetas = chartMetasRef.current;
+
     setCharts((prev) =>
       prev.map((c) => ({ ...c, isLoading: true, error: null })),
     );
 
     let loadedCount = 0;
-    const currentMetas = chartMetas;
     const results = await Promise.all(
       currentMetas.map(async (meta) => {
         const result = await fetchChartData(meta.id);
@@ -474,7 +525,6 @@ export function EmbedApp({
       }),
     );
 
-    setRenderGeneration((g) => g + 1);
     console.log(
       `[EMBED][STEP 10] Chart data fetched — ${loadedCount} charts loaded successfully`,
     );
@@ -482,13 +532,125 @@ export function EmbedApp({
       `[EMBED][STEP 11] Dashboard fully rendered in embed — ${loadedCount} charts visible`,
     );
     sendEmbedHeight();
-  }, [chartMetas, fetchChartData]);
+  // CRITICAL: fetchChartData is the only real dep; chartMetas is read via ref
+  }, [fetchChartData]);
 
+  /**
+   * Reconcile newly fetched chart metadata with existing state.
+   * Handles: new charts, removed charts, renamed charts,
+   * chart type changes, axis changes.
+   *
+   * CRITICAL FIX: Does NOT update chartMetasRef or call loadAllCharts directly
+   * to avoid cascade. Instead updates the ref and returns newly added IDs for
+   * the caller to load.
+   */
+  const reconcileCharts = useCallback(
+    (newMetas: EmbedChartMeta[]) => {
+      // Always keep the ref current
+      const prevMetas = chartMetasRef.current;
+      chartMetasRef.current = newMetas;
+
+      const newIds = new Set(newMetas.map((m) => m.id));
+      const existingIds = new Set(prevMetas.map((m) => m.id));
+
+      // Charts to add (newly discovered)
+      const added = newMetas.filter((m) => !existingIds.has(m.id));
+      // Charts to remove (no longer in dashboard)
+      const removed = new Set(
+        prevMetas.filter((m) => !newIds.has(m.id)).map((m) => m.id),
+      );
+
+      setCharts((prev) => {
+        // Remove charts no longer in dashboard
+        let updated = prev.filter((c) => !removed.has(c.meta.id));
+
+        // Update metadata for existing charts
+        updated = updated.map((c) => {
+          const freshMeta = newMetas.find((m) => m.id === c.meta.id);
+          if (!freshMeta) return c;
+          const typeChanged = freshMeta.chart_type !== c.meta.chart_type;
+          const axisChanged =
+            freshMeta.x_axis !== c.meta.x_axis ||
+            freshMeta.y_axis !== c.meta.y_axis;
+          const titleChanged = freshMeta.title !== c.meta.title;
+
+          if (typeChanged || axisChanged || titleChanged) {
+            return {
+              ...c,
+              meta: freshMeta,
+              type: normalizeEmbedChartType(freshMeta.chart_type),
+              xAxis: freshMeta.x_axis,
+              yAxis: freshMeta.y_axis,
+            };
+          }
+          return c;
+        });
+
+        // Append newly discovered charts
+        const newEntries: EmbedChartState[] = added.map((meta) => ({
+          meta,
+          type: normalizeEmbedChartType(meta.chart_type),
+          xAxis: meta.x_axis,
+          yAxis: meta.y_axis,
+          rows: null,
+          isLoading: true,
+          error: null,
+        }));
+
+        return [...updated, ...newEntries];
+      });
+
+      if (added.length > 0) {
+        console.log(
+          `[EMBED] Dynamic chart discovery — ${added.length} new chart(s) found`,
+        );
+        void loadChartsById(added.map((m) => m.id));
+      }
+
+      if (removed.size > 0) {
+        console.log(
+          `[EMBED] Dynamic chart removal — ${removed.size} chart(s) removed`,
+        );
+        sendEmbedHeight();
+      }
+    },
+    // CRITICAL FIX: no chartMetas state dep — reads via ref instead
+    [loadChartsById],
+  );
+
+  // ── Initial data load — fires exactly once on mount ───────────────────────
+  // CRITICAL FIX: use a stable ref-based trigger instead of [loadAllCharts]
+  // to prevent the effect from re-firing every time loadAllCharts is recreated.
+  const initialLoadDoneRef = useRef(false);
   useEffect(() => {
+    if (initialLoadDoneRef.current) return;
+    initialLoadDoneRef.current = true;
     void loadAllCharts();
-  }, [loadAllCharts]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — runs once on mount only
+
+  // Proactive JWT refresh at 25 minutes
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === "visible") {
+        void doRefresh();
+      }
+    };
+    jwtRefreshTimerRef.current = window.setInterval(tick, JWT_REFRESH_INTERVAL_MS);
+    return () => {
+      if (jwtRefreshTimerRef.current !== null) {
+        window.clearInterval(jwtRefreshTimerRef.current);
+      }
+    };
+  }, [doRefresh]);
 
   // Refresh cycle (data + dynamic discovery)
+  // CRITICAL FIX: use stable refs for loadAllCharts and reconcileCharts
+  // so the effect only re-runs when fetchDashboardMeta changes (apiBase/tokenId).
+  const loadAllChartsRef = useRef(loadAllCharts);
+  const reconcileChartsRef = useRef(reconcileCharts);
+  useEffect(() => { loadAllChartsRef.current = loadAllCharts; }, [loadAllCharts]);
+  useEffect(() => { reconcileChartsRef.current = reconcileCharts; }, [reconcileCharts]);
 
   useEffect(() => {
     const startRefreshCycle = () => {
@@ -507,10 +669,10 @@ export function EmbedApp({
             if (meta.dashboard_title !== dashboardTitle) {
               setDashboardTitle(meta.dashboard_title);
             }
-            reconcileCharts(meta.charts);
+            reconcileChartsRef.current(meta.charts);
           }
           // Step 2: Reload data for all current charts
-          void loadAllCharts();
+          void loadAllChartsRef.current();
         }
       }, REFRESH_INTERVAL_MS);
     };
@@ -537,7 +699,9 @@ export function EmbedApp({
       }
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [loadAllCharts, fetchDashboardMeta, reconcileCharts, dashboardTitle]);
+  // Only re-run when the API connection changes (apiBase/tokenId change via fetchDashboardMeta)
+  // dashboardTitle is read from current state inside the callback so no dep needed
+  }, [fetchDashboardMeta]);
 
   // Render
 
@@ -549,44 +713,13 @@ export function EmbedApp({
       </div>
 
       <div className="charts-grid" id="charts-grid">
-        {charts.map((chart, index) => {
-          const display = buildEmbedChartDisplayConfig(
-            chart.rows,
-            chart.type,
-            chart.xAxis,
-            chart.yAxis,
-          );
-
-          return (
-            <div className="chart-card" key={chart.meta.id}>
-              <h3>{chart.meta.title || "Chart"}</h3>
-              <div className="chart-container" id={`chart-${index}`}>
-                {chart.isLoading ? (
-                  <div className="skeleton" />
-                ) : chart.error ? (
-                  <div className="error-state">{chart.error}</div>
-                ) : display.data.length > 0 ? (
-                  <ChartCard
-                    key={`${chart.meta.id}-${renderGeneration}`}
-                    type={display.effectiveType}
-                    data={display.data}
-                    dataKeys={display.dataKeys}
-                    xAxisKey={display.xAxisKey}
-                    axisConfig={display.axisConfig}
-                    height={320}
-                    showLegend={
-                      display.dataKeys.length > 1 &&
-                      display.effectiveType !== "pie" &&
-                      display.effectiveType !== "donut"
-                    }
-                  />
-                ) : (
-                  <div className="error-state">No data available</div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+        {charts.map((chart, index) => (
+          <EmbedChartCard
+            key={chart.meta.id}
+            chart={chart}
+            index={index}
+          />
+        ))}
       </div>
 
       <div className="powered-by">

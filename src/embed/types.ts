@@ -15,11 +15,9 @@ export interface VizAiEmbedConfig {
   dashboardTitle: string;
   charts: EmbedChartMeta[];
   assetsBase: string;
-  /** Short-lived access token for data requests */
+  /** Embed session JWT for data requests (30m, refreshed at ~25m) */
   accessToken?: string;
-  /** Refresh token to silently renew access tokens */
-  refreshToken?: string;
-  /** Access token TTL in seconds */
+  /** JWT TTL in seconds */
   expiresIn?: number;
 }
 
@@ -48,9 +46,8 @@ export interface DashboardMetaResponse {
   charts: EmbedChartMeta[];
 }
 
-/** Response shape from the token refresh endpoint */
+/** Response shape from the embed JWT refresh endpoint */
 export interface TokenRefreshResponse {
   access_token: string;
-  refresh_token: string;
   expires_in: number;
 }
