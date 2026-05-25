@@ -371,7 +371,7 @@ export function DashboardCreationBot({ isOpen, onClose, onCreate, projectId, pro
                   ? currentQuestion
                     ? `Question ${Math.max(questionsAsked, 1)} of up to 5`
                     : isTyping
-                    ? "Thinking..."
+                    ? "Visualizing..."
                     : "Waiting for your response"
                   : isConnecting
                   ? "Connecting to AI assistant..."

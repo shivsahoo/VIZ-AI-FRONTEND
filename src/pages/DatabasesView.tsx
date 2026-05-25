@@ -1,4 +1,4 @@
-import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye, TrendingUp, Clock, Tag, Filter } from "lucide-react";
+import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye, TrendingUp, Clock, Tag, Filter, Bot } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -91,6 +91,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   const [enrichmentSessionId, setEnrichmentSessionId] = useState<string | null>(null);
   const [enrichmentInput, setEnrichmentInput] = useState("");
   const [enrichmentChat, setEnrichmentChat] = useState<Array<{ role: "assistant" | "user"; text: string }>>([]);
+  const [isEnrichmentReplyPending, setIsEnrichmentReplyPending] = useState(false);
   const [enrichmentUpdates, setEnrichmentUpdates] = useState<Record<string, any>>({});
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
@@ -334,7 +335,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }, [enrichmentChat]);
+  }, [enrichmentChat, isEnrichmentReplyPending]);
 
   const handleSendEnrichmentMessage = async () => {
     if (!selectedDatabase || !enrichmentSessionId) return;
@@ -343,6 +344,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
     setEnrichmentInput("");
     setEnrichmentChat((prev) => [...prev, { role: "user", text: message }]);
     setIsEnriching(true);
+    setIsEnrichmentReplyPending(true);
     try {
       const response = await sendOntologyEnrichmentChat(selectedDatabase.id, enrichmentSessionId, message);
       if (!response.success || !response.data) {
@@ -382,6 +384,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
     } catch (error: any) {
       toast.error(error.message || "Unable to send message");
     } finally {
+      setIsEnrichmentReplyPending(false);
       setIsEnriching(false);
     }
   };
@@ -976,6 +979,23 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                       {msg.text}
                     </div>
                   ))}
+                  {isEnrichmentReplyPending && (
+                    <div className="rounded-lg px-3 py-2 text-sm bg-muted/40 border border-border mr-10" aria-live="polite" aria-busy="true">
+                      <div className="flex items-center gap-2">
+                        <Bot className="h-4 w-4 text-primary/80" />
+                        <span className="text-xs text-muted-foreground">Capturing metrics...</span>
+                        <span className="flex items-center gap-1" aria-hidden>
+                          {[0, 1, 2].map((i) => (
+                            <span
+                              key={i}
+                              className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce"
+                              style={{ animationDelay: `${i * 140}ms` }}
+                            />
+                          ))}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-[1fr_auto] gap-2">
