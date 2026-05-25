@@ -1,5 +1,5 @@
 import { useState, useEffect, type MouseEvent } from "react";
-import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2, Loader2, Search } from "lucide-react";
+import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2, Loader2, Search, Globe, Building2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
@@ -7,7 +7,8 @@ import { GradientButton } from "../components/shared/GradientButton";
 import { OnboardingFlow } from "./OnboardingFlow";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import { toast } from "sonner";
-import { getProjects, createProject, getCurrentUser, deleteProject, type Project as ApiProject } from "../services/api";
+import { getProjects, createProject, getCurrentUser, deleteProject, listApps, deleteApp, type Project as ApiProject, type AppDetail } from "../services/api";
+import { CreateAppModal } from "../components/features/apps/CreateAppModal";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -72,11 +73,46 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState("");
 
+  // App registration state
+  const [apps, setApps] = useState<AppDetail[]>([]);
+  const [showCreateAppModal, setShowCreateAppModal] = useState(false);
+  const [isDeletingApp, setIsDeletingApp] = useState<string | null>(null);
+
   // Fetch projects and user ID on mount
   useEffect(() => {
     fetchProjects();
     fetchUserId();
+    fetchApps();
   }, []);
+
+  const fetchApps = async () => {
+    try {
+      const response = await listApps();
+      if (response.success && response.data) {
+        setApps(response.data);
+        console.log(`[APP][STEP 3] App list refreshed — ${response.data.length} apps visible`);
+      }
+    } catch (error) {
+      console.error("Failed to fetch apps:", error);
+    }
+  };
+
+  const handleDeleteApp = async (appId: string) => {
+    setIsDeletingApp(appId);
+    try {
+      const response = await deleteApp(appId);
+      if (response.success) {
+        setApps((prev) => prev.filter((a) => a.app_id !== appId));
+        toast.success("App deleted");
+      } else {
+        toast.error(response.error?.message || "Failed to delete app");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete app");
+    } finally {
+      setIsDeletingApp(null);
+    }
+  };
 
   const fetchUserId = async () => {
     try {
@@ -466,6 +502,107 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         })()}
 
       </div>
+
+      {/* Registered Apps Section */}
+      <div className="px-8 py-12 max-w-7xl mx-auto border-t border-border">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-2xl text-foreground mb-1">Registered Apps</h2>
+            <p className="text-muted-foreground">
+              External applications that can embed your dashboards
+            </p>
+          </div>
+          <Button
+            id="create-app-btn"
+            variant="outline"
+            onClick={() => {
+              setShowCreateAppModal(true);
+              console.log(`[APP][STEP 1] User clicked "Create app"`);
+            }}
+            className="border-border"
+          >
+            <Globe className="w-4 h-4 mr-2" />
+            Create App
+          </Button>
+        </div>
+
+        {apps.length === 0 ? (
+          <Card className="p-8 text-center border border-dashed border-border">
+            <Globe className="w-12 h-12 mx-auto mb-3 text-muted-foreground" />
+            <h3 className="text-base font-medium text-foreground mb-1">
+              No registered apps
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
+              Register an app to enable domain-locked dashboard embedding.
+              Each app represents an external website that can display your dashboards.
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreateAppModal(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Create Your First App
+            </Button>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {apps.map((app) => (
+              <Card
+                key={app.app_id}
+                className="p-4 border border-border hover:border-primary/30 transition-colors"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Building2 className="w-5 h-5 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {app.company_name}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {app.domain_url}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => handleDeleteApp(app.app_id)}
+                    disabled={isDeletingApp === app.app_id}
+                    title="Delete app"
+                  >
+                    {isDeletingApp === app.app_id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Clock className="w-3 h-3" />
+                  <span>
+                    Created{" "}
+                    {new Date(app.created_at).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Create App Modal */}
+      <CreateAppModal
+        open={showCreateAppModal}
+        onOpenChange={setShowCreateAppModal}
+        onAppCreated={fetchApps}
+      />
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog

@@ -46,6 +46,12 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
   const [schemaName, setSchemaName] = useState("");
   const [accessToken, setAccessToken] = useState("");
 
+  useEffect(() => {
+    if (dbType === "databricks" && connectionMethod === "string") {
+      setConnectionMethod("form");
+    }
+  }, [dbType, connectionMethod]);
+
   // Progress Overlay State
   const [showProgressOverlay, setShowProgressOverlay] = useState(false);
   const [progressValue, setProgressValue] = useState(0);
@@ -453,7 +459,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
           <Card className="w-full max-w-md border border-border shadow-2xl space-y-6 p-8 mx-4">
             <div className="flex flex-col items-center gap-3 text-center">
               <Loader2 className="w-8 h-8 text-primary animate-spin" />
-              <h3 className="text-xl font-semibold text-foreground">Connecting to database</h3>
+              <h3 className="text-xl font-semibold text-foreground">Connecting to datasource</h3>
               <p className="text-sm text-muted-foreground">
                 {progressMessage || "Initializing secure connection..."}
               </p>
@@ -482,65 +488,67 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
         <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center mx-auto mb-4 shadow-lg">
           <DatabaseIcon className="w-7 h-7 md:w-8 md:h-8 text-white" />
         </div>
-        <h2 className="text-2xl md:text-3xl text-foreground mb-2">Connect Your Database</h2>
+        <h2 className="text-2xl md:text-3xl text-foreground mb-2">Connect Your Datasource</h2>
         <p className="text-sm md:text-lg text-muted-foreground">
           Let's connect your first data source for "{projectName}"
         </p>
       </div>
 
       <div className="max-w-2xl mx-auto space-y-6">
-        {/* Connection Name - Always visible */}
         <div className="space-y-2">
-          <Label htmlFor="connectionName">
-            Connection Name <span className="text-destructive">*</span>
+          <Label htmlFor="dbType">
+            Datasource Type <span className="text-destructive">*</span>
           </Label>
-          <Input
-            id="connectionName"
-            placeholder="my-analytics-db"
-            value={connectionName}
-            onChange={(e) => setConnectionName(e.target.value)}
-            className="h-12"
-          />
-          <p className="text-xs text-muted-foreground">
-            A friendly name to identify this database connection
-          </p>
+          <Select value={dbType} onValueChange={setDbType}>
+            <SelectTrigger id="dbType" className="h-12">
+              <SelectValue placeholder="Select Database Type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="postgresql">PostgreSQL</SelectItem>
+              <SelectItem value="mysql">MySQL</SelectItem>
+              <SelectItem value="oracle">Oracle</SelectItem>
+              <SelectItem value="salesforce">Salesforce</SelectItem>
+              <SelectItem value="databricks">Databricks</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        <Tabs value={connectionMethod} onValueChange={setConnectionMethod} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-6 md:mb-8">
-            <TabsTrigger value="form" className="flex items-center gap-2">
-              <DatabaseIcon className="w-4 h-4" />
-              Connection Form
-            </TabsTrigger>
-            <TabsTrigger value="string" className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4" />
-              Connection String
-            </TabsTrigger>
-          </TabsList>
+        {/* Connection Name - Always visible */}
+        <div className="space-y-2">
+              <Label htmlFor="connectionName">
+                Connection Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="connectionName"
+                placeholder="my-analytics-db"
+                value={connectionName}
+                onChange={(e) => setConnectionName(e.target.value)}
+                className="h-12"
+              />
+              <p className="text-xs text-muted-foreground">
+                A friendly name to identify this datasource connection
+              </p>
+            </div>
 
-          {/* Connection Form Tab */}
-          <TabsContent value="form" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Tabs value={connectionMethod} onValueChange={setConnectionMethod} className="w-full">
+              {dbType !== "databricks" && (
+                <TabsList className="grid w-full grid-cols-2 mb-6 md:mb-8">
+                  <TabsTrigger value="form" className="flex items-center gap-2">
+                    <DatabaseIcon className="w-4 h-4" />
+                    Connection Form
+                  </TabsTrigger>
+                  <TabsTrigger value="string" className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" />
+                    Connection String
+                  </TabsTrigger>
+                </TabsList>
+              )}
 
-              <div className="space-y-2">
-                <Label htmlFor="dbType">
-                  Database Type <span className="text-destructive">*</span>
-                </Label>
-                <Select value={dbType} onValueChange={setDbType}>
-                  <SelectTrigger id="dbType" className="h-12">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="postgresql">PostgreSQL</SelectItem>
-                    <SelectItem value="mysql">MySQL</SelectItem>
-                    <SelectItem value="oracle">Oracle</SelectItem>
-                    <SelectItem value="salesforce">Salesforce</SelectItem>
-                    <SelectItem value="databricks">Databricks</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Connection Form Tab */}
+              <TabsContent value="form" className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-              {/* Salesforce OAuth2 fields */}
+                  {/* Salesforce OAuth2 fields */}
               {dbType === "salesforce" && (
                 <>
                   <div className="space-y-2">
@@ -778,7 +786,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                 ) : (
                   <>
                     <Check className="w-5 h-5 mr-2" />
-                    Connect Database & Complete Setup
+                    Connect Datasource & Complete Setup
                     <ArrowRight className="w-5 h-5 ml-2" />
                   </>
                 )}
