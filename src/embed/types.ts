@@ -15,6 +15,10 @@ export interface VizAiEmbedConfig {
   dashboardTitle: string;
   charts: EmbedChartMeta[];
   assetsBase: string;
+  /** Embed session JWT for data requests (30m, refreshed at ~25m) */
+  accessToken?: string;
+  /** JWT TTL in seconds */
+  expiresIn?: number;
 }
 
 declare global {
@@ -33,4 +37,17 @@ export interface EmbedChartState {
   rows: Record<string, unknown>[] | null;
   isLoading: boolean;
   error: string | null;
+}
+
+/** Response shape from the dashboard metadata endpoint */
+export interface DashboardMetaResponse {
+  dashboard_title: string;
+  dashboard_id: string;
+  charts: EmbedChartMeta[];
+}
+
+/** Response shape from the embed JWT refresh endpoint */
+export interface TokenRefreshResponse {
+  access_token: string;
+  expires_in: number;
 }

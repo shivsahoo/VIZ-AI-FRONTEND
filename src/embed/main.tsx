@@ -22,6 +22,7 @@ function boot() {
       apiBase={config.apiBase}
       dashboardTitle={config.dashboardTitle}
       charts={config.charts}
+      initialAccessToken={config.accessToken}
     />,
   );
 }

@@ -135,13 +135,19 @@ export function ChartCard(props: ChartCardProps) {
     );
   }
 
-  const rendererProps: ChartCardProps = { ...props, axisConfig, isDark };
-
   const option = React.useMemo(
     () => {
       if (type === "map" && !mapReady) {
         return {};
       }
+      // Guard: unknown chart type — fall back to empty option instead of throwing
+      const builder = OPTION_BUILDERS[type];
+      if (!builder) {
+        console.warn(`[ChartCard] No option builder for chart type: ${type}`);
+        return {};
+      }
+      // Compose rendererProps inside useMemo so all deps are captured correctly
+      const rendererProps: ChartCardProps = { ...props, axisConfig, isDark };
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console -- temporary scatter pipeline debug
         console.log("[ChartCard] rendering", {
@@ -152,15 +158,22 @@ export function ChartCard(props: ChartCardProps) {
           rowCount: data?.length,
         });
       }
-      return OPTION_BUILDERS[type](rendererProps);
+      try {
+        return builder(rendererProps);
+      } catch (err) {
+        console.error("[ChartCard] option builder threw:", type, err);
+        return {};
+      }
     },
     [
       type,
       mapReady,
       isDark,
+      data,
       props.data,
       props.dataKeys,
       props.xAxisKey,
+      axisConfig,
       props.axisConfig,
       props.title,
       props.height,
@@ -208,7 +221,7 @@ export function ChartCard(props: ChartCardProps) {
       ? (height !== undefined ? baseHeight : Math.max(baseHeight, stackedHorizontalDesiredHeight))
       : type === "heatmap"
         ? (height !== undefined ? baseHeight : heatmapDesiredHeight)
-      : baseHeight;
+        : baseHeight;
   const stackedHorizontalRenderHeight =
     type === "stackedhorizontalbar"
       ? (height !== undefined ? Math.max(baseHeight, stackedHorizontalDesiredHeight) : effectiveHeight)
@@ -224,14 +237,52 @@ export function ChartCard(props: ChartCardProps) {
         ? heatmapRenderHeight
         : effectiveHeight;
 
+  // ── ECharts theme: pass the built-in 'dark' string so ECharts core applies
+  //    proper text/axis/legend colors, fixing the invisible-text-on-mismatch bug.
+  //    echarts-for-react automatically disposes + re-inits when `theme` changes.
+  const echartsTheme = isDark ? 'dark' : undefined;
+
+  // ── ResizeObserver callback: when the chart container resizes (e.g. iframe
+  //    dimensions settle), tell the ECharts instance to recalculate its layout.
+  const chartInstanceRef = React.useRef<any>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => {
+      const instance = chartInstanceRef.current;
+      if (instance && typeof instance.resize === 'function') {
+        // Use rAF to avoid layout thrashing during rapid resizes
+        requestAnimationFrame(() => instance.resize());
+      }
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [echartsTheme]); // re-attach when theme triggers re-init
+
+  const handleChartReady = React.useCallback((instance: any) => {
+    chartInstanceRef.current = instance;
+    // Trigger an initial resize after ECharts settles to fix iframe timing issues
+    requestAnimationFrame(() => {
+      if (instance && typeof instance.resize === 'function') {
+        instance.resize();
+      }
+    });
+  }, []);
+
   const chart = (
-    <ReactECharts
-      option={option}
-      style={{ width: "100%", height: chartRenderHeight }}
-      opts={{ renderer: type === "heatmap" ? "canvas" : "svg" }}
-      notMerge
-      lazyUpdate
-    />
+    <div ref={containerRef} style={{ width: '100%', height: chartRenderHeight }}>
+      <ReactECharts
+        option={option}
+        theme={echartsTheme}
+        style={{ width: "100%", height: chartRenderHeight }}
+        opts={{ renderer: type === "heatmap" ? "canvas" : "svg" }}
+        notMerge
+        lazyUpdate
+        onChartReady={handleChartReady}
+      />
+    </div>
   );
 
   const wrapped =

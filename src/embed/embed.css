@@ -1,75 +1,157 @@
+/*
+ * VizAI Embed — Theme-aware CSS
+ *
+ * Design:
+ *  - :root defaults are deliberately "neutral" (transparent bg, inherit text)
+ *    so the iframe visually blends with the parent by default.
+ *  - [data-theme="light"] / [data-theme="dark"] provide explicit palettes when
+ *    the parent sends a set_theme postMessage.
+ *  - [data-theme="custom"] is set when the parent provides a raw background
+ *    colour; only --embed-bg and --embed-card-bg are overridden via inline
+ *    style on <html>; all other tokens remain from whichever base theme was
+ *    last active.
+ *
+ *  CSS custom properties exposed:
+ *    --embed-bg          root / body background
+ *    --embed-card-bg     chart card background
+ *    --embed-text        primary text colour
+ *    --embed-text-muted  secondary / subtitle text
+ *    --embed-border      divider / card border
+ *    --embed-primary     accent / brand colour
+ *    --embed-error-bg    error state background
+ *    --embed-error-border error state border
+ *    --embed-error-text  error state text
+ */
+
+/* ── Base (transparent / inherit) ────────────────────────────────────────────
+   No background is applied at this level.
+   The parent page colour bleeds through the iframe naturally.             */
 :root {
-  --bg: #0f1117;
-  --card-bg: #1a1d27;
-  --border: #2a2d3a;
-  --text: #e4e4e7;
-  --text-muted: #9ca3af;
-  --primary: #6366f1;
-  --error-bg: #1c1017;
-  --error-border: #7f1d1d;
-  --error-text: #fca5a5;
+  --embed-bg:            transparent;
+  --embed-card-bg:       rgba(255, 255, 255, 0.08);
+  --embed-text:          inherit;
+  --embed-text-muted:    rgba(100, 116, 139, 1);
+  --embed-border:        rgba(148, 163, 184, 0.2);
+  --embed-primary:       #6366f1;
+  --embed-error-bg:      rgba(254, 242, 242, 0.9);
+  --embed-error-border:  #fecaca;
+  --embed-error-text:    #dc2626;
 }
 
+/* ── Light theme ─────────────────────────────────────────────────────────── */
 [data-theme="light"] {
-  --bg: #f8fafc;
-  --card-bg: #ffffff;
-  --border: #e2e8f0;
-  --text: #1e293b;
-  --text-muted: #64748b;
-  --primary: #6366f1;
-  --error-bg: #fef2f2;
-  --error-border: #fecaca;
-  --error-text: #dc2626;
+  --embed-bg:            #f8fafc;
+  --embed-card-bg:       #ffffff;
+  --embed-text:          #1e293b;
+  --embed-text-muted:    #64748b;
+  --embed-border:        #e2e8f0;
+  --embed-primary:       #6366f1;
+  --embed-error-bg:      #fef2f2;
+  --embed-error-border:  #fecaca;
+  --embed-error-text:    #dc2626;
 }
 
+/* ── Dark theme ──────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --embed-bg:            #0f1117;
+  --embed-card-bg:       #1a1d27;
+  --embed-text:          #e4e4e7;
+  --embed-text-muted:    #9ca3af;
+  --embed-border:        #2a2d3a;
+  --embed-primary:       #6366f1;
+  --embed-error-bg:      #1c1017;
+  --embed-error-border:  #7f1d1d;
+  --embed-error-text:    #fca5a5;
+}
+
+/* ── Custom background mode ──────────────────────────────────────────────────
+   When [data-theme="custom"] the parent has injected --embed-bg directly
+   on the <html> element via inline style. Card bg is derived via alpha so
+   it sits above the custom backdrop.                                      */
+[data-theme="custom"] {
+  /* --embed-bg is set inline by JS, so we only set card / text here */
+  --embed-card-bg:       rgba(255, 255, 255, 0.12);
+  --embed-text:          #1e293b;
+  --embed-text-muted:    #475569;
+  --embed-border:        rgba(0, 0, 0, 0.12);
+  --embed-error-bg:      rgba(254, 242, 242, 0.9);
+  --embed-error-border:  #fecaca;
+  --embed-error-text:    #dc2626;
+}
+
+/* Dark custom background: if custom bg is dark, use light text */
+[data-theme="custom"].embed-bg-dark {
+  --embed-card-bg:       rgba(255, 255, 255, 0.08);
+  --embed-text:          #e4e4e7;
+  --embed-text-muted:    #9ca3af;
+  --embed-border:        rgba(255, 255, 255, 0.1);
+  --embed-error-bg:      #1c1017;
+  --embed-error-border:  #7f1d1d;
+  --embed-error-text:    #fca5a5;
+}
+
+/* ── Reset ───────────────────────────────────────────────────────────────── */
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+/* ── Body / root ─────────────────────────────────────────────────────────── */
+html,
+body {
+  /* Allow parent background to show through when --embed-bg is transparent */
+  background: var(--embed-bg);
+  color: var(--embed-text);
+  /* Smooth theme transitions */
+  transition: background 0.25s ease, color 0.25s ease;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: var(--bg);
-  color: var(--text);
   padding: 20px;
-  min-height: 100vh;
 }
 
 #embed-root {
-  min-height: 100vh;
 }
 
+/* ── Header ──────────────────────────────────────────────────────────────── */
 .embed-header {
   margin-bottom: 24px;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--embed-border);
+  transition: border-color 0.25s ease;
 }
 
 .embed-header h1 {
   font-size: 20px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--embed-text);
+  transition: color 0.25s ease;
 }
 
 .embed-header .subtitle {
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--embed-text-muted);
   margin-top: 4px;
+  transition: color 0.25s ease;
 }
 
+/* ── Charts grid ─────────────────────────────────────────────────────────── */
 .charts-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 500px), 1fr));
   gap: 20px;
 }
 
+/* ── Chart card ──────────────────────────────────────────────────────────── */
 .chart-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
+  background: var(--embed-card-bg);
+  border: 1px solid var(--embed-border);
   border-radius: 12px;
   padding: 20px;
-  transition: box-shadow 0.2s;
+  overflow: hidden;
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.2s ease;
 }
 
 .chart-card:hover {
@@ -80,57 +162,60 @@ body {
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 16px;
-  color: var(--text);
+  color: var(--embed-text);
+  transition: color 0.25s ease;
 }
 
+/* ── Chart container ─────────────────────────────────────────────────────── */
 .chart-container {
   position: relative;
   min-height: 280px;
-  height: 300px;
 }
 
+/* ── Skeleton loader ─────────────────────────────────────────────────────── */
 .skeleton {
   background: linear-gradient(
     90deg,
-    var(--border) 25%,
+    var(--embed-border) 25%,
     transparent 50%,
-    var(--border) 75%
+    var(--embed-border) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 8px;
-  height: 100%;
+  height: 280px;
+  transition: background 0.25s ease;
 }
 
 @keyframes shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
+/* ── Error state ─────────────────────────────────────────────────────────── */
 .error-state {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
   min-height: 200px;
-  background: var(--error-bg);
-  border: 1px dashed var(--error-border);
+  background: var(--embed-error-bg);
+  border: 1px dashed var(--embed-error-border);
   border-radius: 8px;
-  color: var(--error-text);
+  color: var(--embed-error-text);
   font-size: 14px;
   text-align: center;
   padding: 20px;
+  transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
 }
 
+/* ── Footer ──────────────────────────────────────────────────────────────── */
 .powered-by {
   text-align: center;
   margin-top: 24px;
   padding-top: 16px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--embed-border);
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--embed-text-muted);
+  transition: border-color 0.25s ease, color 0.25s ease;
 }

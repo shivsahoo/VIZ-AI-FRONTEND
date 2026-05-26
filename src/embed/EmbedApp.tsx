@@ -1,12 +1,103 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { ReactNode } from "react";
 
 import { ChartCard } from "../components/features/charts/ChartCard";
 import type { ChartType } from "../components/features/charts/core/chartTypes";
 import { coerceChartType } from "../utils/chartSpecNormalizer";
 import { buildEmbedChartDisplayConfig } from "./embedChartDisplay";
-import type { EmbedChartMeta, EmbedChartState, EmbedTheme } from "./types";
+import { useIframeHeightBroadcaster } from "./useIframeHeightBroadcaster";
+import type {
+  DashboardMetaResponse,
+  EmbedChartMeta,
+  EmbedChartState,
+  EmbedTheme,
+  TokenRefreshResponse,
+} from "./types";
+
+// ── Theme helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Detect whether a hex/rgb/hsl color string represents a "dark" background
+ * by estimating relative luminance.
+ */
+function isColorDark(color: string): boolean {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 1;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return false;
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  // Perceived luminance (ITU-R BT.709)
+  const lum = 0.2126 * (r / 255) + 0.7152 * (g / 255) + 0.0722 * (b / 255);
+  return lum < 0.35;
+}
+
+/**
+ * Apply theme and/or a custom background colour independently.
+ *
+ * Logic:
+ *  - If `customBg` is provided → set --embed-bg and data-theme="custom";
+ *    use luminance to add/remove .embed-bg-dark for text contrast.
+ *  - The `.dark` class (for ECharts contrast) is driven by the explicit
+ *    `theme` state when set, or falls back to luminance of `customBg` when
+ *    no named theme has been provided.
+ *  - When only a named theme is given (no customBg) → clear inline bg vars
+ *    and set data-theme to "light" | "dark" as before.
+ */
+function applyEmbedTheme(theme: EmbedTheme | null, customBg?: string) {
+  const html = document.documentElement;
+
+  if (customBg) {
+    html.setAttribute("data-theme", "custom");
+    html.style.setProperty("--embed-bg", customBg);
+    html.style.setProperty("--embed-card-bg", ""); // let CSS rule handle it
+
+    const bgIsDark = isColorDark(customBg);
+    if (bgIsDark) {
+      html.classList.add("embed-bg-dark");
+    } else {
+      html.classList.remove("embed-bg-dark");
+    }
+
+    // Prefer explicit theme for ECharts dark class; fall back to luminance
+    if (theme === "dark" || (theme === null && bgIsDark)) {
+      html.classList.add("dark");
+    } else {
+      html.classList.remove("dark");
+    }
+    return;
+  }
+
+  // No custom background — clear inline vars and apply named theme
+  html.style.removeProperty("--embed-bg");
+  html.style.removeProperty("--embed-card-bg");
+  html.classList.remove("embed-bg-dark");
+
+  if (theme === null) return; // stay transparent
+  html.setAttribute("data-theme", theme);
+  if (theme === "dark") {
+    html.classList.add("dark");
+  } else {
+    html.classList.remove("dark");
+  }
+}
+
+/** Detect system preference as a fallback when parent sends no theme. */
+function systemPrefersDark(): boolean {
+  return typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+}
 
 const REFRESH_INTERVAL_MS = 60_000;
+const JWT_REFRESH_INTERVAL_MS = 25 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15_000;
 
 function normalizeEmbedChartType(raw: string | null | undefined): ChartType {
@@ -28,44 +119,146 @@ function fetchWithTimeout(
   ]);
 }
 
-let embedHeightLogged = false;
+// ── Height Broadcaster ────────────────────────────────────────────────────────
+// Height broadcasting is handled by useIframeHeightBroadcaster() which is
+// called at the top level of EmbedApp. The hook owns ResizeObserver,
+// MutationObserver, rAF coalescing, and deduplication internally.
 
-function sendEmbedHeight() {
-  const height = document.body.scrollHeight;
-  window.parent.postMessage({ type: "embed_ready", height }, "*");
-  if (!embedHeightLogged) {
-    embedHeightLogged = true;
-    console.log(
-      `[EMBED][STEP 12] postMessage bridge active — initial height: ${height}px`,
+// ── Chart-level Error Boundary ────────────────────────────────────────────────
+
+interface ChartErrorBoundaryProps {
+  chartTitle: string;
+  children: ReactNode;
+}
+interface ChartErrorBoundaryState {
+  hasError: boolean;
+  message: string;
+}
+
+class ChartErrorBoundary extends Component<
+  ChartErrorBoundaryProps,
+  ChartErrorBoundaryState
+> {
+  constructor(props: ChartErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+
+  static getDerivedStateFromError(error: unknown): ChartErrorBoundaryState {
+    return {
+      hasError: true,
+      message:
+        error instanceof Error ? error.message : "Chart render failed",
+    };
+  }
+
+  componentDidCatch(error: unknown, info: unknown) {
+    console.error(
+      "[EMBED][ChartErrorBoundary] Chart render error:",
+      this.props.chartTitle,
+      error,
+      info,
     );
   }
-}
 
-function applyTheme(theme: EmbedTheme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  if (theme === "light") {
-    document.documentElement.classList.remove("dark");
-  } else {
-    document.documentElement.classList.add("dark");
+  override render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-state">
+          Chart could not be rendered.
+          {import.meta.env.DEV && (
+            <span style={{ display: "block", fontSize: 11, marginTop: 4, opacity: 0.7 }}>
+              {this.state.message}
+            </span>
+          )}
+        </div>
+      );
+    }
+    return this.props.children;
   }
 }
+
+// ── EmbedChartCard — memoised per-chart render ────────────────────────────────
+
+interface EmbedChartCardProps {
+  chart: EmbedChartState;
+  index: number;
+}
+
+function EmbedChartCard({ chart, index }: EmbedChartCardProps) {
+  const display = useMemo(
+    () =>
+      buildEmbedChartDisplayConfig(
+        chart.rows,
+        chart.type,
+        chart.xAxis,
+        chart.yAxis,
+      ),
+    [chart.rows, chart.type, chart.xAxis, chart.yAxis],
+  );
+
+  return (
+    <div className="chart-card" key={chart.meta.id}>
+      <h3>{chart.meta.title || "Chart"}</h3>
+      <div className="chart-container" id={`chart-${index}`}>
+        {chart.isLoading ? (
+          <div className="skeleton" />
+        ) : chart.error ? (
+          <div className="error-state">{chart.error}</div>
+        ) : display.data.length > 0 ? (
+          <ChartErrorBoundary chartTitle={chart.meta.title || "Chart"}>
+            <ChartCard
+              type={display.effectiveType}
+              data={display.data}
+              dataKeys={display.dataKeys}
+              xAxisKey={display.xAxisKey}
+              axisConfig={display.axisConfig}
+              height={320}
+              showLegend={
+                display.dataKeys.length > 1 &&
+                display.effectiveType !== "pie" &&
+                display.effectiveType !== "donut"
+              }
+            />
+          </ChartErrorBoundary>
+        ) : (
+          <div className="error-state">No data available</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── EmbedApp ──────────────────────────────────────────────────────────────────
 
 interface EmbedAppProps {
   tokenId: string;
   apiBase: string;
   dashboardTitle: string;
   charts: EmbedChartMeta[];
+  initialAccessToken?: string;
 }
 
 export function EmbedApp({
   tokenId,
   apiBase,
-  dashboardTitle,
-  charts: chartMetas,
+  dashboardTitle: initialTitle,
+  charts: initialChartMetas,
+  initialAccessToken,
 }: EmbedAppProps) {
-  const [theme, setTheme] = useState<EmbedTheme>("dark");
+  // Height broadcasting — delegates to the dedicated hook (ResizeObserver +
+  // MutationObserver + rAF coalescing + deduplication).
+  useIframeHeightBroadcaster();
+
+  // Start with null = "auto" — we apply it after mount based on parent signal
+  // or system preference, avoiding a flash of the wrong theme.
+  // theme and customBg are fully independent: each postMessage type updates
+  // only its own slice of state.
+  const [theme, setTheme] = useState<EmbedTheme | null>(null);
+  const [customBg, setCustomBg] = useState<string | undefined>(undefined);
+  const [dashboardTitle, setDashboardTitle] = useState(initialTitle);
   const [charts, setCharts] = useState<EmbedChartState[]>(() =>
-    chartMetas.map((meta) => ({
+    initialChartMetas.map((meta) => ({
       meta,
       type: normalizeEmbedChartType(meta.chart_type),
       xAxis: meta.x_axis,
@@ -75,13 +268,24 @@ export function EmbedApp({
       error: null,
     })),
   );
-  const [renderGeneration, setRenderGeneration] = useState(0);
+
   const refreshTimerRef = useRef<number | null>(null);
+  const jwtRefreshTimerRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
 
+  const accessTokenRef = useRef<string | undefined>(initialAccessToken);
+  const isRefreshingRef = useRef(false);
+
+  // ── Keep a ref to the latest chart metas to avoid stale closures ──────────
+  // This is the key fix: instead of putting chartMetas in useCallback deps
+  // (which causes cascading recreations), we keep a ref that's always current.
+  const chartMetasRef = useRef<EmbedChartMeta[]>(initialChartMetas);
+
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+    // Apply whenever either theme or customBg changes.
+    // applyEmbedTheme handles the null-theme "stay transparent" case internally.
+    applyEmbedTheme(theme, customBg);
+  }, [theme, customBg]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -92,34 +296,112 @@ export function EmbedApp({
 
   useEffect(() => {
     console.log("[EMBED][STEP 9] Static assets loaded in embed context");
-    sendEmbedHeight();
 
-    const resizeObserver = new ResizeObserver(() => {
-      sendEmbedHeight();
-    });
-    resizeObserver.observe(document.body);
-
+    // ── postMessage bridge ────────────────────────────────────────────────
     const onMessage = (event: MessageEvent) => {
       if (!event.data || typeof event.data !== "object") return;
-      if (event.data.type === "set_theme") {
-        const next =
-          event.data.value === "light" ? "light" : ("dark" as EmbedTheme);
+      const { type, value } = event.data as { type: string; value?: string };
+
+      // Named theme: "light" | "dark" — only updates theme, never clears customBg
+      if (type === "set_theme") {
+        const next: EmbedTheme = value === "light" ? "light" : "dark";
         setTheme(next);
-        console.log("[EMBED][STEP 12] Theme set to: " + next);
+        console.log("[EMBED] Theme set to:", next);
       }
-      if (event.data.type === "set_filters") {
-        console.log("[EMBED][STEP 12] Filters received:", event.data.value);
+
+      // Custom background colour — only updates customBg, never clears theme
+      if (type === "set_background" && typeof value === "string" && value.trim()) {
+        setCustomBg(value.trim());
+        console.log("[EMBED] Custom background applied:", value.trim());
+      }
+
+      if (type === "set_filters") {
+        console.log("[EMBED] Filters received:", value);
       }
     };
 
     window.addEventListener("message", onMessage);
 
+    // ── Notify parent ─────────────────────────────────────────────────────
+    // request_theme prompts the parent to reply with set_theme / set_background.
+    window.parent.postMessage({ type: "request_theme" }, "*");
+    console.log("[EMBED] Requested parent theme via postMessage");
+
+    // ── Standalone fallback (no parent frame) ─────────────────────────────
+    const isEmbedded = window.self !== window.top;
+    const fallbackTimer = window.setTimeout(() => {
+      setTheme((prev) => {
+        if (prev !== null) return prev; // parent already responded
+        if (isEmbedded) {
+          console.log("[EMBED] No theme received from parent — staying transparent");
+          return null;
+        }
+        const detected: EmbedTheme = systemPrefersDark() ? "dark" : "light";
+        console.log("[EMBED] Standalone mode — using system theme:", detected);
+        return detected;
+      });
+    }, 400);
+
     return () => {
-      resizeObserver.disconnect();
       window.removeEventListener("message", onMessage);
+      window.clearTimeout(fallbackTimer);
     };
   }, []);
 
+  // Token helpers
+
+  /** Build Authorization headers using the embed session JWT */
+  const getAuthHeaders = useCallback((): Record<string, string> => {
+    const token = accessTokenRef.current;
+    if (!token) {
+      return { "Content-Type": "application/json" };
+    }
+    return {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    };
+  }, []);
+
+  /**
+   * Refresh embed JWT (~25m). Verifies current JWT + rechecks share token server-side.
+   */
+  const doRefresh = useCallback(async (): Promise<boolean> => {
+    if (isRefreshingRef.current) return false;
+    if (!accessTokenRef.current) return false;
+
+    isRefreshingRef.current = true;
+    try {
+      const res = await fetchWithTimeout(
+        `${apiBase}/api/v1/embed/token/refresh`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessTokenRef.current}`,
+          },
+          body: JSON.stringify({ share_token: tokenId }),
+        },
+        FETCH_TIMEOUT_MS,
+      );
+
+      if (!res.ok) {
+        console.warn("[EMBED] JWT refresh failed:", res.status);
+        return false;
+      }
+
+      const payload: TokenRefreshResponse = await res.json();
+      accessTokenRef.current = payload.access_token;
+      console.log("[EMBED] Embed JWT refreshed successfully");
+      return true;
+    } catch (err) {
+      console.error("[EMBED] JWT refresh error:", err);
+      return false;
+    } finally {
+      isRefreshingRef.current = false;
+    }
+  }, [apiBase, tokenId]);
+
+  //  Data fetching
   const fetchChartData = useCallback(
     async (chartId: string): Promise<{
       rows: Record<string, unknown>[] | null;
@@ -128,70 +410,174 @@ export function EmbedApp({
       yAxis?: string | null;
       chartType?: string;
     }> => {
+      const doFetch = async (isRetry: boolean): Promise<{
+        rows: Record<string, unknown>[] | null;
+        error: string | null;
+        xAxis?: string | null;
+        yAxis?: string | null;
+        chartType?: string;
+      }> => {
+        try {
+          const response = await fetchWithTimeout(
+            `${apiBase}/api/v1/embed/${tokenId}/data/${chartId}`,
+            { headers: getAuthHeaders() },
+            FETCH_TIMEOUT_MS,
+          );
+
+          if (response.status === 403) {
+            const body = await response.json().catch(() => ({}));
+            const errorCode = body?.detail?.error;
+
+            if (
+              (errorCode === "jwt_expired" || errorCode === "access_token_expired") &&
+              !isRetry
+            ) {
+              const refreshed = await doRefresh();
+              if (refreshed) {
+                return doFetch(true);
+              }
+            }
+
+            console.log(
+              "[EMBED][STEP 13] Token expiry detected mid-session — showing expired UI",
+            );
+            return {
+              rows: null,
+              error:
+                "This embed link has expired. Please contact the dashboard owner.",
+            };
+          }
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const payload = (await response.json()) as {
+            data?: Record<string, unknown>[];
+            x_axis?: string | null;
+            y_axis?: string | null;
+            chart_type?: string;
+          };
+
+          console.log(
+            "[EMBED][STEP 10a] Loading state shown; data fetch result: success",
+          );
+
+          return {
+            rows: payload.data ?? [],
+            error: null,
+            xAxis: payload.x_axis,
+            yAxis: payload.y_axis,
+            chartType: payload.chart_type,
+          };
+        } catch (err) {
+          console.error(
+            "[EMBED][STEP 10a] Loading state shown; data fetch result: error",
+            err,
+          );
+          return { rows: null, error: "Dashboard data unavailable" };
+        }
+      };
+
+      return doFetch(false);
+    },
+    [apiBase, tokenId, getAuthHeaders, doRefresh],
+  );
+
+  // Dynamic chart discovery
+
+  const fetchDashboardMeta = useCallback(async (): Promise<DashboardMetaResponse | null> => {
+    const doFetch = async (isRetry: boolean): Promise<DashboardMetaResponse | null> => {
       try {
-        const response = await fetchWithTimeout(
-          `${apiBase}/api/v1/embed/${tokenId}/data/${chartId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${tokenId}`,
-              "Content-Type": "application/json",
-            },
-          },
+        const res = await fetchWithTimeout(
+          `${apiBase}/api/v1/embed/${tokenId}/dashboard`,
+          { headers: getAuthHeaders() },
           FETCH_TIMEOUT_MS,
         );
 
-        if (response.status === 403) {
-          console.log(
-            "[EMBED][STEP 13] Token expiry detected mid-session — showing expired UI",
+        if (res.status === 403) {
+          const body = await res.json().catch(() => ({}));
+          const errCode = body?.detail?.error;
+          if (
+            (errCode === "jwt_expired" || errCode === "access_token_expired") &&
+            !isRetry
+          ) {
+            const refreshed = await doRefresh();
+            if (refreshed) return doFetch(true);
+          }
+          return null;
+        }
+
+        if (!res.ok) return null;
+        return (await res.json()) as DashboardMetaResponse;
+      } catch {
+        return null;
+      }
+    };
+
+    return doFetch(false);
+  }, [apiBase, tokenId, getAuthHeaders, doRefresh]);
+
+  // Chart loading
+
+  /** Load data for a specific subset of chart IDs */
+  const loadChartsById = useCallback(
+    async (chartIds: string[]) => {
+      const results = await Promise.all(
+        chartIds.map(async (id) => {
+          const result = await fetchChartData(id);
+          return { id, result };
+        }),
+      );
+
+      if (!isMountedRef.current) return;
+
+      setCharts((prev) =>
+        prev.map((c) => {
+          const found = results.find((r) => r.id === c.meta.id);
+          if (!found) return c;
+          const { result } = found;
+          const type = normalizeEmbedChartType(
+            result.chartType ?? c.meta.chart_type,
           );
           return {
-            rows: null,
-            error:
-              "This embed link has expired. Please contact the dashboard owner.",
+            ...c,
+            type,
+            xAxis: result.xAxis ?? c.xAxis,
+            yAxis: result.yAxis ?? c.yAxis,
+            rows: result.rows,
+            isLoading: false,
+            error: result.error
+              ? result.error
+              : result.rows && result.rows.length > 0
+                ? null
+                : "No data available",
           };
-        }
+        }),
+      );
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const payload = (await response.json()) as {
-          data?: Record<string, unknown>[];
-          x_axis?: string | null;
-          y_axis?: string | null;
-          chart_type?: string;
-        };
-
-        console.log(
-          "[EMBED][STEP 10a] Loading state shown; data fetch result: success",
-        );
-
-        return {
-          rows: payload.data ?? [],
-          error: null,
-          xAxis: payload.x_axis,
-          yAxis: payload.y_axis,
-          chartType: payload.chart_type,
-        };
-      } catch (err) {
-        console.error(
-          "[EMBED][STEP 10a] Loading state shown; data fetch result: error",
-          err,
-        );
-        return { rows: null, error: "Dashboard data unavailable" };
-      }
+      // Height change is picked up automatically by useIframeHeightBroadcaster
     },
-    [apiBase, tokenId],
+    [fetchChartData],
   );
 
+  /**
+   * Load all charts.
+   * CRITICAL FIX: reads current metas from ref (not stale closure) so
+   * this callback's identity never needs to change when metas update —
+   * eliminating the useEffect([loadAllCharts]) re-trigger loop.
+   */
   const loadAllCharts = useCallback(async () => {
+    // Read latest metas from ref to avoid stale-closure dependency
+    const currentMetas = chartMetasRef.current;
+
     setCharts((prev) =>
       prev.map((c) => ({ ...c, isLoading: true, error: null })),
     );
 
     let loadedCount = 0;
     const results = await Promise.all(
-      chartMetas.map(async (meta) => {
+      currentMetas.map(async (meta) => {
         const result = await fetchChartData(meta.id);
         return { meta, result };
       }),
@@ -233,32 +619,154 @@ export function EmbedApp({
       }),
     );
 
-    setRenderGeneration((g) => g + 1);
     console.log(
       `[EMBED][STEP 10] Chart data fetched — ${loadedCount} charts loaded successfully`,
     );
     console.log(
       `[EMBED][STEP 11] Dashboard fully rendered in embed — ${loadedCount} charts visible`,
     );
-    sendEmbedHeight();
-  }, [chartMetas, fetchChartData]);
+    // Height change is picked up automatically by useIframeHeightBroadcaster
+    // CRITICAL: fetchChartData is the only real dep; chartMetas is read via ref
+  }, [fetchChartData]);
 
+  /**
+   * Reconcile newly fetched chart metadata with existing state.
+   * Handles: new charts, removed charts, renamed charts,
+   * chart type changes, axis changes.
+   *
+   * CRITICAL FIX: Does NOT update chartMetasRef or call loadAllCharts directly
+   * to avoid cascade. Instead updates the ref and returns newly added IDs for
+   * the caller to load.
+   */
+  const reconcileCharts = useCallback(
+    (newMetas: EmbedChartMeta[]) => {
+      // Always keep the ref current
+      const prevMetas = chartMetasRef.current;
+      chartMetasRef.current = newMetas;
+
+      const newIds = new Set(newMetas.map((m) => m.id));
+      const existingIds = new Set(prevMetas.map((m) => m.id));
+
+      // Charts to add (newly discovered)
+      const added = newMetas.filter((m) => !existingIds.has(m.id));
+      // Charts to remove (no longer in dashboard)
+      const removed = new Set(
+        prevMetas.filter((m) => !newIds.has(m.id)).map((m) => m.id),
+      );
+
+      setCharts((prev) => {
+        // Remove charts no longer in dashboard
+        let updated = prev.filter((c) => !removed.has(c.meta.id));
+
+        // Update metadata for existing charts
+        updated = updated.map((c) => {
+          const freshMeta = newMetas.find((m) => m.id === c.meta.id);
+          if (!freshMeta) return c;
+          const typeChanged = freshMeta.chart_type !== c.meta.chart_type;
+          const axisChanged =
+            freshMeta.x_axis !== c.meta.x_axis ||
+            freshMeta.y_axis !== c.meta.y_axis;
+          const titleChanged = freshMeta.title !== c.meta.title;
+
+          if (typeChanged || axisChanged || titleChanged) {
+            return {
+              ...c,
+              meta: freshMeta,
+              type: normalizeEmbedChartType(freshMeta.chart_type),
+              xAxis: freshMeta.x_axis,
+              yAxis: freshMeta.y_axis,
+            };
+          }
+          return c;
+        });
+
+        // Append newly discovered charts
+        const newEntries: EmbedChartState[] = added.map((meta) => ({
+          meta,
+          type: normalizeEmbedChartType(meta.chart_type),
+          xAxis: meta.x_axis,
+          yAxis: meta.y_axis,
+          rows: null,
+          isLoading: true,
+          error: null,
+        }));
+
+        return [...updated, ...newEntries];
+      });
+
+      if (added.length > 0) {
+        console.log(
+          `[EMBED] Dynamic chart discovery — ${added.length} new chart(s) found`,
+        );
+        void loadChartsById(added.map((m) => m.id));
+      }
+
+      if (removed.size > 0) {
+        console.log(
+          `[EMBED] Dynamic chart removal — ${removed.size} chart(s) removed`,
+        );
+        // Height change is picked up automatically by useIframeHeightBroadcaster
+      }
+    },
+    // CRITICAL FIX: no chartMetas state dep — reads via ref instead
+    [loadChartsById],
+  );
+
+  // ── Initial data load — fires exactly once on mount ───────────────────────
+  // CRITICAL FIX: use a stable ref-based trigger instead of [loadAllCharts]
+  // to prevent the effect from re-firing every time loadAllCharts is recreated.
+  const initialLoadDoneRef = useRef(false);
   useEffect(() => {
+    if (initialLoadDoneRef.current) return;
+    initialLoadDoneRef.current = true;
     void loadAllCharts();
-  }, [loadAllCharts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — runs once on mount only
+
+  // Proactive JWT refresh at 25 minutes
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === "visible") {
+        void doRefresh();
+      }
+    };
+    jwtRefreshTimerRef.current = window.setInterval(tick, JWT_REFRESH_INTERVAL_MS);
+    return () => {
+      if (jwtRefreshTimerRef.current !== null) {
+        window.clearInterval(jwtRefreshTimerRef.current);
+      }
+    };
+  }, [doRefresh]);
+
+  // Refresh cycle (data + dynamic discovery)
+  // CRITICAL FIX: use stable refs for loadAllCharts and reconcileCharts
+  // so the effect only re-runs when fetchDashboardMeta changes (apiBase/tokenId).
+  const loadAllChartsRef = useRef(loadAllCharts);
+  const reconcileChartsRef = useRef(reconcileCharts);
+  useEffect(() => { loadAllChartsRef.current = loadAllCharts; }, [loadAllCharts]);
+  useEffect(() => { reconcileChartsRef.current = reconcileCharts; }, [reconcileCharts]);
 
   useEffect(() => {
     const startRefreshCycle = () => {
       if (refreshTimerRef.current !== null) {
         window.clearInterval(refreshTimerRef.current);
       }
-      refreshTimerRef.current = window.setInterval(() => {
+      refreshTimerRef.current = window.setInterval(async () => {
         const visible = document.visibilityState === "visible";
         console.log(
           `[EMBED][STEP 14] Data refresh cycle — tab visible: ${visible}, next refresh in ${REFRESH_INTERVAL_MS / 1000}s`,
         );
         if (visible) {
-          void loadAllCharts();
+          // Step 1: Discover chart changes
+          const meta = await fetchDashboardMeta();
+          if (meta && isMountedRef.current) {
+            if (meta.dashboard_title !== dashboardTitle) {
+              setDashboardTitle(meta.dashboard_title);
+            }
+            reconcileChartsRef.current(meta.charts);
+          }
+          // Step 2: Reload data for all current charts
+          void loadAllChartsRef.current();
         }
       }, REFRESH_INTERVAL_MS);
     };
@@ -285,7 +793,11 @@ export function EmbedApp({
       }
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [loadAllCharts]);
+    // Only re-run when the API connection changes (apiBase/tokenId change via fetchDashboardMeta)
+    // dashboardTitle is read from current state inside the callback so no dep needed
+  }, [fetchDashboardMeta]);
+
+  // Render
 
   return (
     <>
@@ -295,44 +807,13 @@ export function EmbedApp({
       </div>
 
       <div className="charts-grid" id="charts-grid">
-        {charts.map((chart, index) => {
-          const display = buildEmbedChartDisplayConfig(
-            chart.rows,
-            chart.type,
-            chart.xAxis,
-            chart.yAxis,
-          );
-
-          return (
-            <div className="chart-card" key={chart.meta.id}>
-              <h3>{chart.meta.title || "Chart"}</h3>
-              <div className="chart-container" id={`chart-${index}`}>
-                {chart.isLoading ? (
-                  <div className="skeleton" />
-                ) : chart.error ? (
-                  <div className="error-state">{chart.error}</div>
-                ) : display.data.length > 0 ? (
-                  <ChartCard
-                    key={`${chart.meta.id}-${renderGeneration}`}
-                    type={display.effectiveType}
-                    data={display.data}
-                    dataKeys={display.dataKeys}
-                    xAxisKey={display.xAxisKey}
-                    axisConfig={display.axisConfig}
-                    height={280}
-                    showLegend={
-                      display.dataKeys.length > 1 &&
-                      display.effectiveType !== "pie" &&
-                      display.effectiveType !== "donut"
-                    }
-                  />
-                ) : (
-                  <div className="error-state">No data available</div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+        {charts.map((chart, index) => (
+          <EmbedChartCard
+            key={chart.meta.id}
+            chart={chart}
+            index={index}
+          />
+        ))}
       </div>
 
       <div className="powered-by">
