@@ -108,8 +108,9 @@ body {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  padding: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  padding: 24px;
+  min-width: 0;
 }
 
 #embed-root {
@@ -138,38 +139,166 @@ body {
 }
 
 /* ── Charts grid ─────────────────────────────────────────────────────────── */
-.charts-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 500px), 1fr));
-  gap: 20px;
+/*
+ * Grafana-style full-width stacked rows.
+ *
+ * Every chart panel spans the full iframe width — identical behaviour to
+ * Grafana's default "panel" layout and Metabase's single-column dashboard.
+ * This maximises the chart canvas area and eliminates wasted whitespace on
+ * all viewport sizes.
+ *
+ * All breakpoints use 1fr (no multi-column logic needed).
+ */
+/* ── Charts grid ─────────────────────────────────────────── */
+
+/* ── Dashboard density layout ───────────────────────── */
+
+#charts-grid,
+.charts-grid{
+
+    display:grid;
+
+    grid-template-columns:
+
+        repeat(
+            auto-fit,
+
+            minmax(
+                380px,
+                1fr
+            )
+        );
+
+    gap:20px;
+
+    width:100%;
+
+    align-items:start;
+
 }
 
+
+/* Wider screens → allow more charts */
+
+@media(min-width:1600px){
+
+    #charts-grid,
+    .charts-grid{
+
+        grid-template-columns:
+
+            repeat(
+                auto-fit,
+
+                minmax(
+                    320px,
+                    1fr
+                )
+            );
+
+    }
+
+}
+
+
+/* Tablet */
+
+@media(max-width:900px){
+
+    #charts-grid,
+    .charts-grid{
+
+        grid-template-columns:
+
+            repeat(
+                auto-fit,
+
+                minmax(
+                    300px,
+                    1fr
+                )
+            );
+
+    }
+
+}
+
+
+/* Mobile */
+
+@media(max-width:600px){
+
+    #charts-grid,
+    .charts-grid{
+
+        grid-template-columns:1fr;
+
+    }
+
+}
 /* ── Chart card ──────────────────────────────────────────────────────────── */
+/*
+ * Premium dashboard panel — Grafana / Superset aesthetic:
+ *  - Subtle top-border accent stripe (brand colour).
+ *  - Frosted-glass backdrop (blurs parent bg when supported).
+ *  - Lift shadow on hover.
+ */
 .chart-card {
   background: var(--embed-card-bg);
+  min-height:320px;
+  padding:16px;
+
   border: 1px solid var(--embed-border);
+  /* Accent stripe at the top of every panel */
+  border-top: 2px solid var(--embed-primary);
   border-radius: 12px;
-  padding: 20px;
+  padding: 20px 20px 16px;
   overflow: hidden;
-  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.2s ease;
+  /* Prevent canvas overflow from breaking grid */
+  min-width: 0;
+  /* Smooth glass-like panel */
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  transition:
+    background 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.22s ease,
+    transform 0.18s ease;
 }
 
 .chart-card:hover {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.18),
+    0 2px 8px rgba(99, 102, 241, 0.12);
+  transform: translateY(-2px);
 }
 
+/* Panel title row — label + optional action slots (future) */
 .chart-card h3 {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
-  margin-bottom: 16px;
-  color: var(--embed-text);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  color: var(--embed-text-muted);
   transition: color 0.25s ease;
+  /* Truncate long titles */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Chart container ─────────────────────────────────────────────────────── */
+/*
+ * Full-width panels benefit from more vertical space so the chart has room
+ * to breathe. ECharts height prop is the source of truth for render height;
+ * min-height here just prevents a jarring collapse before the canvas paints.
+ */
 .chart-container {
   position: relative;
-  min-height: 280px;
+  min-height: 380px; /* taller floor — matches ChartCard height={420} */
+  overflow: hidden;
+  border-radius: 6px;
 }
 
 /* ── Skeleton loader ─────────────────────────────────────────────────────── */
@@ -183,7 +312,7 @@ body {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 8px;
-  height: 280px;
+  height: 380px; /* matches updated chart-container min-height */
   transition: background 0.25s ease;
 }
 
