@@ -53,12 +53,53 @@
       outDir: 'build',
     },
     server: {
+      host: "0.0.0.0",
       port: 3000,
+      strictPort: true,
+      hmr: {
+        clientPort: 3000,
+      },
       open: true,
       allowedHosts: [
         "vizai-be.webknot-dev.in",
         "vizai-llm.webknot-dev.in",
-        "vizai.webknot-dev.in"
-      ]
+        "vizai.webknot-dev.in",
+        "aim-ripeness-dealing.ngrok-free.dev"
+      ],
+      proxy: {
+        // Route LLM HTTP endpoints first (more specific than /api).
+        "/api/v1/enhance-text": {
+          target: "http://localhost:8001",
+          changeOrigin: true,
+        },
+        "/api/ontology": {
+          target: "http://localhost:8001",
+          changeOrigin: true,
+        },
+        // Route conversational WebSocket to LLM service.
+        "/ws/vizai": {
+          target: "ws://localhost:8001",
+          ws: true,
+          changeOrigin: true,
+        },
+        // Route main API to backend service.
+        "/api": {
+          target: "http://localhost:8000",
+          changeOrigin: true,
+        },
+        // Optional: expose backend docs through the same public URL.
+        "/docs": {
+          target: "http://localhost:8000",
+          changeOrigin: true,
+        },
+        "/redoc": {
+          target: "http://localhost:8000",
+          changeOrigin: true,
+        },
+        "/openapi.json": {
+          target: "http://localhost:8000",
+          changeOrigin: true,
+        },
+      },
     },
   });

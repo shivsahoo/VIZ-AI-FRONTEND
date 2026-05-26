@@ -86,7 +86,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
   const normalizeChartType = useCallback((chartType?: string | null): 'line' | 'bar' | 'pie' | 'area' => {
     if (!chartType) {
       return 'line';
-    }
+    }      
     const normalized = chartType.toString().toLowerCase();
     if (normalized === 'bar' || normalized === 'column') return 'bar';
     if (normalized === 'pie' || normalized === 'donut') return 'pie';
