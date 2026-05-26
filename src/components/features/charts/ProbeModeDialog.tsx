@@ -261,7 +261,7 @@ export function ProbeModeDialog({
     return messageIdRef.current;
   };
 
-  // Auto-scroll to latest message or thinking indicator
+  // Auto-scroll to latest message or visualizing indicator
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
@@ -528,6 +528,8 @@ export function ProbeModeDialog({
         original_chart_type: chart?.type ?? "bar",
         original_chart_spec: chart?.spec,
         db_schema: chart?.db_schema ?? "",
+        ontology_context: (chart as any)?.ontology_context,
+        ontology_constraints: (chart as any)?.ontology_constraints,
         db_type: (chart?.db_type ?? "postgres") as
           | "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce" | "databricks",
         current_working_sql: workingSqlRef.current,
@@ -972,7 +974,7 @@ export function ProbeModeDialog({
               </div>
             ))}
 
-            {/* Thinking / typing indicator while the model responds */}
+            {/* Visualizing / typing indicator while the model responds */}
             {isLoading && !isConnecting && (
               <div className="flex gap-2.5" aria-live="polite" aria-busy="true">
                 <div className="w-6 h-6 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0 mt-0.5 ring-1 ring-primary/30 shadow-md glow">
@@ -987,7 +989,7 @@ export function ProbeModeDialog({
                           "0 0 12px color-mix(in oklab, var(--primary) 55%, transparent), 0 0 20px color-mix(in oklab, var(--primary) 25%, transparent)",
                       }}
                     >
-                      Thinking
+                      Visualizing
                     </span>
                     <span className="flex items-center gap-1 pl-0.5" aria-hidden>
                       {[0, 1, 2].map((i) => (

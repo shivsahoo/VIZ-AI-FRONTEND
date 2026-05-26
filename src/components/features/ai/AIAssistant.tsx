@@ -6,7 +6,7 @@ import { Badge } from "../../ui/badge";
 import { GradientButton } from "../../shared/GradientButton";
 import { ChartPreviewDialog } from "../charts/ChartPreviewDialog";
 import { ProbeModeDialog } from "../charts/ProbeModeDialog";
-import { getDashboards, getDatabases, getCurrentUser, type Chart as SavedChart } from "../../../services/api";
+import { getDashboards, getDatabases, getCurrentUser, getLatestOntology, type Chart as SavedChart } from "../../../services/api";
 import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../../../utils/databaseMetadata";
 import { VizAIWebSocket, WebSocketResponse, type ChartSpec } from "../../../services/websocket";
 import { toast } from "sonner";
@@ -117,6 +117,8 @@ type ChartCreationRequestPayload = {
   data_connection_id: string;
   db_schema: string;
   db_type: 'postgres' | 'mysql' | 'sqlite' | 'oracledb' | 'salesforce' | 'databricks';
+  ontology_context?: Record<string, any>;
+  ontology_constraints?: Record<string, any>;
   role: string;
   product_name?: string;
   product_description?: string;
@@ -124,6 +126,42 @@ type ChartCreationRequestPayload = {
   conversation_summary?: string;
   min_max_dates?: [string, string];
   sample_data?: string;
+};
+
+const buildOntologyConstraints = (ontology: Record<string, any> | undefined) => {
+  if (!ontology || typeof ontology !== "object") return undefined;
+  const classes = Array.isArray(ontology.classes) ? ontology.classes : [];
+  const relationships = Array.isArray(ontology.relationships) ? ontology.relationships : [];
+  const metrics = Array.isArray(ontology.metrics) ? ontology.metrics : [];
+  const rules = ontology.rules && typeof ontology.rules === "object" ? ontology.rules : {};
+
+  const allowed_joins = relationships
+    .filter((r: any) => r && r.source && r.target)
+    .map((r: any) => ({
+      source: r.source,
+      target: r.target,
+      source_column: r.source_column,
+      target_column: r.target_column,
+      label: r.label,
+    }));
+
+  const metric_defs = metrics.map((m: any) => ({
+    name: m?.name,
+    definition: m?.definition,
+    formula: m?.formula,
+    denominator: m?.denominator,
+    default_filter: m?.default_filter,
+  }));
+
+  return {
+    class_count: classes.length,
+    allowed_joins,
+    metrics: metric_defs,
+    default_time_dimension: rules.default_time_dimension ?? null,
+    default_time_granularity: rules.default_time_granularity ?? null,
+    success_status_values: Array.isArray(rules.status_success_values) ? rules.status_success_values : [],
+    default_filters: rules.default_filters ?? {},
+  };
 };
 
 interface AIAssistantProps {
@@ -797,7 +835,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     }, 800);
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmedInput = input.trim();
     if (!trimmedInput) return;
 
@@ -871,6 +909,17 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     }, 100);
 
     const dbType = normalizeDbType(selectedDb.type);
+    let ontologyContext: Record<string, any> | undefined;
+    let ontologyConstraints: Record<string, any> | undefined;
+    try {
+      const ontologyResponse = await getLatestOntology(String(selectedDb.id));
+      if (ontologyResponse.success && ontologyResponse.data?.ontology) {
+        ontologyContext = ontologyResponse.data.ontology;
+        ontologyConstraints = buildOntologyConstraints(ontologyContext);
+      }
+    } catch (error) {
+      console.warn("[AIAssistant] Failed to load ontology context for chart generation", error);
+    }
 
     let payload: ChartCreationRequestPayload;
 
@@ -880,6 +929,8 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         data_connection_id: String(selectedDb.id),
         db_schema: schemaString,
         db_type: dbType,
+        ontology_context: ontologyContext,
+        ontology_constraints: ontologyConstraints,
       };
     } else {
       payload = {
@@ -887,6 +938,8 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         data_connection_id: String(selectedDb.id),
         db_schema: schemaString,
         db_type: dbType,
+        ontology_context: ontologyContext,
+        ontology_constraints: ontologyConstraints,
         role: 'Analyst',
       };
       chartRequestRef.current = { ...payload };
@@ -903,8 +956,12 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         });
         setIsAwaitingClarification(false);
       } else {
+        // If the user previously generated charts in this session, pass the
+        // last known state so the backend can restore conversation history
+        // even if its in-memory session was lost (e.g. server restart).
         wsClient.chartCreation({
           ...payload,
+          ...(chartWorkflowState ? { existing_state: chartWorkflowState } : {}),
         });
       }
     } catch (error: any) {
@@ -913,7 +970,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     }
   };
 
-  const handleRegenerateCharts = () => {
+  const handleRegenerateCharts = async () => {
     if (!wsClient || !wsClient.isConnected()) {
       toast.error(isConnecting ? "Still connecting to AI assistant..." : "AI assistant is not connected. Please try again.");
       return;
@@ -939,6 +996,17 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
 
     const schemaString = ensureSchemaString(selectedDb.schema);
     const dbType = normalizeDbType(selectedDb.type);
+    let ontologyContext: Record<string, any> | undefined;
+    let ontologyConstraints: Record<string, any> | undefined;
+    try {
+      const ontologyResponse = await getLatestOntology(String(selectedDb.id));
+      if (ontologyResponse.success && ontologyResponse.data?.ontology) {
+        ontologyContext = ontologyResponse.data.ontology;
+        ontologyConstraints = buildOntologyConstraints(ontologyContext);
+      }
+    } catch (error) {
+      console.warn("[AIAssistant] Failed to load ontology context for regenerate", error);
+    }
 
     const hasExistingCharts = messages.some(m => m.type === 'chart-suggestions');
 
@@ -954,6 +1022,8 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
           data_connection_id: String(selectedDb.id),
           db_schema: schemaString,
           db_type: dbType,
+          ontology_context: ontologyContext,
+          ontology_constraints: ontologyConstraints,
           role: 'Analyst',
           domain: 'admin',
         } as any); // <-- ADD "as any" HERE
@@ -966,6 +1036,8 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
             data_connection_id: String(selectedDb.id),
             db_schema: schemaString,
             db_type: dbType,
+            ontology_context: ontologyContext,
+            ontology_constraints: ontologyConstraints,
             role: 'Analyst',
             domain: 'admin',
             project_id: projectId || undefined,
@@ -980,7 +1052,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     }
   };
 
-  const handleOpenProbeMode = (suggestion: ChartSuggestion) => {
+  const handleOpenProbeMode = async (suggestion: ChartSuggestion) => {
     const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
     if (!selectedDb?.id) {
       toast.error("Please select a valid database connection first.");
@@ -988,6 +1060,17 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     }
     const schemaString = ensureSchemaString(selectedDb.schema);
     const dbType = normalizeDbType(selectedDb.type);
+    let ontologyContext: Record<string, any> | undefined;
+    let ontologyConstraints: Record<string, any> | undefined;
+    try {
+      const ontologyResponse = await getLatestOntology(String(selectedDb.id));
+      if (ontologyResponse.success && ontologyResponse.data?.ontology) {
+        ontologyContext = ontologyResponse.data.ontology;
+        ontologyConstraints = buildOntologyConstraints(ontologyContext);
+      }
+    } catch (error) {
+      console.warn("[AIAssistant] Failed to load ontology context for probe mode", error);
+    }
     // Cast to `any` to carry db_schema / db_type alongside the standard ChartSuggestion fields.
     // ProbeModeDialog reads these extra fields when building the first-turn context block.
     setProbeModeChart({
@@ -996,6 +1079,8 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       databaseId: suggestion.dataConnectionId || selectedDb.id,
       db_schema: schemaString,
       db_type: dbType,
+      ontology_context: ontologyContext,
+      ontology_constraints: ontologyConstraints,
     } as any);
   };
 

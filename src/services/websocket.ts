@@ -409,6 +409,8 @@ export class VizAIWebSocket {
     data_connection_id: string;
     db_schema: string; // JSON string of database schema
     db_type: "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce" | "databricks";
+    ontology_context?: Record<string, any>;
+    ontology_constraints?: Record<string, any>;
     role: string;
     domain?: string;
     product_name?: string;
@@ -457,6 +459,10 @@ export class VizAIWebSocket {
     original_chart_spec?: ChartSpec;
     /** Send on first turn; backend caches by websocket/thread_id for follow-ups */
     db_schema?: string;
+    /** Optional enriched ontology context for semantic grounding in probe mode */
+    ontology_context?: Record<string, any>;
+    /** Optional normalized ontology constraints for business-safe SQL decisions */
+    ontology_constraints?: Record<string, any>;
     db_type?: 'mysql' | 'postgres' | 'sqlite' | 'oracledb' | 'salesforce' | 'databricks';
     /**
      * Every turn: last executed SQL and chart type so the agent does not rely on
@@ -477,6 +483,8 @@ export class VizAIWebSocket {
    */
   regenerate(payload: {
     data_connection_id: string;
+    ontology_context?: Record<string, any>;
+    ontology_constraints?: Record<string, any>;
     role?: string;
     domain?: string;
     product_info?: string;

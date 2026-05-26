@@ -1,5 +1,5 @@
-import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye, TrendingUp, Clock, Tag, Filter, Bot } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -34,9 +34,23 @@ import {
 import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
 import { DSGraphViewer } from "../components/features/databases/DSGraphViewer";
+import { OntologyViewer } from "../components/features/databases/OntologyViewer";
 import { OnboardingTour, type TourOutcome } from "../components/shared/OnboardingTour";
 
-import { getDatabases, deleteConnection, updateConnection, getDatabaseDSGraph, type DSGraphPayload } from "../services/api";
+import {
+  getDatabases,
+  deleteConnection,
+  updateConnection,
+  getDatabaseDSGraph,
+  getLatestOntology,
+  bootstrapOntology,
+  downloadLatestOntologyTTL,
+  startOntologyEnrichment,
+  sendOntologyEnrichmentChat,
+  applyOntologyEnrichment,
+  type DSGraphPayload,
+  type OntologyVersionPayload,
+} from "../services/api";
 import { storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 
 interface DatabaseConnection {
@@ -66,6 +80,20 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   const [graphError, setGraphError] = useState<string | null>(null);
   const [currentGraph, setCurrentGraph] = useState<DSGraphPayload | null>(null);
   const [showTour, setShowTour] = useState(false);
+
+  // Ontology dialog state
+  const [ontologyDialogOpen, setOntologyDialogOpen] = useState(false);
+  const [isOntologyLoading, setIsOntologyLoading] = useState(false);
+  const [ontologyError, setOntologyError] = useState<string | null>(null);
+  const [currentOntology, setCurrentOntology] = useState<OntologyVersionPayload | null>(null);
+  const [enrichChatOpen, setEnrichChatOpen] = useState(false);
+  const [isEnriching, setIsEnriching] = useState(false);
+  const [enrichmentSessionId, setEnrichmentSessionId] = useState<string | null>(null);
+  const [enrichmentInput, setEnrichmentInput] = useState("");
+  const [enrichmentChat, setEnrichmentChat] = useState<Array<{ role: "assistant" | "user"; text: string }>>([]);
+  const [isEnrichmentReplyPending, setIsEnrichmentReplyPending] = useState(false);
+  const [enrichmentUpdates, setEnrichmentUpdates] = useState<Record<string, any>>({});
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   // Edit form state (for editing existing connections)
   const [connectionName, setConnectionName] = useState("");
@@ -223,6 +251,184 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
       setGraphError(error.message || "Unable to load datasource graph");
     } finally {
       setIsGraphLoading(false);
+    }
+  };
+
+  const handleEnrichDatasource = async (db: DatabaseConnection) => {
+    setSelectedDatabase(db);
+    setOntologyDialogOpen(true);
+    setIsOntologyLoading(true);
+    setOntologyError(null);
+    setCurrentOntology(null);
+    try {
+      // Try to fetch the latest ontology first
+      let response = await getLatestOntology(db.id);
+      if (!response.success || !response.data) {
+        // No ontology yet — bootstrap one from the DS graph (silent UX)
+        response = await bootstrapOntology(db.id);
+      }
+      if (response.success && response.data) {
+        setCurrentOntology(response.data);
+      } else {
+        setOntologyError(response.error?.message || "Unable to load ontology");
+        toast.error(response.error?.message || "Unable to load ontology");
+      }
+    } catch (error: any) {
+      setOntologyError(error.message || "Unable to load ontology");
+      toast.error(error.message || "Unable to load ontology");
+    } finally {
+      setIsOntologyLoading(false);
+    }
+  };
+
+  const handleDownloadOntologyTTL = async () => {
+    if (!selectedDatabase) return;
+    try {
+      const response = await downloadLatestOntologyTTL(selectedDatabase.id);
+      if (!response.success || !response.data) {
+        toast.error(response.error?.message || "Unable to download ontology");
+        return;
+      }
+      const ttl = response.data;
+      const blob = new Blob([ttl], { type: "text/turtle;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${selectedDatabase.name || "ontology"}.ttl`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Ontology file downloaded");
+    } catch (error: any) {
+      toast.error(error.message || "Unable to download ontology");
+    }
+  };
+
+  const handleStartEnriching = async () => {
+    if (!selectedDatabase) return;
+    setIsEnriching(true);
+    try {
+      const response = await startOntologyEnrichment(selectedDatabase.id);
+      if (!response.success || !response.data) {
+        toast.error(response.error?.message || "Unable to start enrichment");
+        return;
+      }
+      setEnrichmentSessionId(response.data.session_id);
+      setEnrichmentUpdates({});
+      setEnrichmentChat([
+        {
+          role: "assistant",
+          text: response.data.initial_message || "Let's enrich your ontology. Share business rules, default metrics, and status definitions.",
+        },
+      ]);
+      setEnrichChatOpen(true);
+    } catch (error: any) {
+      toast.error(error.message || "Unable to start enrichment");
+    } finally {
+      setIsEnriching(false);
+    }
+  };
+
+  // Auto-scroll chat to bottom whenever a new message is added
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [enrichmentChat, isEnrichmentReplyPending]);
+
+  const handleSendEnrichmentMessage = async () => {
+    if (!selectedDatabase || !enrichmentSessionId) return;
+    const message = enrichmentInput.trim();
+    if (!message) return;
+    setEnrichmentInput("");
+    setEnrichmentChat((prev) => [...prev, { role: "user", text: message }]);
+    setIsEnriching(true);
+    setIsEnrichmentReplyPending(true);
+    try {
+      const response = await sendOntologyEnrichmentChat(selectedDatabase.id, enrichmentSessionId, message);
+      if (!response.success || !response.data) {
+        toast.error(response.error?.message || "Unable to send message");
+        return;
+      }
+      // Deep-merge new extracted_updates into accumulated updates.
+      // When the LLM is asking a clarification question (needs_clarification=true)
+      // it intentionally leaves incomplete/empty metrics out of extracted_updates,
+      // so we skip the merge in that case to avoid writing partial data.
+      const needsClarification = response.data.needs_clarification === true;
+      if (!needsClarification) {
+        const incoming = response.data.extracted_updates || {};
+        setEnrichmentUpdates((prev) => {
+          const next = { ...prev };
+          for (const [key, value] of Object.entries(incoming)) {
+            if (key in next && typeof next[key] === "object" && !Array.isArray(next[key]) && typeof value === "object" && !Array.isArray(value)) {
+              next[key] = { ...(next[key] as Record<string, any>), ...(value as Record<string, any>) };
+            } else if (key in next && Array.isArray(next[key]) && Array.isArray(value)) {
+              const existingTerms = new Set((next[key] as any[]).filter(i => i?.term).map((i: any) => i.term));
+              const newItems = (value as any[]).filter(i => !existingTerms.has(i?.term));
+              next[key] = [...(next[key] as any[]), ...newItems];
+            } else {
+              next[key] = value;
+            }
+          }
+          return next;
+        });
+      }
+      setEnrichmentChat((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: response.data.assistant_message || "Noted.",
+        },
+      ]);
+    } catch (error: any) {
+      toast.error(error.message || "Unable to send message");
+    } finally {
+      setIsEnrichmentReplyPending(false);
+      setIsEnriching(false);
+    }
+  };
+
+  const handleApplyEnrichment = async () => {
+    if (!selectedDatabase || !enrichmentSessionId) return;
+    setIsEnriching(true);
+    try {
+      // Send empty answers — the backend uses the session's accumulated updates from chat
+      // (stored in session.answers_json.updates) as the authoritative source.
+      // Sending enrichmentUpdates as flat strings ([object Object]) overwrites the
+      // correctly-typed nested dicts the backend already has from the chat phase.
+      const response = await applyOntologyEnrichment(selectedDatabase.id, enrichmentSessionId, []);
+      if (!response.success || !response.data) {
+        toast.error(response.error?.message || "Unable to apply enrichment");
+        return;
+      }
+      setCurrentOntology(response.data);
+      setEnrichChatOpen(false);
+
+      // Surface any metric formula validation issues so the user knows their
+      // business metric was rejected because it referenced a non-existent column.
+      const metricWarnings = (response.data as any)?.metric_warnings as
+        | Array<{ metric_name: string; missing_columns: string[]; formula: string }>
+        | undefined;
+      if (metricWarnings && metricWarnings.length > 0) {
+        for (const w of metricWarnings) {
+          toast.error(
+            `Metric "${w.metric_name}" was dropped: column(s) ${w.missing_columns
+              .map((c) => `"${c}"`)
+              .join(", ")} do not exist in your schema. Formula: ${w.formula}`,
+            { duration: 12000 }
+          );
+        }
+        toast.success(
+          `Ontology saved with ${metricWarnings.length} metric(s) skipped. Re-enrich with valid column names to include them.`
+        );
+      } else {
+        toast.success("Ontology enriched successfully");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Unable to apply enrichment");
+    } finally {
+      setIsEnriching(false);
     }
   };
 
@@ -632,8 +838,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
           }
         }}>
           <DialogContent
-            className="!w-[82vw] !max-w-[82vw] sm:!max-w-[82vw] h-[84vh] max-h-[84vh] p-4 flex flex-col overflow-hidden"
-            style={{ width: "82vw", maxWidth: "82vw", height: "84vh", maxHeight: "84vh" }}
+            className="!w-[92vw] !max-w-[92vw] sm:!max-w-[92vw] h-[88vh] max-h-[88vh] p-4 flex flex-col overflow-hidden"
+            style={{ width: "92vw", maxWidth: "92vw", height: "88vh", maxHeight: "88vh" }}
             data-tour-container="ds-graph-dialog"
             hideCloseButton={showTour}
             onInteractOutside={(event) => {
@@ -660,7 +866,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                 </DialogDescription>
               </DialogHeader>
               <GradientButton
-                onClick={() => { }}
+                onClick={() => selectedDatabase && handleEnrichDatasource(selectedDatabase)}
                 data-tour-target="enrich-datasource-btn"
               >
                 Enrich Datasource
@@ -696,6 +902,227 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
             />
           </DialogContent>
         </Dialog>
+
+        {/* ── Ontology Explorer Dialog ── */}
+        <Dialog open={ontologyDialogOpen} onOpenChange={setOntologyDialogOpen}>
+          <DialogContent
+            className="!w-[92vw] !max-w-[92vw] sm:!max-w-[92vw] h-[88vh] max-h-[88vh] p-4 flex flex-col overflow-hidden"
+            style={{ width: "92vw", maxWidth: "92vw", height: "88vh", maxHeight: "88vh" }}
+          >
+            <div className="flex items-start justify-between pr-8 shrink-0">
+              <DialogHeader>
+                <DialogTitle>Ontology Explorer</DialogTitle>
+                <DialogDescription>
+                  {selectedDatabase
+                    ? `Knowledge graph ontology for ${selectedDatabase.name}`
+                    : "Knowledge graph ontology"}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => setOntologyDialogOpen(false)}>
+                  Close
+                </Button>
+                <Button variant="outline" onClick={handleDownloadOntologyTTL} disabled={isOntologyLoading || !currentOntology}>
+                  Download RDF/OWL
+                </Button>
+                <GradientButton onClick={handleStartEnriching} disabled={isEnriching || isOntologyLoading || !currentOntology}>
+                  {isEnriching ? "Preparing..." : "Start Enriching"}
+                </GradientButton>
+              </div>
+            </div>
+            {isOntologyLoading ? (
+              <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                <div className="w-6 h-6 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+                <span className="text-sm">Loading ontology…</span>
+              </div>
+            ) : ontologyError ? (
+              <div className="flex-1 min-h-0 flex items-center justify-center text-destructive text-sm">
+                {ontologyError}
+              </div>
+            ) : currentOntology ? (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <OntologyViewer ontology={currentOntology} />
+              </div>
+            ) : (
+              <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground text-sm">
+                Ontology not available.
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={enrichChatOpen} onOpenChange={setEnrichChatOpen}>
+          <DialogContent
+            className="!w-[98vw] !max-w-[98vw] sm:!max-w-[98vw] h-[90vh] max-h-[90vh] flex flex-col"
+            style={{ width: "98vw", maxWidth: "98vw", height: "90vh", maxHeight: "90vh" }}
+          >
+            <DialogHeader>
+              <DialogTitle>Ontology Enrichment Chat</DialogTitle>
+              <DialogDescription>
+                Chat with the assistant to enrich business semantics for this ontology.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex flex-1 min-h-0 gap-3 overflow-hidden">
+              {/* Chat area */}
+              <div className="flex flex-col flex-1 min-h-0 min-w-0 gap-2">
+                <div ref={chatScrollRef} className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+                  {enrichmentChat.map((msg, index) => (
+                    <div
+                      key={`${msg.role}-${index}`}
+                      className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
+                        msg.role === "assistant"
+                          ? "bg-muted/40 border border-border mr-10"
+                          : "bg-primary/10 border border-primary/20 ml-10"
+                      }`}
+                    >
+                      {msg.text}
+                    </div>
+                  ))}
+                  {isEnrichmentReplyPending && (
+                    <div className="rounded-lg px-3 py-2 text-sm bg-muted/40 border border-border mr-10" aria-live="polite" aria-busy="true">
+                      <div className="flex items-center gap-2">
+                        <Bot className="h-4 w-4 text-primary/80" />
+                        <span className="text-xs text-muted-foreground">Capturing metrics...</span>
+                        <span className="flex items-center gap-1" aria-hidden>
+                          {[0, 1, 2].map((i) => (
+                            <span
+                              key={i}
+                              className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce"
+                              style={{ animationDelay: `${i * 140}ms` }}
+                            />
+                          ))}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <Input
+                    placeholder="Type your answer or business rule..."
+                    value={enrichmentInput}
+                    onChange={(e) => setEnrichmentInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleSendEnrichmentMessage();
+                      }
+                    }}
+                    disabled={isEnriching}
+                  />
+                  <Button onClick={handleSendEnrichmentMessage} disabled={isEnriching || !enrichmentInput.trim()}>
+                    Send
+                  </Button>
+                </div>
+              </div>
+
+              {/* Captured so far panel */}
+              <div className="w-80 shrink-0 flex flex-col rounded-lg border border-border bg-muted/20 overflow-hidden">
+                <div className="px-3 py-2.5 border-b border-border shrink-0">
+                  <p className="text-xs font-semibold text-foreground">Captured so far</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Updated as you chat</p>
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-4">
+                  {Object.keys(enrichmentUpdates).length === 0 && (
+                    <p className="text-[11px] text-muted-foreground text-center pt-4">
+                      Nothing captured yet. Start chatting to define metrics, granularity, and rules.
+                    </p>
+                  )}
+
+                  {/* Metrics */}
+                  {enrichmentUpdates.metrics && Object.keys(enrichmentUpdates.metrics).length > 0 && (
+                    <div>
+                      <p className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 mb-1.5">
+                        <TrendingUp className="w-3 h-3" /> Metrics
+                      </p>
+                      <div className="space-y-2">
+                        {Object.entries(enrichmentUpdates.metrics).map(([name, val]: [string, any]) => (
+                          <div key={name} className="rounded border border-border/50 bg-background/40 p-2">
+                            <p className="text-[11px] font-semibold text-foreground">{name}</p>
+                            {val?.formula && (
+                              <code className="block text-[10px] text-emerald-400 font-mono mt-1 break-all">
+                                {val.formula}
+                              </code>
+                            )}
+                            {typeof val === "string" && (
+                              <p className="text-[10px] text-muted-foreground mt-0.5">{val}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Rules */}
+                  {enrichmentUpdates.rules && Object.keys(enrichmentUpdates.rules).length > 0 && (
+                    <div>
+                      <p className="flex items-center gap-1 text-[10px] font-semibold text-sky-400 mb-1.5">
+                        <Clock className="w-3 h-3" /> Rules
+                      </p>
+                      <div className="rounded border border-border/50 bg-background/40 divide-y divide-border/40">
+                        {enrichmentUpdates.rules.default_time_granularity && (
+                          <div className="flex items-center justify-between px-2 py-1.5">
+                            <span className="text-[10px] text-muted-foreground">Granularity</span>
+                            <span className="text-[10px] font-semibold text-sky-300 capitalize">
+                              {enrichmentUpdates.rules.default_time_granularity}
+                            </span>
+                          </div>
+                        )}
+                        {enrichmentUpdates.rules.default_time_dimension && (
+                          <div className="flex items-center justify-between px-2 py-1.5">
+                            <span className="text-[10px] text-muted-foreground">Date Column</span>
+                            <code className="text-[10px] font-mono text-sky-300">
+                              {enrichmentUpdates.rules.default_time_dimension}
+                            </code>
+                          </div>
+                        )}
+                        {enrichmentUpdates.rules.status_success_values?.length > 0 && (
+                          <div className="px-2 py-1.5">
+                            <span className="text-[10px] text-muted-foreground">Success values</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {enrichmentUpdates.rules.status_success_values.map((v: string) => (
+                                <span key={v} className="text-[9px] px-1 py-0.5 rounded bg-emerald-400/10 text-emerald-300 border border-emerald-400/20">{v}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Aliases */}
+                  {enrichmentUpdates.aliases?.length > 0 && (
+                    <div>
+                      <p className="flex items-center gap-1 text-[10px] font-semibold text-violet-400 mb-1.5">
+                        <Tag className="w-3 h-3" /> Aliases
+                      </p>
+                      <div className="rounded border border-border/50 bg-background/40 divide-y divide-border/40">
+                        {enrichmentUpdates.aliases.map((a: any, i: number) => (
+                          <div key={i} className="flex items-center gap-1.5 px-2 py-1.5">
+                            <span className="text-[10px] text-violet-300">"{a.term}"</span>
+                            <span className="text-[9px] text-muted-foreground">→</span>
+                            <code className="text-[10px] font-mono text-foreground">{a.maps_to}</code>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 shrink-0">
+              <Button variant="outline" onClick={() => setEnrichChatOpen(false)} disabled={isEnriching}>
+                Close
+              </Button>
+              <GradientButton onClick={handleApplyEnrichment} disabled={isEnriching || !enrichmentSessionId}>
+                {isEnriching ? "Applying..." : "Apply Enrichment"}
+              </GradientButton>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </div>
   );
