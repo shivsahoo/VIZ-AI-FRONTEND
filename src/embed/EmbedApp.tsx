@@ -12,6 +12,7 @@ import { ChartCard } from "../components/features/charts/ChartCard";
 import type { ChartType } from "../components/features/charts/core/chartTypes";
 import { coerceChartType } from "../utils/chartSpecNormalizer";
 import { buildEmbedChartDisplayConfig } from "./embedChartDisplay";
+import { useIframeHeightBroadcaster } from "./useIframeHeightBroadcaster";
 import type {
   DashboardMetaResponse,
   EmbedChartMeta,
@@ -40,33 +41,47 @@ function isColorDark(color: string): boolean {
 }
 
 /**
- * Apply a named theme (light | dark) or a custom background colour.
- * Updates:
- *  - html[data-theme]
- *  - html.dark  (for ECharts / ChartCard dark-mode detection)
- *  - html.embed-bg-dark  (for custom-bg dark-text variant)
- *  - html style --embed-bg (custom mode only)
+ * Apply theme and/or a custom background colour independently.
+ *
+ * Logic:
+ *  - If `customBg` is provided → set --embed-bg and data-theme="custom";
+ *    use luminance to add/remove .embed-bg-dark for text contrast.
+ *  - The `.dark` class (for ECharts contrast) is driven by the explicit
+ *    `theme` state when set, or falls back to luminance of `customBg` when
+ *    no named theme has been provided.
+ *  - When only a named theme is given (no customBg) → clear inline bg vars
+ *    and set data-theme to "light" | "dark" as before.
  */
-function applyEmbedTheme(theme: EmbedTheme, customBg?: string) {
+function applyEmbedTheme(theme: EmbedTheme | null, customBg?: string) {
   const html = document.documentElement;
 
-  if (theme === "custom" && customBg) {
+  if (customBg) {
     html.setAttribute("data-theme", "custom");
     html.style.setProperty("--embed-bg", customBg);
     html.style.setProperty("--embed-card-bg", ""); // let CSS rule handle it
-    if (isColorDark(customBg)) {
-      html.classList.add("dark", "embed-bg-dark");
+
+    const bgIsDark = isColorDark(customBg);
+    if (bgIsDark) {
+      html.classList.add("embed-bg-dark");
     } else {
-      html.classList.remove("dark", "embed-bg-dark");
+      html.classList.remove("embed-bg-dark");
+    }
+
+    // Prefer explicit theme for ECharts dark class; fall back to luminance
+    if (theme === "dark" || (theme === null && bgIsDark)) {
+      html.classList.add("dark");
+    } else {
+      html.classList.remove("dark");
     }
     return;
   }
 
-  // Clear any inline custom-bg property
+  // No custom background — clear inline vars and apply named theme
   html.style.removeProperty("--embed-bg");
   html.style.removeProperty("--embed-card-bg");
   html.classList.remove("embed-bg-dark");
 
+  if (theme === null) return; // stay transparent
   html.setAttribute("data-theme", theme);
   if (theme === "dark") {
     html.classList.add("dark");
@@ -105,53 +120,9 @@ function fetchWithTimeout(
 }
 
 // ── Height Broadcaster ────────────────────────────────────────────────────────
-// Sends the dashboard's total content height to the parent so the <iframe> can
-// auto-expand.  Three safeguards:
-//   1. Uses documentElement.scrollHeight (accurate for grid/flex layouts).
-//   2. Deduplicates: skips postMessage when height hasn't changed.
-//   3. Wraps in rAF: prevents "ResizeObserver loop limit exceeded" errors.
-
-let _lastBroadcastHeight = 0;
-let _heightRafId: number | null = null;
-let _heightLoggedOnce = false;
-
-/**
- * Measure the full document height and send it to the parent window.
- * Safe to call from any context (ResizeObserver, MutationObserver, async code).
- * Coalesces rapid calls via requestAnimationFrame and skips duplicate values.
- */
-function sendEmbedHeight() {
-  // Cancel any pending rAF to coalesce rapid successive calls
-  if (_heightRafId !== null) {
-    cancelAnimationFrame(_heightRafId);
-  }
-
-  _heightRafId = requestAnimationFrame(() => {
-    _heightRafId = null;
-
-    // documentElement.scrollHeight is the most reliable cross-browser measurement
-    // for total content height, including grid/flex children and overflows.
-    const height = Math.max(
-      document.documentElement.scrollHeight,
-      document.body.scrollHeight,
-    );
-
-    // Deduplicate: don't flood the parent with identical height messages
-    if (height === _lastBroadcastHeight) return;
-    _lastBroadcastHeight = height;
-
-    window.parent.postMessage({ type: "embed_ready", height }, "*");
-
-    if (!_heightLoggedOnce) {
-      _heightLoggedOnce = true;
-      console.log(
-        `[EMBED][STEP 12] postMessage bridge active — initial height: ${height}px`,
-      );
-    }
-  });
-}
-
-// (applyTheme replaced by applyEmbedTheme above)
+// Height broadcasting is handled by useIframeHeightBroadcaster() which is
+// called at the top level of EmbedApp. The hook owns ResizeObserver,
+// MutationObserver, rAF coalescing, and deduplication internally.
 
 // ── Chart-level Error Boundary ────────────────────────────────────────────────
 
@@ -275,8 +246,14 @@ export function EmbedApp({
   charts: initialChartMetas,
   initialAccessToken,
 }: EmbedAppProps) {
+  // Height broadcasting — delegates to the dedicated hook (ResizeObserver +
+  // MutationObserver + rAF coalescing + deduplication).
+  useIframeHeightBroadcaster();
+
   // Start with null = "auto" — we apply it after mount based on parent signal
   // or system preference, avoiding a flash of the wrong theme.
+  // theme and customBg are fully independent: each postMessage type updates
+  // only its own slice of state.
   const [theme, setTheme] = useState<EmbedTheme | null>(null);
   const [customBg, setCustomBg] = useState<string | undefined>(undefined);
   const [dashboardTitle, setDashboardTitle] = useState(initialTitle);
@@ -305,9 +282,8 @@ export function EmbedApp({
   const chartMetasRef = useRef<EmbedChartMeta[]>(initialChartMetas);
 
   useEffect(() => {
-    // Only apply a theme when explicitly set — when theme is null we leave
-    // the :root transparent defaults in place so the parent bg shows through.
-    if (theme === null) return;
+    // Apply whenever either theme or customBg changes.
+    // applyEmbedTheme handles the null-theme "stay transparent" case internally.
     applyEmbedTheme(theme, customBg);
   }, [theme, customBg]);
 
@@ -320,49 +296,21 @@ export function EmbedApp({
 
   useEffect(() => {
     console.log("[EMBED][STEP 9] Static assets loaded in embed context");
-    sendEmbedHeight();
-
-    // ── ResizeObserver: fires when body dimensions change (window resize,
-    //    content reflow, chart render).  sendEmbedHeight already wraps in
-    //    rAF internally, so this is safe from loop-limit errors.
-    const resizeObserver = new ResizeObserver(() => {
-      sendEmbedHeight();
-    });
-    resizeObserver.observe(document.body);
-    resizeObserver.observe(document.documentElement);
-
-    // ── MutationObserver: catches dynamic chart additions/removals that
-    //    change the DOM tree height without triggering a body resize
-    //    (e.g. a new chart card appended to .charts-grid).
-    const chartsGrid = document.getElementById("charts-grid");
-    const mutationObserver = new MutationObserver(() => {
-      sendEmbedHeight();
-    });
-    if (chartsGrid) {
-      mutationObserver.observe(chartsGrid, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ["style", "class"],
-      });
-    }
 
     // ── postMessage bridge ────────────────────────────────────────────────
     const onMessage = (event: MessageEvent) => {
       if (!event.data || typeof event.data !== "object") return;
       const { type, value } = event.data as { type: string; value?: string };
 
-      // Named theme: "light" | "dark"
+      // Named theme: "light" | "dark" — only updates theme, never clears customBg
       if (type === "set_theme") {
         const next: EmbedTheme = value === "light" ? "light" : "dark";
         setTheme(next);
-        setCustomBg(undefined);
         console.log("[EMBED] Theme set to:", next);
       }
 
-      // Custom background colour (any CSS colour string)
+      // Custom background colour — only updates customBg, never clears theme
       if (type === "set_background" && typeof value === "string" && value.trim()) {
-        setTheme("custom");
         setCustomBg(value.trim());
         console.log("[EMBED] Custom background applied:", value.trim());
       }
@@ -375,24 +323,19 @@ export function EmbedApp({
     window.addEventListener("message", onMessage);
 
     // ── Notify parent ─────────────────────────────────────────────────────
-    // Send embed_ready (height) + request_theme so the parent can respond.
-    window.parent.postMessage({ type: "embed_ready", height: document.body.scrollHeight }, "*");
+    // request_theme prompts the parent to reply with set_theme / set_background.
     window.parent.postMessage({ type: "request_theme" }, "*");
     console.log("[EMBED] Requested parent theme via postMessage");
 
     // ── Standalone fallback (no parent frame) ─────────────────────────────
-    // When the embed page is opened directly (not in an iframe) there is no
-    // parent to respond. Detect this and apply system preference as fallback.
     const isEmbedded = window.self !== window.top;
     const fallbackTimer = window.setTimeout(() => {
       setTheme((prev) => {
         if (prev !== null) return prev; // parent already responded
         if (isEmbedded) {
-          // Inside an iframe but parent sent nothing — stay transparent.
           console.log("[EMBED] No theme received from parent — staying transparent");
           return null;
         }
-        // Standalone page: use system preference
         const detected: EmbedTheme = systemPrefersDark() ? "dark" : "light";
         console.log("[EMBED] Standalone mode — using system theme:", detected);
         return detected;
@@ -400,15 +343,8 @@ export function EmbedApp({
     }, 400);
 
     return () => {
-      resizeObserver.disconnect();
-      mutationObserver.disconnect();
       window.removeEventListener("message", onMessage);
       window.clearTimeout(fallbackTimer);
-      // Cancel any pending height broadcast rAF
-      if (_heightRafId !== null) {
-        cancelAnimationFrame(_heightRafId);
-        _heightRafId = null;
-      }
     };
   }, []);
 
@@ -620,7 +556,7 @@ export function EmbedApp({
         }),
       );
 
-      sendEmbedHeight();
+      // Height change is picked up automatically by useIframeHeightBroadcaster
     },
     [fetchChartData],
   );
@@ -689,7 +625,7 @@ export function EmbedApp({
     console.log(
       `[EMBED][STEP 11] Dashboard fully rendered in embed — ${loadedCount} charts visible`,
     );
-    sendEmbedHeight();
+    // Height change is picked up automatically by useIframeHeightBroadcaster
     // CRITICAL: fetchChartData is the only real dep; chartMetas is read via ref
   }, [fetchChartData]);
 
@@ -769,7 +705,7 @@ export function EmbedApp({
         console.log(
           `[EMBED] Dynamic chart removal — ${removed.size} chart(s) removed`,
         );
-        sendEmbedHeight();
+        // Height change is picked up automatically by useIframeHeightBroadcaster
       }
     },
     // CRITICAL FIX: no chartMetas state dep — reads via ref instead
