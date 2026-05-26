@@ -20,6 +20,67 @@ import type {
   TokenRefreshResponse,
 } from "./types";
 
+// ── Theme helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Detect whether a hex/rgb/hsl color string represents a "dark" background
+ * by estimating relative luminance.
+ */
+function isColorDark(color: string): boolean {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 1;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return false;
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  // Perceived luminance (ITU-R BT.709)
+  const lum = 0.2126 * (r / 255) + 0.7152 * (g / 255) + 0.0722 * (b / 255);
+  return lum < 0.35;
+}
+
+/**
+ * Apply a named theme (light | dark) or a custom background colour.
+ * Updates:
+ *  - html[data-theme]
+ *  - html.dark  (for ECharts / ChartCard dark-mode detection)
+ *  - html.embed-bg-dark  (for custom-bg dark-text variant)
+ *  - html style --embed-bg (custom mode only)
+ */
+function applyEmbedTheme(theme: EmbedTheme, customBg?: string) {
+  const html = document.documentElement;
+
+  if (theme === "custom" && customBg) {
+    html.setAttribute("data-theme", "custom");
+    html.style.setProperty("--embed-bg", customBg);
+    html.style.setProperty("--embed-card-bg", ""); // let CSS rule handle it
+    if (isColorDark(customBg)) {
+      html.classList.add("dark", "embed-bg-dark");
+    } else {
+      html.classList.remove("dark", "embed-bg-dark");
+    }
+    return;
+  }
+
+  // Clear any inline custom-bg property
+  html.style.removeProperty("--embed-bg");
+  html.style.removeProperty("--embed-card-bg");
+  html.classList.remove("embed-bg-dark");
+
+  html.setAttribute("data-theme", theme);
+  if (theme === "dark") {
+    html.classList.add("dark");
+  } else {
+    html.classList.remove("dark");
+  }
+}
+
+/** Detect system preference as a fallback when parent sends no theme. */
+function systemPrefersDark(): boolean {
+  return typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+}
+
 const REFRESH_INTERVAL_MS = 60_000;
 const JWT_REFRESH_INTERVAL_MS = 25 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15_000;
@@ -43,27 +104,54 @@ function fetchWithTimeout(
   ]);
 }
 
-let embedHeightLogged = false;
+// ── Height Broadcaster ────────────────────────────────────────────────────────
+// Sends the dashboard's total content height to the parent so the <iframe> can
+// auto-expand.  Three safeguards:
+//   1. Uses documentElement.scrollHeight (accurate for grid/flex layouts).
+//   2. Deduplicates: skips postMessage when height hasn't changed.
+//   3. Wraps in rAF: prevents "ResizeObserver loop limit exceeded" errors.
 
+let _lastBroadcastHeight = 0;
+let _heightRafId: number | null = null;
+let _heightLoggedOnce = false;
+
+/**
+ * Measure the full document height and send it to the parent window.
+ * Safe to call from any context (ResizeObserver, MutationObserver, async code).
+ * Coalesces rapid calls via requestAnimationFrame and skips duplicate values.
+ */
 function sendEmbedHeight() {
-  const height = document.body.scrollHeight;
-  window.parent.postMessage({ type: "embed_ready", height }, "*");
-  if (!embedHeightLogged) {
-    embedHeightLogged = true;
-    console.log(
-      `[EMBED][STEP 12] postMessage bridge active — initial height: ${height}px`,
-    );
+  // Cancel any pending rAF to coalesce rapid successive calls
+  if (_heightRafId !== null) {
+    cancelAnimationFrame(_heightRafId);
   }
+
+  _heightRafId = requestAnimationFrame(() => {
+    _heightRafId = null;
+
+    // documentElement.scrollHeight is the most reliable cross-browser measurement
+    // for total content height, including grid/flex children and overflows.
+    const height = Math.max(
+      document.documentElement.scrollHeight,
+      document.body.scrollHeight,
+    );
+
+    // Deduplicate: don't flood the parent with identical height messages
+    if (height === _lastBroadcastHeight) return;
+    _lastBroadcastHeight = height;
+
+    window.parent.postMessage({ type: "embed_ready", height }, "*");
+
+    if (!_heightLoggedOnce) {
+      _heightLoggedOnce = true;
+      console.log(
+        `[EMBED][STEP 12] postMessage bridge active — initial height: ${height}px`,
+      );
+    }
+  });
 }
 
-function applyTheme(theme: EmbedTheme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  if (theme === "light") {
-    document.documentElement.classList.remove("dark");
-  } else {
-    document.documentElement.classList.add("dark");
-  }
-}
+// (applyTheme replaced by applyEmbedTheme above)
 
 // ── Chart-level Error Boundary ────────────────────────────────────────────────
 
@@ -187,7 +275,10 @@ export function EmbedApp({
   charts: initialChartMetas,
   initialAccessToken,
 }: EmbedAppProps) {
-  const [theme, setTheme] = useState<EmbedTheme>("dark");
+  // Start with null = "auto" — we apply it after mount based on parent signal
+  // or system preference, avoiding a flash of the wrong theme.
+  const [theme, setTheme] = useState<EmbedTheme | null>(null);
+  const [customBg, setCustomBg] = useState<string | undefined>(undefined);
   const [dashboardTitle, setDashboardTitle] = useState(initialTitle);
   const [charts, setCharts] = useState<EmbedChartState[]>(() =>
     initialChartMetas.map((meta) => ({
@@ -214,8 +305,11 @@ export function EmbedApp({
   const chartMetasRef = useRef<EmbedChartMeta[]>(initialChartMetas);
 
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+    // Only apply a theme when explicitly set — when theme is null we leave
+    // the :root transparent defaults in place so the parent bg shows through.
+    if (theme === null) return;
+    applyEmbedTheme(theme, customBg);
+  }, [theme, customBg]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -228,29 +322,93 @@ export function EmbedApp({
     console.log("[EMBED][STEP 9] Static assets loaded in embed context");
     sendEmbedHeight();
 
+    // ── ResizeObserver: fires when body dimensions change (window resize,
+    //    content reflow, chart render).  sendEmbedHeight already wraps in
+    //    rAF internally, so this is safe from loop-limit errors.
     const resizeObserver = new ResizeObserver(() => {
       sendEmbedHeight();
     });
     resizeObserver.observe(document.body);
+    resizeObserver.observe(document.documentElement);
 
+    // ── MutationObserver: catches dynamic chart additions/removals that
+    //    change the DOM tree height without triggering a body resize
+    //    (e.g. a new chart card appended to .charts-grid).
+    const chartsGrid = document.getElementById("charts-grid");
+    const mutationObserver = new MutationObserver(() => {
+      sendEmbedHeight();
+    });
+    if (chartsGrid) {
+      mutationObserver.observe(chartsGrid, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["style", "class"],
+      });
+    }
+
+    // ── postMessage bridge ────────────────────────────────────────────────
     const onMessage = (event: MessageEvent) => {
       if (!event.data || typeof event.data !== "object") return;
-      if (event.data.type === "set_theme") {
-        const next =
-          event.data.value === "light" ? "light" : ("dark" as EmbedTheme);
+      const { type, value } = event.data as { type: string; value?: string };
+
+      // Named theme: "light" | "dark"
+      if (type === "set_theme") {
+        const next: EmbedTheme = value === "light" ? "light" : "dark";
         setTheme(next);
-        console.log("[EMBED][STEP 12] Theme set to: " + next);
+        setCustomBg(undefined);
+        console.log("[EMBED] Theme set to:", next);
       }
-      if (event.data.type === "set_filters") {
-        console.log("[EMBED][STEP 12] Filters received:", event.data.value);
+
+      // Custom background colour (any CSS colour string)
+      if (type === "set_background" && typeof value === "string" && value.trim()) {
+        setTheme("custom");
+        setCustomBg(value.trim());
+        console.log("[EMBED] Custom background applied:", value.trim());
+      }
+
+      if (type === "set_filters") {
+        console.log("[EMBED] Filters received:", value);
       }
     };
 
     window.addEventListener("message", onMessage);
 
+    // ── Notify parent ─────────────────────────────────────────────────────
+    // Send embed_ready (height) + request_theme so the parent can respond.
+    window.parent.postMessage({ type: "embed_ready", height: document.body.scrollHeight }, "*");
+    window.parent.postMessage({ type: "request_theme" }, "*");
+    console.log("[EMBED] Requested parent theme via postMessage");
+
+    // ── Standalone fallback (no parent frame) ─────────────────────────────
+    // When the embed page is opened directly (not in an iframe) there is no
+    // parent to respond. Detect this and apply system preference as fallback.
+    const isEmbedded = window.self !== window.top;
+    const fallbackTimer = window.setTimeout(() => {
+      setTheme((prev) => {
+        if (prev !== null) return prev; // parent already responded
+        if (isEmbedded) {
+          // Inside an iframe but parent sent nothing — stay transparent.
+          console.log("[EMBED] No theme received from parent — staying transparent");
+          return null;
+        }
+        // Standalone page: use system preference
+        const detected: EmbedTheme = systemPrefersDark() ? "dark" : "light";
+        console.log("[EMBED] Standalone mode — using system theme:", detected);
+        return detected;
+      });
+    }, 400);
+
     return () => {
       resizeObserver.disconnect();
+      mutationObserver.disconnect();
       window.removeEventListener("message", onMessage);
+      window.clearTimeout(fallbackTimer);
+      // Cancel any pending height broadcast rAF
+      if (_heightRafId !== null) {
+        cancelAnimationFrame(_heightRafId);
+        _heightRafId = null;
+      }
     };
   }, []);
 
@@ -532,7 +690,7 @@ export function EmbedApp({
       `[EMBED][STEP 11] Dashboard fully rendered in embed — ${loadedCount} charts visible`,
     );
     sendEmbedHeight();
-  // CRITICAL: fetchChartData is the only real dep; chartMetas is read via ref
+    // CRITICAL: fetchChartData is the only real dep; chartMetas is read via ref
   }, [fetchChartData]);
 
   /**
@@ -626,7 +784,7 @@ export function EmbedApp({
     if (initialLoadDoneRef.current) return;
     initialLoadDoneRef.current = true;
     void loadAllCharts();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — runs once on mount only
 
   // Proactive JWT refresh at 25 minutes
@@ -699,8 +857,8 @@ export function EmbedApp({
       }
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  // Only re-run when the API connection changes (apiBase/tokenId change via fetchDashboardMeta)
-  // dashboardTitle is read from current state inside the callback so no dep needed
+    // Only re-run when the API connection changes (apiBase/tokenId change via fetchDashboardMeta)
+    // dashboardTitle is read from current state inside the callback so no dep needed
   }, [fetchDashboardMeta]);
 
   // Render

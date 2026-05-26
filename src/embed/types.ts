@@ -27,7 +27,7 @@ declare global {
   }
 }
 
-export type EmbedTheme = "dark" | "light";
+export type EmbedTheme = "dark" | "light" | "custom";
 
 export interface EmbedChartState {
   meta: EmbedChartMeta;
