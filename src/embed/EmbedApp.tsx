@@ -213,7 +213,7 @@ function EmbedChartCard({ chart, index }: EmbedChartCardProps) {
               dataKeys={display.dataKeys}
               xAxisKey={display.xAxisKey}
               axisConfig={display.axisConfig}
-              height={320}
+              height={280}
               showLegend={
                 display.dataKeys.length > 1 &&
                 display.effectiveType !== "pie" &&
