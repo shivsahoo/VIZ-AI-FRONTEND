@@ -1967,6 +1967,9 @@ export const createDatabase = async (
         // Backend accepts both 'username' and 'name', send 'username' to match expected payload format
         requestBody.username = data.username || '';
         requestBody.password = data.password || '';
+        if (data.schemaName) {
+          requestBody.schema_name = data.schemaName;
+        }
       }
     }
 
@@ -2357,6 +2360,7 @@ export interface KeyMetricAnalysis {
   kpi_name: string;
   value_interpretation: string;
   business_impact: string;
+  trend?: 'positive' | 'negative' | 'neutral';
   reasoning?: string;
 }
 

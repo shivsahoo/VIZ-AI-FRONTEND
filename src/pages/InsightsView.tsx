@@ -257,6 +257,47 @@ export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProp
     }
   }, [showGenerateDialog, projectId, fetchDatabases]);
 
+  const classifyKeyMetricType = (metric: any): Insight["type"] => {
+    const trendRaw = metric?.trend;
+    const trend = typeof trendRaw === "string" ? trendRaw.toLowerCase() : trendRaw;
+    if (trend === "positive") return "positive";
+    if (trend === "negative") return "negative";
+    if (trend === "neutral") return "negative";
+
+    // Fallback (handles cases like "not good" / "not improving")
+    const valueInterpretation = String(metric?.value_interpretation || "");
+    const lower = valueInterpretation.toLowerCase();
+
+    const hasPositive = [/\bgood\b/, /\bexcellent\b/, /\bimprov\w*\b/].some((re) =>
+      re.test(lower)
+    );
+    const hasNegative = [
+      /\bpoor\b/,
+      /\bworse\b/,
+      /\bdeclin\w*\b/,
+      /\bdecreas\w*\b/,
+      /\bdeteriorat\w*\b/,
+      /\bunderperform\w*\b/,
+      /\bnegative\b/,
+      /\bdrop\b/,
+      /\bdown\b/,
+    ].some((re) => re.test(lower));
+
+    const negatesPositive = [
+      /\bnot\s+good\b/,
+      /\bnot\s+excellent\b/,
+      /\bnot\s+improv\w*\b/,
+      /\bno\s+longer\s+improv\w*\b/,
+    ].some((re) => re.test(lower));
+
+    // If there are clear negative signals, prefer `negative` to avoid mislabeling issues as good.
+    if (hasNegative) return "negative";
+    if (hasPositive && !negatesPositive) return "positive";
+
+    // Default to negative when unclear/mixed to avoid false positives.
+    return "negative";
+  };
+
   const transformProjectInsights = (data: ProjectInsightsResponse): Insight[] => {
     try {
       // Separate arrays to maintain exact order
@@ -542,15 +583,13 @@ export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProp
             const kpiName = String(metric?.kpi_name || 'Unknown KPI');
             const valueInterpretation = String(metric?.value_interpretation || '');
             const businessImpact = String(metric?.business_impact || '');
-            const isPositive = valueInterpretation.toLowerCase().includes("good") ||
-                             valueInterpretation.toLowerCase().includes("excellent") ||
-                             valueInterpretation.toLowerCase().includes("improving");
+            const type = classifyKeyMetricType(metric);
             
             rest.push({
               id: `metric-${dbInsight.database_id}-${idCounter++}`,
               title: kpiName,
               description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
-              type: isPositive ? "positive" : "negative",
+              type,
               category: "Key Metric",
               timestamp: "Just now",
               impact: "Medium",
@@ -662,15 +701,13 @@ export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProp
         const kpiName = String(metric?.kpi_name || 'Unknown KPI');
         const valueInterpretation = String(metric?.value_interpretation || '');
         const businessImpact = String(metric?.business_impact || '');
-        const isPositive = valueInterpretation.toLowerCase().includes("good") ||
-                         valueInterpretation.toLowerCase().includes("excellent") ||
-                         valueInterpretation.toLowerCase().includes("improving");
+        const type = classifyKeyMetricType(metric);
         
         transformed.push({
           id: `metric-${idCounter++}`,
           title: kpiName,
           description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
-          type: isPositive ? "positive" : "negative",
+          type,
           category: "Key Metric",
           timestamp: "Just now",
           impact: "Medium",

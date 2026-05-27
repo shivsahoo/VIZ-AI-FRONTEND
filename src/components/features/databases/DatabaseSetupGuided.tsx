@@ -36,7 +36,8 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
   const [password, setPassword] = useState("");
   const [useSSL, setUseSSL] = useState(false);
   const [additionalParams, setAdditionalParams] = useState("");
-  
+  const [pgSchemaName, setPgSchemaName] = useState("");
+
   // Salesforce OAuth2 fields (session-based authentication only)
   const [sessionId, setSessionId] = useState("");
   const [instanceUrl, setInstanceUrl] = useState("");
@@ -372,6 +373,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
         } else {
           // Traditional database request data
           const portValue = port && port.trim() ? port.trim() : undefined;
+          const schemaValue = pgSchemaName.trim() || undefined;
           
           requestData = {
             connectionName: normalizedConnectionName,
@@ -381,6 +383,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
             database: database.trim(),
             username: username.trim(),
             password: password || "",
+            ...(schemaValue && { schemaName: schemaValue }),
             consentGiven: true,
           };
         }
@@ -741,6 +744,22 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                       autoComplete="new-password"
                     />
                   </div>
+
+                  {dbType === "postgresql" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="pgSchemaName">Schema Name <span className="text-muted-foreground text-xs">(Optional)</span></Label>
+                      <Input
+                        id="pgSchemaName"
+                        placeholder="public"
+                        value={pgSchemaName}
+                        onChange={(e) => setPgSchemaName(e.target.value)}
+                        className="h-12"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Leave empty to use the default <code>public</code> schema
+                      </p>
+                    </div>
+                  )}
                 </>
               )}
 
