@@ -40,6 +40,7 @@ export default function App() {
     return 'home';
   });
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
+  const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
   const [chartCreatedTrigger, setChartCreatedTrigger] = useState(0);
   const [dashboardRefreshTrigger, setDashboardRefreshTrigger] = useState(0);
   const [pendingChartFromAI, setPendingChartFromAI] = useState<{
@@ -445,6 +446,7 @@ export default function App() {
             setEditingChart(chart);
             setIsAIAssistantOpen(true);
           }}
+          onInsightsGeneratingChange={setIsGeneratingInsights}
         />
       );
     }
@@ -550,6 +552,7 @@ export default function App() {
               activeTab={workspaceTab}
               onTabChange={setWorkspaceTab}
               onOpenAIAssistant={() => setIsAIAssistantOpen(prev => !prev)}
+              disabled={isGeneratingInsights}
             />
           )}
           

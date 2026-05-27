@@ -81,9 +81,10 @@ interface WorkspaceViewProps {
   onChartFromAIProcessed?: () => void;
   onOpenAIAssistant?: () => void;
   onEditChart?: (chart: { name: string; type: 'line' | 'bar' | 'pie' | 'area'; description?: string }) => void;
+  onInsightsGeneratingChange?: (generating: boolean) => void;
 }
 
-export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabChange, currentUser, projectId, chartCreatedTrigger, dashboardRefreshTrigger, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart }: WorkspaceViewProps) {
+export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabChange, currentUser, projectId, chartCreatedTrigger, dashboardRefreshTrigger, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart, onInsightsGeneratingChange }: WorkspaceViewProps) {
   // Restore selected dashboard from localStorage
   const [selectedDashboard, setSelectedDashboard] = useState<{ id: string; name: string } | null>(() => {
     if (typeof window !== 'undefined' && projectId) {
@@ -324,7 +325,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
       case 'databases':
         return <DatabasesView projectId={projectId} />;
       case 'insights':
-        return <InsightsView projectId={projectId} />;
+        return <InsightsView projectId={projectId} onGeneratingChange={onInsightsGeneratingChange} />;
       case 'team':
         return <UsersView projectId={projectId} />;
       default:

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { 
   Lightbulb, 
   TrendingUp, 
@@ -60,6 +60,7 @@ interface Insight {
 
 interface InsightsViewProps {
   projectId?: string | number;
+  onGeneratingChange?: (generating: boolean) => void;
 }
 
 const mapDatabaseMetadataToApiDatabase = (entry: DatabaseMetadataEntry): ApiDatabase => ({
@@ -77,9 +78,16 @@ const mapDatabaseMetadataToApiDatabase = (entry: DatabaseMetadataEntry): ApiData
   consentGiven: undefined,
 });
 
-export function InsightsView({ projectId }: InsightsViewProps) {
+export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProps) {
   const [insights, setInsights] = useState<Insight[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const onGeneratingChangeRef = useRef(onGeneratingChange);
+  onGeneratingChangeRef.current = onGeneratingChange;
+
+  // Notify parent whenever the generating state changes so it can disable the sidebar.
+  useEffect(() => {
+    onGeneratingChangeRef.current?.(isGenerating);
+  }, [isGenerating]);
   const [databases, setDatabases] = useState<ApiDatabase[]>([]);
   const [selectedDatabase, setSelectedDatabase] = useState<string>("all");
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
@@ -924,7 +932,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             <Button 
               variant="outline"
               onClick={handleExportCSV}
-              disabled={filteredInsights.length === 0}
+              disabled={filteredInsights.length === 0 || isGenerating}
             >
               <Download className="w-4 h-4 mr-2" />
               Export Insights
@@ -1053,9 +1061,19 @@ export function InsightsView({ projectId }: InsightsViewProps) {
               <Button 
                 className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
                 onClick={() => setShowGenerateDialog(true)}
+                disabled={isGenerating}
               >
-                <Sparkles className="w-4 h-4 mr-2" />
-                Generate Insights
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Generate Insights
+                  </>
+                )}
               </Button>
             )}
           </div>
@@ -1119,6 +1137,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                               handleCopyToClipboard(insight);
                             }}
                             title="Copy to clipboard"
+                            disabled={isGenerating}
                           >
                             {copiedInsightId === insight.id ? (
                               <Check className="w-4 h-4 text-success" />
@@ -1131,6 +1150,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                             size="sm"
                             className="whitespace-nowrap"
                             onClick={() => handleAddToHome(insight)}
+                            disabled={isGenerating}
                           >
                             + Add to Homepage
                           </Button>
