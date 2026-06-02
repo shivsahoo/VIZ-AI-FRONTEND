@@ -64,7 +64,8 @@
         "vizai-be.webknot-dev.in",
         "vizai-llm.webknot-dev.in",
         "vizai.webknot-dev.in",
-        "aim-ripeness-dealing.ngrok-free.dev"
+        "aim-ripeness-dealing.ngrok-free.dev",
+        "uat-vizai.webknot-dev.in"
       ],
       proxy: {
         // Route LLM HTTP endpoints first (more specific than /api).
