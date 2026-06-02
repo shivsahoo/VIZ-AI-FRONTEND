@@ -5,8 +5,19 @@ services:
     build: .
     container_name: vizai-frontend
     ports:
-      - "3000:3000"
-    environment:
-      - HOST=0.0.0.0
-      - PORT=3000
-    restart: always
+      - "127.0.0.1:3000:80"
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536

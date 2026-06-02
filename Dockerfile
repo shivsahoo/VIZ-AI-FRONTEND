@@ -1,42 +1,25 @@
-#FROM node:18-alpine
+# ---------- Stage 1: Build ----------
+FROM node:18-alpine AS builder
 
-#WORKDIR /app
-
-#COPY package*.json yarn.lock ./
-#RUN yarn install --frozen-lockfile
-
-#COPY . .
-
-# Expose port 3000
-#EXPOSE 3000
-
-# Start in development mode
-#CMD ["yarn", "dev", "--host", "0.0.0.0", "--port", "3000"]
-FROM node:18-alpine
-
-# Create non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-
-# Create working directory
 WORKDIR /app
 
-# Copy dependency files
 COPY package*.json yarn.lock ./
-
-# Install dependencies
 RUN yarn install --frozen-lockfile
 
-# Copy application code
 COPY . .
+RUN yarn build
 
-# Ensure correct permissions
-RUN chown -R appuser:appgroup /app
 
-# Switch to non-root user
-USER appuser
+# ---------- Stage 2: Nginx ----------
+FROM nginx:alpine
 
-# Expose port
-EXPOSE 3000
+RUN rm /etc/nginx/conf.d/default.conf
 
-# Start app
-CMD ["yarn", "dev", "--host", "0.0.0.0", "--port", "3000"]
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# IMPORTANT: React build output
+COPY --from=builder /app/build /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
