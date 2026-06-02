@@ -59,7 +59,8 @@
       allowedHosts: [
         "vizai-be.webknot-dev.in",
         "vizai-llm.webknot-dev.in",
-        "vizai.webknot-dev.in"
+        "vizai.webknot-dev.in",
+        "uat-vizai.webknot-dev.in"
       ]
     },
   });
