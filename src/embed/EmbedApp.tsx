@@ -13,6 +13,8 @@ import type { ChartType } from "../components/features/charts/core/chartTypes";
 import { coerceChartType } from "../utils/chartSpecNormalizer";
 import { buildEmbedChartDisplayConfig } from "./embedChartDisplay";
 import { useIframeHeightBroadcaster } from "./useIframeHeightBroadcaster";
+import { DateRangePicker } from "./DateRangePicker";
+import { useDateRange } from "./useDateRange";
 import type {
   DashboardMetaResponse,
   EmbedChartMeta,
@@ -183,9 +185,20 @@ class ChartErrorBoundary extends Component<
 interface EmbedChartCardProps {
   chart: EmbedChartState;
   index: number;
+  apiBase: string;
+  tokenId: string;
+  getAuthHeaders: () => Record<string, string>;
+  onDateChange: (chartId: string, start: string, end: string) => void;
 }
 
-function EmbedChartCard({ chart, index }: EmbedChartCardProps) {
+function EmbedChartCard({
+  chart,
+  index,
+  apiBase,
+  tokenId,
+  getAuthHeaders,
+  onDateChange,
+}: EmbedChartCardProps) {
   const display = useMemo(
     () =>
       buildEmbedChartDisplayConfig(
@@ -197,9 +210,64 @@ function EmbedChartCard({ chart, index }: EmbedChartCardProps) {
     [chart.rows, chart.type, chart.xAxis, chart.yAxis],
   );
 
+  /**
+   * Detect whether a chart is likely time-based even when the DB flag is not set.
+   * Checks (in priority order):
+   *   1. meta.is_time_based flag from the backend
+   *   2. Whether the x_axis value in the first data row parses as a date / datetime
+   */
+  const isLikelyTimeBased = useMemo(() => {
+    if (chart.meta.is_time_based) return true;
+    // Only sniff when we have rows and an x_axis column name
+    const col = chart.xAxis;
+    if (!col || !chart.rows || chart.rows.length === 0) return false;
+    const sample = chart.rows[0][col];
+    if (!sample) return false;
+    // Accept ISO date strings (YYYY-MM-DD…) or epoch-like numbers
+    if (typeof sample === "string") {
+      return /^\d{4}-\d{2}-\d{2}/.test(sample) || !isNaN(Date.parse(sample));
+    }
+    return false;
+  }, [chart.meta.is_time_based, chart.xAxis, chart.rows]);
+
+  // Fetch date bounds for any chart that has an x_axis and appears time-based
+  const { minDate, maxDate, isLoading: rangeLoading } = useDateRange({
+    apiBase,
+    tokenId,
+    chartId: chart.meta.id,
+    enabled: isLikelyTimeBased || (!!chart.xAxis && !chart.isLoading),
+    getAuthHeaders,
+  });
+
+  // Show the picker only when the backend actually returned date bounds
+  // (handles the case where is_time_based is false but dates came back anyway)
+  const hasRange = !!minDate && !!maxDate;
+
+  // Current picker selection (falls back to full range when no selection yet)
+  const currentStart = chart.dateRange?.start ?? minDate ?? "";
+  const currentEnd   = chart.dateRange?.end   ?? maxDate ?? "";
+
   return (
     <div className="chart-card" key={chart.meta.id}>
       <h3>{chart.meta.title || "Chart"}</h3>
+
+      {/* Date range picker — shown when the backend returned actual date bounds */}
+      {!rangeLoading && hasRange && !chart.isLoading && (
+        <DateRangePicker
+          id={`date-picker-${chart.meta.id}`}
+          minDate={minDate!}
+          maxDate={maxDate!}
+          startDate={currentStart}
+          endDate={currentEnd}
+          isLoading={chart.isRefetchingDateFilter}
+          onChange={(start, end) => onDateChange(chart.meta.id, start, end)}
+        />
+      )}
+      {/* Skeleton while range bounds are loading (only shown when we expect a picker) */}
+      {isLikelyTimeBased && rangeLoading && !chart.isLoading && (
+        <div className="date-range-picker date-range-picker--skeleton" aria-hidden="true" />
+      )}
+
       <div className="chart-container" id={`chart-${index}`}>
         {chart.isLoading ? (
           <div className="skeleton" />
@@ -266,6 +334,8 @@ export function EmbedApp({
       rows: null,
       isLoading: true,
       error: null,
+      dateRange: null,
+      isRefetchingDateFilter: false,
     })),
   );
 
@@ -280,6 +350,14 @@ export function EmbedApp({
   // This is the key fix: instead of putting chartMetas in useCallback deps
   // (which causes cascading recreations), we keep a ref that's always current.
   const chartMetasRef = useRef<EmbedChartMeta[]>(initialChartMetas);
+
+  // Stable ref for handleChartDateChange — keeps the postMessage bridge's
+  // onMessage closure from going stale. The ref is set after handleChartDateChange
+  // is defined below; reads happen only when a message arrives (after mount).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleChartDateChangeRef = useRef<(id: string, s: string, e: string) => void>(
+    () => { /* populated after handleChartDateChange is defined */ },
+  );
 
   useEffect(() => {
     // Apply whenever either theme or customBg changes.
@@ -315,8 +393,24 @@ export function EmbedApp({
         console.log("[EMBED] Custom background applied:", value.trim());
       }
 
-      if (type === "set_filters") {
-        console.log("[EMBED] Filters received:", value);
+      // Date range filter pushed from the parent page.
+      // Applies to all time-based charts in the embed — does NOT affect the
+      // VizAI dashboard for authenticated users.
+      if (type === "set_filters" && value && typeof value === "object") {
+        const { start_date, end_date } = value as {
+          start_date?: string;
+          end_date?: string;
+        };
+        if (start_date && end_date) {
+          console.log("[EMBED] Parent date filter received:", start_date, "→", end_date);
+          // We read the current chart list via ref to avoid a stale closure
+          const metas = chartMetasRef.current;
+          metas
+            .filter((m) => m.is_time_based)
+            .forEach((m) => {
+              void handleChartDateChangeRef.current(m.id, start_date, end_date);
+            });
+        }
       }
     };
 
@@ -403,7 +497,11 @@ export function EmbedApp({
 
   //  Data fetching
   const fetchChartData = useCallback(
-    async (chartId: string): Promise<{
+    async (
+      chartId: string,
+      startDate?: string,
+      endDate?: string,
+    ): Promise<{
       rows: Record<string, unknown>[] | null;
       error: string | null;
       xAxis?: string | null;
@@ -418,8 +516,15 @@ export function EmbedApp({
         chartType?: string;
       }> => {
         try {
+          // Build URL with optional date range params
+          const baseUrl = `${apiBase}/api/v1/embed/${tokenId}/data/${chartId}`;
+          const params = new URLSearchParams();
+          if (startDate) params.set("start_date", startDate);
+          if (endDate)   params.set("end_date",   endDate);
+          const url = params.toString() ? `${baseUrl}?${params}` : baseUrl;
+
           const response = await fetchWithTimeout(
-            `${apiBase}/api/v1/embed/${tokenId}/data/${chartId}`,
+            url,
             { headers: getAuthHeaders() },
             FETCH_TIMEOUT_MS,
           );
@@ -547,6 +652,8 @@ export function EmbedApp({
             yAxis: result.yAxis ?? c.yAxis,
             rows: result.rows,
             isLoading: false,
+            dateRange: null,
+            isRefetchingDateFilter: false,
             error: result.error
               ? result.error
               : result.rows && result.rows.length > 0
@@ -557,6 +664,54 @@ export function EmbedApp({
       );
 
       // Height change is picked up automatically by useIframeHeightBroadcaster
+    },
+    [fetchChartData],
+  );
+
+  /**
+   * Handle date range change for a single time-based chart card.
+   * Fires a filtered API call and updates only that chart's rows.
+   * Does NOT affect the VizAI dashboard state.
+   */
+  const handleChartDateChange = useCallback(
+    async (chartId: string, start: string, end: string) => {
+      // Mark that specific card as refetching
+      setCharts((prev) =>
+        prev.map((c) =>
+          c.meta.id === chartId
+            ? {
+                ...c,
+                isRefetchingDateFilter: true,
+                dateRange: c.dateRange
+                  ? { ...c.dateRange, start, end }
+                  : { min: start, max: end, start, end, isLoading: false },
+              }
+            : c,
+        ),
+      );
+
+      const result = await fetchChartData(chartId, start, end);
+
+      if (!isMountedRef.current) return;
+
+      setCharts((prev) =>
+        prev.map((c) => {
+          if (c.meta.id !== chartId) return c;
+          return {
+            ...c,
+            rows: result.rows,
+            isRefetchingDateFilter: false,
+            error: result.error
+              ? result.error
+              : result.rows && result.rows.length > 0
+                ? null
+                : "No data available for the selected range",
+            dateRange: c.dateRange
+              ? { ...c.dateRange, start, end, isLoading: false }
+              : { min: start, max: end, start, end, isLoading: false },
+          };
+        }),
+      );
     },
     [fetchChartData],
   );
@@ -599,6 +754,8 @@ export function EmbedApp({
             rows: null,
             isLoading: false,
             error: result.error,
+            dateRange: null,
+            isRefetchingDateFilter: false,
           };
         }
         if (result.rows && result.rows.length > 0) {
@@ -615,6 +772,8 @@ export function EmbedApp({
             result.rows && result.rows.length > 0
               ? null
               : "No data available",
+          dateRange: null,
+          isRefetchingDateFilter: false,
         };
       }),
     );
@@ -689,6 +848,8 @@ export function EmbedApp({
           rows: null,
           isLoading: true,
           error: null,
+          dateRange: null,
+          isRefetchingDateFilter: false,
         }));
 
         return [...updated, ...newEntries];
@@ -745,6 +906,8 @@ export function EmbedApp({
   const reconcileChartsRef = useRef(reconcileCharts);
   useEffect(() => { loadAllChartsRef.current = loadAllCharts; }, [loadAllCharts]);
   useEffect(() => { reconcileChartsRef.current = reconcileCharts; }, [reconcileCharts]);
+  // Keep handleChartDateChangeRef (declared near the top of the component) current
+  useEffect(() => { handleChartDateChangeRef.current = handleChartDateChange; }, [handleChartDateChange]);
 
   useEffect(() => {
     const startRefreshCycle = () => {
@@ -812,6 +975,10 @@ export function EmbedApp({
             key={chart.meta.id}
             chart={chart}
             index={index}
+            apiBase={apiBase}
+            tokenId={tokenId}
+            getAuthHeaders={getAuthHeaders}
+            onDateChange={handleChartDateChange}
           />
         ))}
       </div>
