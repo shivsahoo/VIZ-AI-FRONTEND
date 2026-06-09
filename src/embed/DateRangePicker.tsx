@@ -107,8 +107,6 @@ export function DateRangePicker({
           />
         </div>
 
-        <span className="date-range-picker__separator" aria-hidden="true">→</span>
-
         {/* To */}
         <div className="date-range-picker__field">
           <label

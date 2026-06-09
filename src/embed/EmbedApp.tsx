@@ -15,6 +15,11 @@ import { buildEmbedChartDisplayConfig } from "./embedChartDisplay";
 import { useIframeHeightBroadcaster } from "./useIframeHeightBroadcaster";
 import { DateRangePicker } from "./DateRangePicker";
 import { useDateRange } from "./useDateRange";
+import {
+  clearPersistedRange,
+  persistDateRange,
+  readPersistedRange,
+} from "./useEmbedDateStorage";
 import type {
   DashboardMetaResponse,
   EmbedChartMeta,
@@ -326,18 +331,37 @@ export function EmbedApp({
   const [customBg, setCustomBg] = useState<string | undefined>(undefined);
   const [dashboardTitle, setDashboardTitle] = useState(initialTitle);
   const [charts, setCharts] = useState<EmbedChartState[]>(() =>
-    initialChartMetas.map((meta) => ({
-      meta,
-      type: normalizeEmbedChartType(meta.chart_type),
-      xAxis: meta.x_axis,
-      yAxis: meta.y_axis,
-      rows: null,
-      isLoading: true,
-      error: null,
-      dateRange: null,
-      isRefetchingDateFilter: false,
-    })),
+    initialChartMetas.map((meta) => {
+      // Restore previously selected date range from localStorage (if any).
+      // `rows` are still null — the initial data fetch will use the persisted
+      // range so the chart loads with the user's last filter already applied.
+      const persisted = readPersistedRange(tokenId, meta.id);
+      return {
+        meta,
+        type: normalizeEmbedChartType(meta.chart_type),
+        xAxis: meta.x_axis,
+        yAxis: meta.y_axis,
+        rows: null,
+        isLoading: true,
+        error: null,
+        dateRange: persisted
+          ? {
+              min: persisted.start, // bounds unknown until date-range endpoint responds
+              max: persisted.end,
+              start: persisted.start,
+              end: persisted.end,
+              isLoading: false,
+            }
+          : null,
+        isRefetchingDateFilter: false,
+      };
+    }),
   );
+
+  const chartsRef = useRef(charts);
+  useEffect(() => {
+    chartsRef.current = charts;
+  }, [charts]);
 
   const refreshTimerRef = useRef<number | null>(null);
   const jwtRefreshTimerRef = useRef<number | null>(null);
@@ -628,9 +652,13 @@ export function EmbedApp({
   /** Load data for a specific subset of chart IDs */
   const loadChartsById = useCallback(
     async (chartIds: string[]) => {
+      const currentCharts = chartsRef.current;
       const results = await Promise.all(
         chartIds.map(async (id) => {
-          const result = await fetchChartData(id);
+          const existingChart = currentCharts.find((c) => c.meta.id === id);
+          const start = existingChart?.dateRange?.start ?? readPersistedRange(tokenId, id)?.start;
+          const end = existingChart?.dateRange?.end ?? readPersistedRange(tokenId, id)?.end;
+          const result = await fetchChartData(id, start, end);
           return { id, result };
         }),
       );
@@ -652,7 +680,6 @@ export function EmbedApp({
             yAxis: result.yAxis ?? c.yAxis,
             rows: result.rows,
             isLoading: false,
-            dateRange: null,
             isRefetchingDateFilter: false,
             error: result.error
               ? result.error
@@ -697,6 +724,19 @@ export function EmbedApp({
       setCharts((prev) =>
         prev.map((c) => {
           if (c.meta.id !== chartId) return c;
+
+          // Persist the new selection so it survives page refresh.
+          // When start/end equal the dataset's full min/max (i.e. the user
+          // clicked "Reset"), we wipe the stored entry instead of saving it
+          // so a future reload goes back to the default (unfiltered) view.
+          const fullMin = c.dateRange?.min ?? start;
+          const fullMax = c.dateRange?.max ?? end;
+          if (start === fullMin && end === fullMax) {
+            clearPersistedRange(tokenId, chartId);
+          } else {
+            persistDateRange(tokenId, chartId, start, end);
+          }
+
           return {
             ...c,
             rows: result.rows,
@@ -713,7 +753,7 @@ export function EmbedApp({
         }),
       );
     },
-    [fetchChartData],
+    [fetchChartData, tokenId],
   );
 
   /**
@@ -725,6 +765,7 @@ export function EmbedApp({
   const loadAllCharts = useCallback(async () => {
     // Read latest metas from ref to avoid stale-closure dependency
     const currentMetas = chartMetasRef.current;
+    const currentCharts = chartsRef.current;
 
     setCharts((prev) =>
       prev.map((c) => ({ ...c, isLoading: true, error: null })),
@@ -733,20 +774,27 @@ export function EmbedApp({
     let loadedCount = 0;
     const results = await Promise.all(
       currentMetas.map(async (meta) => {
-        const result = await fetchChartData(meta.id);
+        const existingChart = currentCharts.find((c) => c.meta.id === meta.id);
+        const start = existingChart?.dateRange?.start ?? readPersistedRange(tokenId, meta.id)?.start;
+        const end = existingChart?.dateRange?.end ?? readPersistedRange(tokenId, meta.id)?.end;
+        const result = await fetchChartData(meta.id, start, end);
         return { meta, result };
       }),
     );
 
     if (!isMountedRef.current) return;
 
-    setCharts(
-      results.map(({ meta, result }) => {
+    setCharts((prev) =>
+      prev.map((c) => {
+        const found = results.find((r) => r.meta.id === c.meta.id);
+        if (!found) return c;
+        const { meta, result } = found;
         const type = normalizeEmbedChartType(
           result.chartType ?? meta.chart_type,
         );
         if (result.error) {
           return {
+            ...c,
             meta,
             type,
             xAxis: result.xAxis ?? meta.x_axis,
@@ -754,7 +802,6 @@ export function EmbedApp({
             rows: null,
             isLoading: false,
             error: result.error,
-            dateRange: null,
             isRefetchingDateFilter: false,
           };
         }
@@ -762,6 +809,7 @@ export function EmbedApp({
           loadedCount += 1;
         }
         return {
+          ...c,
           meta,
           type,
           xAxis: result.xAxis ?? meta.x_axis,
@@ -772,10 +820,9 @@ export function EmbedApp({
             result.rows && result.rows.length > 0
               ? null
               : "No data available",
-          dateRange: null,
           isRefetchingDateFilter: false,
         };
-      }),
+      })
     );
 
     console.log(
@@ -840,17 +887,28 @@ export function EmbedApp({
         });
 
         // Append newly discovered charts
-        const newEntries: EmbedChartState[] = added.map((meta) => ({
-          meta,
-          type: normalizeEmbedChartType(meta.chart_type),
-          xAxis: meta.x_axis,
-          yAxis: meta.y_axis,
-          rows: null,
-          isLoading: true,
-          error: null,
-          dateRange: null,
-          isRefetchingDateFilter: false,
-        }));
+        const newEntries: EmbedChartState[] = added.map((meta) => {
+          const persisted = readPersistedRange(tokenId, meta.id);
+          return {
+            meta,
+            type: normalizeEmbedChartType(meta.chart_type),
+            xAxis: meta.x_axis,
+            yAxis: meta.y_axis,
+            rows: null,
+            isLoading: true,
+            error: null,
+            dateRange: persisted
+              ? {
+                  min: persisted.start,
+                  max: persisted.end,
+                  start: persisted.start,
+                  end: persisted.end,
+                  isLoading: false,
+                }
+              : null,
+            isRefetchingDateFilter: false,
+          };
+        });
 
         return [...updated, ...newEntries];
       });
@@ -908,6 +966,32 @@ export function EmbedApp({
   useEffect(() => { reconcileChartsRef.current = reconcileCharts; }, [reconcileCharts]);
   // Keep handleChartDateChangeRef (declared near the top of the component) current
   useEffect(() => { handleChartDateChangeRef.current = handleChartDateChange; }, [handleChartDateChange]);
+
+  // ── Persisted date-range restore ──────────────────────────────────────────
+  // After mount, re-fetch with the stored range for any chart that has one.
+  // Placed here — AFTER the handleChartDateChangeRef sync effect — so the
+  // function referenced in the closure is the real, fully-defined one and NOT
+  // the empty placeholder initialised with useRef(()=>{}).
+  const persistedInitDoneRef = useRef(false);
+  useEffect(() => {
+    if (persistedInitDoneRef.current) return;
+    persistedInitDoneRef.current = true;
+
+    initialChartMetas.forEach((meta) => {
+      const persisted = readPersistedRange(tokenId, meta.id);
+      if (!persisted) return;
+      console.log(
+        `[EMBED] Restoring persisted date range for chart ${meta.id.slice(0, 8)}…`,
+        persisted.start,
+        "→",
+        persisted.end,
+      );
+      // `handleChartDateChange` is captured directly so we're guaranteed to
+      // call the real function (not the stub held by the ref before it syncs).
+      void handleChartDateChange(meta.id, persisted.start, persisted.end);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleChartDateChange]); // re-runs only when the fn identity changes (effectively once)
 
   useEffect(() => {
     const startRefreshCycle = () => {
