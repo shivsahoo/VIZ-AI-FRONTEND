@@ -6,6 +6,7 @@ import { DashboardsView } from "./DashboardsView";
 import { ChartsView } from "./ChartsView";
 import { InsightsView } from "./InsightsView";
 import { UsersView } from "./UsersView";
+import { ObservabilityView } from "./ObservabilityView";
 import { DashboardDetailView } from "./DashboardDetailView";
 import { DashboardCreationForm } from "../components/features/dashboards/DashboardCreationForm";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "../components/ui/dialog";
@@ -328,6 +329,8 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
         return <InsightsView projectId={projectId} onGeneratingChange={onInsightsGeneratingChange} />;
       case 'team':
         return <UsersView projectId={projectId} />;
+      case 'observability':
+        return <ObservabilityView projectId={projectId} />;
       default:
         return (
           <HomeDashboardView 
