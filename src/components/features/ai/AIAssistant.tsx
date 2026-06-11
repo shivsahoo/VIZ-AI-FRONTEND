@@ -1,17 +1,81 @@
 import { useState, useEffect, useRef } from "react";
-import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw } from "lucide-react";
+import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, ChartScatter, Grid3x3, Funnel, Globe, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw, Microscope } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { Badge } from "../../ui/badge";
 import { GradientButton } from "../../shared/GradientButton";
 import { ChartPreviewDialog } from "../charts/ChartPreviewDialog";
-import { getDashboards, getDatabases, getCurrentUser, type Chart as SavedChart } from "../../../services/api";
+import { ProbeModeDialog } from "../charts/ProbeModeDialog";
+import { getDashboards, getDatabases, getCurrentUser, getLatestOntology, type Chart as SavedChart } from "../../../services/api";
 import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../../../utils/databaseMetadata";
 import { VizAIWebSocket, WebSocketResponse, type ChartSpec } from "../../../services/websocket";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
 import { useChartGenerationStore } from "../../../store/chartGenerationStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../ui/dialog";
+import type { ChartAxisConfig, ChartType } from "../charts/core/chartTypes";
+import { normalizeChartSpec } from "../../../utils/chartSpecNormalizer";
+
+/** Maps WebSocket `chart_spec` → preview model; all `x_axis` / `y_axis` reads go through `normalizeChartSpec`. */
+function chartSuggestionFromWebSocketSpec(
+  spec: ChartSpec,
+  index: number,
+): ChartSuggestion {
+  const n = normalizeChartSpec({
+    title: spec.title ?? "",
+    query: spec.query ?? "",
+    chart_type: spec.chart_type ?? "line",
+    x_axis: spec.x_axis,
+    y_axis: spec.y_axis,
+    report: spec.report,
+    relevance: typeof spec.relevance === "number" ? spec.relevance : undefined,
+    is_time_based: spec.is_time_based,
+    data_connection_id: spec.data_connection_id ?? "",
+    value_key: spec.value_key,
+    category_key: spec.category_key,
+    region_key: spec.region_key,
+    metric_key: spec.metric_key,
+  });
+
+  const primarySeriesKey =
+    n.chartType === "pie"
+      ? n.axisConfig.valueKey ?? n.yAxisKey
+      : n.chartType === "map"
+        ? n.axisConfig.metricKey ?? n.yAxisKey
+        : n.chartType === "funnel"
+          ? n.axisConfig.valueKey ?? n.yAxisKey
+          : n.chartType === "heatmap"
+            ? n.axisConfig.valueKey ?? n.yAxisKey
+            : n.yAxisKey ??
+              n.axisConfig.yAxisKey ??
+              n.axisConfig.valueKey ??
+              n.axisConfig.metricKey;
+
+  return {
+    id: `${spec.data_connection_id || "chart"}-${index}-${Date.now()}`,
+    name: n.title || `Generated Chart ${index + 1}`,
+    type: n.chartType,
+    description: spec.report || n.title || "AI-generated chart suggestion",
+    query: n.query,
+    reasoning: spec.report || "Generated based on your request.",
+    interaction: (spec as { interaction?: string }).interaction,
+    dataSource: n.dataConnectionId ? `Database ${n.dataConnectionId}` : undefined,
+    dataConnectionId: n.dataConnectionId,
+    databaseId: n.dataConnectionId,
+    relevance: n.relevance,
+    spec,
+    axisConfig: n.axisConfig,
+    xAxisField: n.axisConfig.xAxisKey ?? null,
+    yAxisField:
+      n.axisConfig.yAxisKey ??
+      n.axisConfig.valueKey ??
+      n.axisConfig.metricKey ??
+      null,
+    minMaxDates: spec.min_max_dates ?? null,
+    xAxisKey: n.xAxisKey,
+    dataKeys: primarySeriesKey ? { primary: primarySeriesKey } : undefined,
+  };
+}
 
 interface Message {
   id: number;
@@ -23,15 +87,18 @@ interface Message {
 interface ChartSuggestion {
   id: string;
   name: string;
-  type: 'line' | 'bar' | 'pie' | 'area';
+  type: ChartType;
   description: string;
   query: string;
   reasoning: string;
+  interaction?: string; // Added to match schema
   dataSource?: string;
   dataConnectionId?: string;
   databaseId?: string;
   relevance?: number;
   spec?: ChartSpec;
+  /** Normalized axis keys from `normalizeChartSpec` — required for scatter / heatmap / funnel / map. */
+  axisConfig?: ChartAxisConfig;
   data?: any[];
   dataKeys?: {
     primary: string;
@@ -49,25 +116,63 @@ type ChartCreationRequestPayload = {
   nlq_query: string;
   data_connection_id: string;
   db_schema: string;
-  db_type: 'postgres' | 'mysql' | 'sqlite' | 'oracledb' | 'salesforce';
+  db_type: 'postgres' | 'mysql' | 'sqlite' | 'oracledb' | 'salesforce' | 'databricks';
+  ontology_context?: Record<string, any>;
+  ontology_constraints?: Record<string, any>;
   role: string;
-  kpi_info?: string;
-  dashboard_kpi_info?: string;
+  product_name?: string;
+  product_description?: string;
   product_info?: string;
   conversation_summary?: string;
   min_max_dates?: [string, string];
   sample_data?: string;
 };
 
+const buildOntologyConstraints = (ontology: Record<string, any> | undefined) => {
+  if (!ontology || typeof ontology !== "object") return undefined;
+  const classes = Array.isArray(ontology.classes) ? ontology.classes : [];
+  const relationships = Array.isArray(ontology.relationships) ? ontology.relationships : [];
+  const metrics = Array.isArray(ontology.metrics) ? ontology.metrics : [];
+  const rules = ontology.rules && typeof ontology.rules === "object" ? ontology.rules : {};
+
+  const allowed_joins = relationships
+    .filter((r: any) => r && r.source && r.target)
+    .map((r: any) => ({
+      source: r.source,
+      target: r.target,
+      source_column: r.source_column,
+      target_column: r.target_column,
+      label: r.label,
+    }));
+
+  const metric_defs = metrics.map((m: any) => ({
+    name: m?.name,
+    definition: m?.definition,
+    formula: m?.formula,
+    denominator: m?.denominator,
+    default_filter: m?.default_filter,
+  }));
+
+  return {
+    class_count: classes.length,
+    allowed_joins,
+    metrics: metric_defs,
+    default_time_dimension: rules.default_time_dimension ?? null,
+    default_time_granularity: rules.default_time_granularity ?? null,
+    success_status_values: Array.isArray(rules.status_success_values) ? rules.status_success_values : [],
+    default_filters: rules.default_filters ?? {},
+  };
+};
+
 interface AIAssistantProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   projectId?: number | string;
-  currentTab?: string; // Current workspace tab to determine if we should keep WebSocket connected
+  currentTab?: string;
   onChartCreated?: (chart: {
     id?: string;
     name: string;
-    type: 'line' | 'bar' | 'pie' | 'area';
+    type: ChartType;
     dataSource: string;
     query: string;
     status: 'draft' | 'published';
@@ -75,7 +180,7 @@ interface AIAssistantProps {
   }) => void;
   editingChart?: {
     name: string;
-    type: 'line' | 'bar' | 'pie' | 'area';
+    type: ChartType;
     description?: string;
   } | null;
 }
@@ -84,14 +189,32 @@ const chartTypeIcons = {
   line: LineChart,
   bar: BarChart3,
   pie: PieChart,
-  area: AreaChart
+  donut: PieChart,
+  area: AreaChart,
+  scatter: ChartScatter,
+  heatmap: Grid3x3,
+  funnel: Funnel,
+  map: Globe,
+  stackedlinechart: LineChart,
+  stackedhorizontalbar: BarChart3,
+  clustering: ChartScatter,
+  multiyaxischart: BarChart3,
 };
 
 const chartTypeColors = {
   line: "bg-blue-500/10 text-blue-500 border-blue-500/20",
   bar: "bg-purple-500/10 text-purple-500 border-purple-500/20",
   pie: "bg-green-500/10 text-green-500 border-green-500/20",
-  area: "bg-orange-500/10 text-orange-500 border-orange-500/20"
+  donut: "bg-teal-500/10 text-teal-500 border-teal-500/20",
+  area: "bg-orange-500/10 text-orange-500 border-orange-500/20",
+  scatter: "bg-cyan-500/10 text-cyan-500 border-cyan-500/20",
+  heatmap: "bg-pink-500/10 text-pink-500 border-pink-500/20",
+  funnel: "bg-violet-500/10 text-violet-500 border-violet-500/20",
+  map: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+  stackedlinechart: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
+  stackedhorizontalbar: "bg-amber-500/10 text-amber-500 border-amber-500/20",
+  clustering: "bg-sky-500/10 text-sky-500 border-sky-500/20",
+  multiyaxischart: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
 };
 
 const mapDatabaseMetadataToAssistantState = (entry: DatabaseMetadataEntry) => ({
@@ -101,47 +224,64 @@ const mapDatabaseMetadataToAssistantState = (entry: DatabaseMetadataEntry) => ({
   schema: entry.schema ?? null,
 });
 
-const normalizeChartType = (type?: string): 'line' | 'bar' | 'pie' | 'area' => {
-  if (!type) return 'line';
+const normalizeChartType = (type?: string): ChartType => {
+  if (!type) return "line";
   const lower = type.toLowerCase();
-  if (lower.includes('bar')) return 'bar';
-  if (lower.includes('pie') || lower.includes('donut')) return 'pie';
-  if (lower.includes('area')) return 'area';
-  return 'line';
+  if (lower.includes("scatter")) return "scatter";
+  if (lower.includes("heatmap")) return "heatmap";
+  if (lower.includes("funnel")) return "funnel";
+  if (lower.includes("map") && !lower.includes("heatmap")) return "map";
+  if (lower.includes("stackedlinechart") || lower.includes("stacked_line_chart")) return "stackedlinechart";
+  if (lower.includes("stackedhorizontalbar") || lower.includes("stacked_horizontal_bar"))
+    return "stackedhorizontalbar";
+  if (lower.includes("clustering") || lower.includes("cluster")) return "clustering";
+  if (
+    lower.includes("multiyaxischart") ||
+    lower.includes("multi_y_axis_chart") ||
+    lower.includes("multiyaxis")
+  )
+    return "multiyaxischart";
+  if (lower.includes("bar")) return "bar";
+  if (lower.includes("donut")) return "donut";
+  if (lower.includes("pie")) return "pie";
+  if (lower.includes("area")) return "area";
+  return "line";
 };
 
-const normalizeDbType = (type?: string): 'postgres' | 'mysql' | 'sqlite' | 'oracledb' | 'salesforce' => {
+const normalizeDbType = (type?: string): 'postgres' | 'mysql' | 'sqlite' | 'oracledb' | 'salesforce' | 'databricks' => {
   if (!type) return 'postgres';
   const lower = type.toLowerCase();
-  // Handle Salesforce
+  if (lower.includes('databricks')) return 'databricks';
   if (lower.includes('salesforce')) return 'salesforce';
-  // Handle Oracle database types
   if (lower.includes('oracle')) return 'oracledb';
-  // Handle MySQL
   if (lower.includes('mysql')) return 'mysql';
-  // Handle SQLite
   if (lower.includes('sqlite')) return 'sqlite';
-  // Handle PostgreSQL variations (postgresql, postgres, pg)
   if (lower.includes('postgres') || lower.includes('pg')) return 'postgres';
-  // Default to postgres if type is not recognized
   return 'postgres';
 };
 
 const ensureSchemaString = (schema?: string | null): string => {
   if (!schema) {
-    return JSON.stringify({ tables: [] });
+    return "";
   }
   try {
-    JSON.parse(schema);
+    const parsed = JSON.parse(schema);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray((parsed as { tables?: unknown[] }).tables) &&
+      (parsed as { tables?: unknown[] }).tables!.length === 0
+    ) {
+      return "";
+    }
     return schema;
   } catch (error) {
-    console.warn('AIAssistant: Received invalid schema JSON, falling back to empty schema', { error });
-    return JSON.stringify({ tables: [] });
+    console.warn('AIAssistant: Received invalid schema JSON, omitting schema from payload', { error });
+    return "";
   }
 };
 
 export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onChartCreated, editingChart }: AIAssistantProps) {
-  // Use Zustand store for persistent state
   const {
     messages: storeMessages,
     selectedDatabase: storeSelectedDatabase,
@@ -153,13 +293,13 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     setChartWorkflowState: setStoreChartWorkflowState,
   } = useChartGenerationStore();
 
-  // Local state - initialize from store to restore history
   const [messages, setMessages] = useState<Message[]>(storeMessages);
   const [input, setInput] = useState("");
   const [selectedDatabase, setSelectedDatabase] = useState(storeSelectedDatabase);
   const [expandedSuggestion, setExpandedSuggestion] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(storeIsGenerating);
   const [previewChart, setPreviewChart] = useState<ChartSuggestion | null>(null);
+  const [probeModeChart, setProbeModeChart] = useState<ChartSuggestion | null>(null);
   const [showDatabaseSelection, setShowDatabaseSelection] = useState(!storeSelectedDatabase);
   const [dashboards, setDashboards] = useState<Array<{ id: string | number; name: string }>>([]);
   const [databases, setDatabases] = useState<Array<{ id: string; name: string; type: string; schema?: string | null }>>([]);
@@ -168,7 +308,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
   const [userId, setUserId] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [dynamicSuggestions, setDynamicSuggestions] = useState<string[]>([]);
   const chartRequestRef = useRef<ChartCreationRequestPayload | null>(null);
   const [isAwaitingClarification, setIsAwaitingClarification] = useState(false);
   const [chartWorkflowState, setChartWorkflowState] = useState<Record<string, any> | null>(storeChartWorkflowState);
@@ -176,107 +315,74 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
   const inputRef = useRef<HTMLInputElement>(null);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(false);
   const [isSettingUp, setIsSettingUp] = useState(false);
-  
-  // Helper function to check if a message starts with "Question X" pattern
+
   const isFollowUpQuestion = (messageText: string): boolean => {
     if (!messageText) return false;
     const trimmed = messageText.trim();
-    // Check if message starts with "Question" followed by a number and colon
     const questionPattern = /^Question\s+\d+:/i;
     return questionPattern.test(trimmed);
   };
 
-  // Track if we're restoring from store to avoid sync loops
   const isRestoringRef = useRef(false);
-
-  // Load state from store when opening (only when isOpen changes from false to true)
   const wasOpenRef = useRef(false);
+
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
-      // Assistant just opened - restore history from Zustand store
-      // Get fresh store state directly to avoid stale closure issues
       const storeState = useChartGenerationStore.getState();
-      console.log('[AIAssistant] Restoring from store:', {
-        messagesCount: storeState.messages.length,
-        hasDatabase: !!storeState.selectedDatabase,
-        chartSuggestionsCount: storeState.messages.filter(m => m.type === 'chart-suggestions').length,
-        messages: storeState.messages
-      });
-      
       isRestoringRef.current = true;
-      // Always restore messages from store to ensure history is shown
-      // Even if empty, set it to ensure consistency
       setMessages(storeState.messages);
-      
+
       if (storeState.selectedDatabase) {
         setSelectedDatabase(storeState.selectedDatabase);
         setShowDatabaseSelection(false);
       } else {
-        // If no database in store, show selection
         setShowDatabaseSelection(true);
       }
-      
+
       setIsGenerating(storeState.isGenerating);
       if (storeState.chartWorkflowState) {
         setChartWorkflowState(storeState.chartWorkflowState);
       }
-      
-      // Reset restore flag after state updates (longer delay to ensure other effects don't interfere)
+
       setTimeout(() => {
         isRestoringRef.current = false;
-        console.log('[AIAssistant] Restore complete, messages after restore:', storeState.messages.length);
       }, 300);
     }
     wasOpenRef.current = isOpen;
-  }, [isOpen]); // ONLY depend on isOpen - get fresh store state inside effect
+  }, [isOpen]);
 
-  // CRITICAL: Always sync messages to store (even when closed) to preserve history
-  // This ensures that when you close and reopen the assistant, your chart generation history is restored
-  // Use a ref to track previous messages to avoid unnecessary updates
   const prevMessagesRef = useRef<Message[]>([]);
   useEffect(() => {
-    // Skip sync if we're currently restoring from store to avoid loops
     if (isRestoringRef.current) {
-      console.log('[AIAssistant] Skipping sync - currently restoring from store');
       prevMessagesRef.current = messages;
       return;
     }
-    
-    // Only sync if messages actually changed and exist
+
     const messagesChanged = JSON.stringify(prevMessagesRef.current) !== JSON.stringify(messages);
     if (messagesChanged && messages.length > 0) {
-      console.log('[AIAssistant] Syncing messages to store:', {
-        count: messages.length,
-        hasChartSuggestions: messages.some(m => m.type === 'chart-suggestions')
-      });
-      // Directly update store - this is safe in useEffect (not during render)
       setStoreMessages(messages);
     }
     prevMessagesRef.current = messages;
   }, [messages, setStoreMessages]);
 
-  // Sync selectedDatabase to store (persist even when closed)
   useEffect(() => {
     if (!isRestoringRef.current && selectedDatabase) {
       setStoreSelectedDatabase(selectedDatabase);
     }
   }, [selectedDatabase, setStoreSelectedDatabase]);
 
-  // Sync isGenerating to store (only when open)
   useEffect(() => {
     if (!isRestoringRef.current && isOpen) {
       setStoreIsGenerating(isGenerating);
     }
   }, [isGenerating, isOpen, setStoreIsGenerating]);
 
-  // Sync chartWorkflowState to store (persist even when closed)
   useEffect(() => {
     if (!isRestoringRef.current) {
       setStoreChartWorkflowState(chartWorkflowState);
     }
   }, [chartWorkflowState, setStoreChartWorkflowState]);
 
-  // Ensure any open preview dialog is dismissed when the assistant closes
   useEffect(() => {
     if (!isOpen && previewChart) {
       setPreviewChart(null);
@@ -288,7 +394,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     chartWorkflowStateRef.current = chartWorkflowState;
   }, [chartWorkflowState]);
 
-  // Auto-focus input when database is selected and not generating
   useEffect(() => {
     if (selectedDatabase && !isGenerating && inputRef.current) {
       const timer = setTimeout(() => {
@@ -301,13 +406,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
   const replaceAnalyzingMessage = (content: string) => {
     setMessages((prev) => {
       if (prev.length === 0) {
-        return [
-          {
-            id: 1,
-            type: 'ai',
-            content,
-          },
-        ];
+        return [{ id: 1, type: 'ai', content }];
       }
 
       const updated = [...prev];
@@ -319,14 +418,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         }
       }
 
-      return [
-        ...updated,
-        {
-          id: prev.length + 1,
-          type: 'ai',
-          content,
-        },
-      ];
+      return [...updated, { id: prev.length + 1, type: 'ai', content }];
     });
   };
 
@@ -349,7 +441,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     return segments.join('\n\n');
   };
 
-  // Fetch dashboards and databases when projectId is available
   useEffect(() => {
     if (projectId && isOpen) {
       fetchDashboards();
@@ -357,33 +448,25 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     }
   }, [projectId, isOpen]);
 
-  // Track previous tab to detect navigation away from charts page
   const prevTabRef = useRef<string | undefined>(currentTab);
-  
-  // Separate effect to handle WebSocket disconnection when navigating away from charts page
+
   useEffect(() => {
     const prevTab = prevTabRef.current;
-    // If we're navigating away from charts page, disconnect WebSocket
     if (prevTab === 'charts' && currentTab !== 'charts' && wsClient) {
-      console.log('[AIAssistant] Navigating away from charts page - disconnecting WebSocket');
       wsClient.disconnect();
       setWsClient(null);
     }
     prevTabRef.current = currentTab;
   }, [currentTab, wsClient]);
 
-  // Effect to handle WebSocket connection when assistant opens
   useEffect(() => {
     if (!isOpen || !userId) {
       return;
     }
 
-    // Don't create new connection if we already have one
-    if (wsClient) {
-      return;
-    }
-
-    console.log('[AIAssistant] Creating WebSocket connection');
+    // New VizAIWebSocket each time the panel opens → new connectionId / LangGraph thread_id.
+    // Same client (and ID) for all chart requests while the panel stays open so memory stays useful.
+    let cancelled = false;
     const client = new VizAIWebSocket(userId);
     setIsConnecting(true);
     setConnectionError(null);
@@ -403,6 +486,29 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         clarityQs = [],
       }: { message?: string; clarityQs?: string[] } = {}
     ) => {
+
+      // --- INTERCEPT CONVERSATIONAL MESSAGES ---
+      if (chartSpecs.length === 1) {
+        const spec: any = chartSpecs[0];
+        if (spec.interaction || spec.chart_type?.toLowerCase() === 'none') {
+          const messageContent = spec.interaction || spec.report || spec.title || "Hello! How can I help you today?";
+
+          removeAnalyzingMessage();
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: prev.length + 1,
+              type: 'ai',
+              content: messageContent,
+            },
+          ]);
+
+          return; // Stop execution so it doesn't build a chart card
+        }
+      }
+      // -----------------------------------------
+
       if (!chartSpecs.length) {
         const errorMessage = message || "I couldn't find any relevant charts based on that request. Try rephrasing or providing more detail.";
         removeAnalyzingMessage();
@@ -417,35 +523,9 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         return;
       }
 
-      const suggestions: ChartSuggestion[] = chartSpecs.map((spec, index) => {
-        const chartType = normalizeChartType(spec.chart_type);
-        return {
-          id: `${spec.data_connection_id || 'chart'}-${index}-${Date.now()}`,
-          name: spec.title || `Generated Chart ${index + 1}`,
-          type: chartType,
-          description: spec.report || spec.title || "AI-generated chart suggestion",
-          query: spec.query,
-          reasoning: spec.report || "Generated based on your request.",
-          dataSource: spec.data_connection_id ? `Database ${spec.data_connection_id}` : undefined,
-          dataConnectionId: spec.data_connection_id,
-          databaseId: spec.data_connection_id,
-          relevance: typeof spec.relevance === 'number' ? spec.relevance : undefined,
-          spec,
-          xAxisField: spec.x_axis ?? null,
-          yAxisField: spec.y_axis ?? null,
-          minMaxDates: spec.min_max_dates ?? null,
-          xAxisKey: spec.x_axis || undefined,
-          dataKeys: spec.y_axis ? { primary: spec.y_axis } : undefined,
-        };
-      });
-
-      if (clarityQs.length === 0 && suggestions.length > 0) {
-        const qs = suggestions
-          .map(s => s.name || s.description || '')
-          .filter(Boolean)
-          .slice(0, 3);
-        if (qs.length > 0) setDynamicSuggestions(qs);
-      }
+      const suggestions: ChartSuggestion[] = chartSpecs.map(
+        chartSuggestionFromWebSocketSpec,
+      );
 
       const contentMessage =
         message ||
@@ -467,33 +547,25 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     };
 
     const handleChartCreation = (response: WebSocketResponse) => {
-      // Update quick suggestions from clarity questions if present
       const clarityQs = Array.isArray(response.state?.clarity_questions)
         ? (response.state?.clarity_questions as string[])
         : [];
-      if (clarityQs.length > 0) {
-        setDynamicSuggestions(clarityQs.slice(0, 3));
-      }
 
       if (response.status === 'collecting') {
         setIsGenerating(false);
-        
-        // Check if the message starts with "Question X" pattern
+
         const messageText = response.message || '';
         const hasQuestionPattern = isFollowUpQuestion(messageText);
-        
-        // Set awaiting clarification if message contains Question X pattern
+
         setIsAwaitingClarification(hasQuestionPattern);
         setChartWorkflowState(response.state ?? null);
-        
-        // Check if chart_specs are provided even when status is 'collecting'
+
         const chartSpecs = (response.state?.chart_specs as ChartSpec[]) || [];
-        
+
         if (chartSpecs.length > 0) {
           const message = response.message || "Here are a few starter charts for this data source.";
           showChartSuggestions(chartSpecs, { message, clarityQs });
         } else {
-          // No chart specs, just show clarification message
           replaceAnalyzingMessage(buildClarificationMessage(response));
         }
         return;
@@ -506,7 +578,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         setIsAwaitingClarification(false);
         chartRequestRef.current = null;
         setChartWorkflowState(response.state ?? null);
-        
+
         showChartSuggestions(chartSpecs, { message: response.message, clarityQs });
       } else if (response.status === 'error') {
         setIsGenerating(false);
@@ -534,31 +606,12 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         const chartSpecs = (response.state?.chart_specs as ChartSpec[]) || [];
         if (chartSpecs.length > 0) {
           const processChartSpecs = (chartSpecs: ChartSpec[], message?: string) => {
-            const suggestions: ChartSuggestion[] = chartSpecs.map((spec, index) => {
-              const chartType = normalizeChartType(spec.chart_type);
-              return {
-                id: `${spec.data_connection_id || 'chart'}-${index}-${Date.now()}`,
-                name: spec.title || `Generated Chart ${index + 1}`,
-                type: chartType,
-                description: spec.report || spec.title || "AI-generated chart suggestion",
-                query: spec.query,
-                reasoning: spec.report || "Generated based on your request.",
-                dataSource: spec.data_connection_id ? `Database ${spec.data_connection_id}` : undefined,
-                dataConnectionId: spec.data_connection_id,
-                databaseId: spec.data_connection_id,
-                relevance: typeof spec.relevance === 'number' ? spec.relevance : undefined,
-                spec,
-                xAxisField: spec.x_axis ?? null,
-                yAxisField: spec.y_axis ?? null,
-                minMaxDates: spec.min_max_dates ?? null,
-                xAxisKey: spec.x_axis || undefined,
-                dataKeys: spec.y_axis ? { primary: spec.y_axis } : undefined,
-              };
-            });
+            const suggestions: ChartSuggestion[] = chartSpecs.map(
+              chartSuggestionFromWebSocketSpec,
+            );
 
             const contentMessage = message || `I've generated ${suggestions.length} new chart suggestion${suggestions.length > 1 ? 's' : ''}.`;
-            
-            // Remove the "Generating more charts..." message
+
             setMessages((prev) => {
               const filtered = prev.filter(m => m.content !== 'Generating more chart suggestions...');
               return [
@@ -591,26 +644,25 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
 
     client.connect()
       .then(() => {
-        setWsClient(client);
-        setIsConnecting(false);
+        if (!cancelled) {
+          setWsClient(client);
+          setIsConnecting(false);
+        }
       })
       .catch((error) => {
-        console.error('[AIAssistant] Failed to connect to WebSocket:', error);
-        setIsConnecting(false);
-        setConnectionError(error?.message || 'Failed to connect to AI assistant');
-        toast.error(error?.message || 'Failed to connect to AI assistant');
+        if (!cancelled) {
+          console.error('[AIAssistant] Failed to connect to WebSocket:', error);
+          setIsConnecting(false);
+          setConnectionError(error?.message || 'Failed to connect to AI assistant');
+          toast.error(error?.message || 'Failed to connect to AI assistant');
+        }
       });
 
-    // Cleanup: Don't disconnect when assistant closes - only when navigating away
-    // The disconnect when navigating away from charts page is handled in the separate effect above
-    // This cleanup only runs when isOpen or userId changes, not when component unmounts
-    // Cleanup: Don't disconnect or remove listeners when assistant closes
-    // Keep connection and listeners alive - only disconnect when navigating away from charts page
-    // The disconnect when navigating away is handled in the separate effect above
     return () => {
-      // Do nothing - keep connection and listeners alive
-      // This allows the connection to persist when closing/reopening the assistant
-      console.log('[AIAssistant] Assistant closed - keeping WebSocket connection alive');
+      cancelled = true;
+      client.disconnect();
+      setWsClient(null);
+      setIsConnecting(false);
     };
   }, [isOpen, userId]);
 
@@ -644,21 +696,18 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
 
   const fetchDashboards = async () => {
     if (!projectId) return;
-    
+
     try {
-      console.log('AIAssistant: Fetching dashboards for projectId:', projectId);
       const response = await getDashboards(String(projectId));
-      console.log('AIAssistant: getDashboards response:', response);
-      
+
       if (response.success && response.data && Array.isArray(response.data)) {
         const fetchedDashboards = response.data.map(d => ({ id: d.id, name: d.name }));
         setDashboards(fetchedDashboards);
-        console.log('AIAssistant: Fetched dashboards successfully', { count: fetchedDashboards.length, dashboards: fetchedDashboards });
       } else {
-        console.warn('AIAssistant: getDashboards failed or no data', { 
-          success: response.success, 
+        console.warn('AIAssistant: getDashboards failed or no data', {
+          success: response.success,
           error: response.error,
-          data: response.data 
+          data: response.data
         });
       }
     } catch (err) {
@@ -686,31 +735,25 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         }));
         setDatabases(fetchedDatabases);
         storeDatabaseMetadata(String(projectId), fetchedDatabases);
-        console.log('AIAssistant: Fetched databases', { count: fetchedDatabases.length, databases: fetchedDatabases });
-        
+
         if (fetchedDatabases.length === 0) {
           toast.info("No database connections found. Please add a database connection first.");
         }
       } else {
         toast.error(response.error?.message || "Failed to fetch database connections");
-        console.error("Failed to fetch databases:", response.error);
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to fetch database connections");
-      console.error("Failed to fetch databases:", err);
     } finally {
       setIsLoadingDatabases(false);
     }
   };
 
-  // Update initial message when editing a chart
-  // IMPORTANT: Don't reset messages if we're restoring from store or if messages already exist
   useEffect(() => {
-    // Skip if we just restored from store (give it time to complete)
     if (isRestoringRef.current) {
       return;
     }
-    
+
     if (editingChart && isOpen) {
       setMessages([
         {
@@ -723,8 +766,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       setSelectedDatabase('editing-mode');
       setShowWelcomeScreen(false);
     } else if (!editingChart && isOpen && messages.length === 0) {
-      // Only reset to initial state if there are NO messages (fresh start)
-      // Don't reset if we have restored messages from store
       const storeState = useChartGenerationStore.getState();
       if (storeState.messages.length === 0) {
         setShowWelcomeScreen(true);
@@ -745,47 +786,41 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     }
   }, [editingChart, isOpen, messages.length]);
 
-  // Use fetched databases if available, otherwise fall back to mock databases
-  const availableDatabases = databases.length > 0 
+  const availableDatabases = databases.length > 0
     ? databases.map(db => ({
-        value: db.id,
-        label: db.name,
-        id: db.id,
-        name: db.name,
-        type: db.type,
-        schema: db.schema ?? null,
-      }))
+      value: db.id,
+      label: db.name,
+      id: db.id,
+      name: db.name,
+      type: db.type,
+      schema: db.schema ?? null,
+    }))
     : [
-        { value: "sales-db", label: "Sales Database", id: "sales-db", name: "Sales Database", type: "postgresql", schema: null },
-        { value: "inventory-db", label: "Inventory DB", id: "inventory-db", name: "Inventory DB", type: "postgresql", schema: null },
-        { value: "analytics-db", label: "Analytics DB", id: "analytics-db", name: "Analytics DB", type: "mysql", schema: null },
-        { value: "customer-db", label: "Customer DB", id: "customer-db", name: "Customer DB", type: "mysql", schema: null },
-        { value: "marketing-db", label: "Marketing DB", id: "marketing-db", name: "Marketing DB", type: "postgresql", schema: null }
-  ];
+      { value: "sales-db", label: "Sales Database", id: "sales-db", name: "Sales Database", type: "postgresql", schema: null },
+      { value: "inventory-db", label: "Inventory DB", id: "inventory-db", name: "Inventory DB", type: "postgresql", schema: null },
+      { value: "analytics-db", label: "Analytics DB", id: "analytics-db", name: "Analytics DB", type: "mysql", schema: null },
+      { value: "customer-db", label: "Customer DB", id: "customer-db", name: "Customer DB", type: "mysql", schema: null },
+      { value: "marketing-db", label: "Marketing DB", id: "marketing-db", name: "Marketing DB", type: "postgresql", schema: null }
+    ];
 
   const handleDatabaseSelect = (dbValue: string) => {
     setSelectedDatabase(dbValue);
     const selectedDb = availableDatabases.find(db => db.value === dbValue || db.id === dbValue);
-    
-    // Clear the previous chart request ref when database changes
-    // This ensures that subsequent prompts use the new database type
+
     chartRequestRef.current = null;
     setIsAwaitingClarification(false);
     setChartWorkflowState(null);
     setShowWelcomeScreen(false);
-    
-    // Add user selection message
+
     const userMessage: Message = {
       id: messages.length + 1,
       type: 'user',
       content: `Selected: ${selectedDb?.label}`
     };
-    
-    // Push user selection to the chat
+
     setMessages(prev => [...prev, userMessage]);
     setShowDatabaseSelection(false);
-    
-    // Show animated loader briefly, then show informational message
+
     setIsSettingUp(true);
     setTimeout(() => {
       setIsSettingUp(false);
@@ -797,14 +832,13 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
           content: "Now you can generate charts by giving prompts or click the button below to auto-generate charts using AI."
         }
       ]);
-    }, 800); // 800ms delay for a natural feel
+    }, 800);
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmedInput = input.trim();
     if (!trimmedInput) return;
 
-    // If no database selected, prompt the user to choose one
     if (!selectedDatabase) {
       setShowDatabaseSelection(true);
       const aiMessage: Message = {
@@ -835,27 +869,17 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     }
 
     const schemaString = ensureSchemaString(selectedDb.schema);
-    if (!selectedDb.schema) {
-      toast.warning("Schema details for this database are unavailable. Chart quality may be limited.");
-    }
 
-    // Check if the last AI message starts with "Question X" pattern
     const lastAIMessage = messages
       .slice()
       .reverse()
       .find(msg => msg.type === 'ai' || msg.type === 'database-prompt');
-    const isFollowUpQuestionDetected = lastAIMessage 
+    const isFollowUpQuestionDetected = lastAIMessage
       ? isFollowUpQuestion(lastAIMessage.content)
       : false;
 
-    // Determine if this is a follow-up response or a new question
-    // Only treat as follow-up if:
-    // 1. We're actively awaiting clarification (isAwaitingClarification is true)
-    // 2. The last AI message has "Question X" pattern
-    // 3. We have a previous chart request stored
-    // This ensures new questions aren't incorrectly treated as follow-ups
-    const isFollowUpResponse = isAwaitingClarification 
-      && isFollowUpQuestionDetected 
+    const isFollowUpResponse = isAwaitingClarification
+      && isFollowUpQuestionDetected
       && chartRequestRef.current !== null;
 
     const userMessage: Message = {
@@ -874,59 +898,56 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     setInput("");
     setIsGenerating(true);
     setConnectionError(null);
-    
-    // Reset follow-up state if this is a new question
+
     if (!isFollowUpResponse) {
       setIsAwaitingClarification(false);
       setChartWorkflowState(null);
     }
 
-    // Refocus input after sending
     setTimeout(() => {
       inputRef.current?.focus();
     }, 100);
 
     const dbType = normalizeDbType(selectedDb.type);
-    console.log('[AIAssistant] Normalizing db_type:', {
-      originalType: selectedDb.type,
-      normalizedType: dbType,
-      databaseName: selectedDb.name
-    });
+    let ontologyContext: Record<string, any> | undefined;
+    let ontologyConstraints: Record<string, any> | undefined;
+    try {
+      const ontologyResponse = await getLatestOntology(String(selectedDb.id));
+      if (ontologyResponse.success && ontologyResponse.data?.ontology) {
+        ontologyContext = ontologyResponse.data.ontology;
+        ontologyConstraints = buildOntologyConstraints(ontologyContext);
+      }
+    } catch (error) {
+      console.warn("[AIAssistant] Failed to load ontology context for chart generation", error);
+    }
 
-    // Prepare payload based on whether this is a follow-up or new question
     let payload: ChartCreationRequestPayload;
-    
+
     if (isFollowUpResponse && chartRequestRef.current) {
-      // Follow-up response: Keep existing nlq_query, send user_response
-      console.log('[AIAssistant] Detected follow-up response. Keeping nlq_query:', chartRequestRef.current.nlq_query);
       payload = {
         ...chartRequestRef.current,
-        // Override with current database info to ensure correct db_type
         data_connection_id: String(selectedDb.id),
         db_schema: schemaString,
         db_type: dbType,
+        ontology_context: ontologyContext,
+        ontology_constraints: ontologyConstraints,
       };
     } else {
-      // New question: Update nlq_query, reset user_response
-      console.log('[AIAssistant] Detected new question. Setting nlq_query:', trimmedInput);
       payload = {
         nlq_query: trimmedInput,
         data_connection_id: String(selectedDb.id),
         db_schema: schemaString,
         db_type: dbType,
+        ontology_context: ontologyContext,
+        ontology_constraints: ontologyConstraints,
         role: 'Analyst',
       };
-      // Store the new request for potential follow-ups
       chartRequestRef.current = { ...payload };
-      // Ensure we're not in follow-up mode for new questions
       setIsAwaitingClarification(false);
     }
 
     try {
-      // Send WebSocket message
       if (isFollowUpResponse) {
-        // Follow-up: Send user_response, keep nlq_query unchanged
-        console.log('[AIAssistant] Sending follow-up response with user_response:', trimmedInput);
         wsClient.chartCreation({
           ...payload,
           user_response: trimmedInput,
@@ -935,21 +956,21 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         });
         setIsAwaitingClarification(false);
       } else {
-        // New question: Send only nlq_query, explicitly no user_response
-        console.log('[AIAssistant] Sending new question with nlq_query only (no user_response):', trimmedInput);
+        // If the user previously generated charts in this session, pass the
+        // last known state so the backend can restore conversation history
+        // even if its in-memory session was lost (e.g. server restart).
         wsClient.chartCreation({
           ...payload,
-          // Explicitly ensure user_response is not included
+          ...(chartWorkflowState ? { existing_state: chartWorkflowState } : {}),
         });
       }
     } catch (error: any) {
-      console.error('[AIAssistant] Failed to send chart creation request:', error);
       setIsGenerating(false);
       toast.error(error?.message || 'Failed to submit your request. Please try again.');
     }
   };
 
-  const handleRegenerateCharts = () => {
+  const handleRegenerateCharts = async () => {
     if (!wsClient || !wsClient.isConnected()) {
       toast.error(isConnecting ? "Still connecting to AI assistant..." : "AI assistant is not connected. Please try again.");
       return;
@@ -973,9 +994,22 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       return;
     }
 
-    // Check if this is initial generation or regeneration
+    const schemaString = ensureSchemaString(selectedDb.schema);
+    const dbType = normalizeDbType(selectedDb.type);
+    let ontologyContext: Record<string, any> | undefined;
+    let ontologyConstraints: Record<string, any> | undefined;
+    try {
+      const ontologyResponse = await getLatestOntology(String(selectedDb.id));
+      if (ontologyResponse.success && ontologyResponse.data?.ontology) {
+        ontologyContext = ontologyResponse.data.ontology;
+        ontologyConstraints = buildOntologyConstraints(ontologyContext);
+      }
+    } catch (error) {
+      console.warn("[AIAssistant] Failed to load ontology context for regenerate", error);
+    }
+
     const hasExistingCharts = messages.some(m => m.type === 'chart-suggestions');
-    
+
     setIsGenerating(true);
     setMessages(prev => [
       ...prev,
@@ -984,19 +1018,26 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
 
     try {
       if (hasExistingCharts) {
-        // Use regenerate for subsequent generations
         wsClient.regenerate({
           data_connection_id: String(selectedDb.id),
+          db_schema: schemaString,
+          db_type: dbType,
+          ontology_context: ontologyContext,
+          ontology_constraints: ontologyConstraints,
           role: 'Analyst',
           domain: 'admin',
-        });
+        } as any); // <-- ADD "as any" HERE
       } else {
-        // Use chart_creation for initial generation
         wsClient.send({
           event_type: 'chart_creation',
           user_id: userId!,
           payload: {
+            nlq_query: null,
             data_connection_id: String(selectedDb.id),
+            db_schema: schemaString,
+            db_type: dbType,
+            ontology_context: ontologyContext,
+            ontology_constraints: ontologyConstraints,
             role: 'Analyst',
             domain: 'admin',
             project_id: projectId || undefined,
@@ -1011,30 +1052,65 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     }
   };
 
-  const handleCreateChart = (suggestion: ChartSuggestion) => {
-    // Find the selected database and format dataSource with database ID
+  const handleOpenProbeMode = async (suggestion: ChartSuggestion) => {
     const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
-    
+    if (!selectedDb?.id) {
+      toast.error("Please select a valid database connection first.");
+      return;
+    }
+    const schemaString = ensureSchemaString(selectedDb.schema);
+    const dbType = normalizeDbType(selectedDb.type);
+    let ontologyContext: Record<string, any> | undefined;
+    let ontologyConstraints: Record<string, any> | undefined;
+    try {
+      const ontologyResponse = await getLatestOntology(String(selectedDb.id));
+      if (ontologyResponse.success && ontologyResponse.data?.ontology) {
+        ontologyContext = ontologyResponse.data.ontology;
+        ontologyConstraints = buildOntologyConstraints(ontologyContext);
+      }
+    } catch (error) {
+      console.warn("[AIAssistant] Failed to load ontology context for probe mode", error);
+    }
+    // Cast to `any` to carry db_schema / db_type alongside the standard ChartSuggestion fields.
+    // ProbeModeDialog reads these extra fields when building the first-turn context block.
+    setProbeModeChart({
+      ...suggestion,
+      dataConnectionId: suggestion.dataConnectionId || selectedDb.id,
+      databaseId: suggestion.dataConnectionId || selectedDb.id,
+      db_schema: schemaString,
+      db_type: dbType,
+      ontology_context: ontologyContext,
+      ontology_constraints: ontologyConstraints,
+    } as any);
+  };
+
+  const handleCreateChart = (suggestion: ChartSuggestion) => {
+    const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
+
     if (!selectedDb || !selectedDb.id) {
       toast.error("Please select a valid database connection first.");
       return;
     }
-    
-    // If it's a real database (UUID), validate it; otherwise use mock value
+
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const isRealDatabase = uuidRegex.test(selectedDb.id);
-    
+
     if (!isRealDatabase && databases.length > 0) {
-      // If we have real databases but selected a mock one, show error
       toast.error("Please select a valid database connection from the list.");
       return;
     }
-    
-    // Format dataSource as "Database {id}" so ChartPreviewDialog can extract it
-    const fallbackXAxis = suggestion.xAxisField || suggestion.xAxisKey;
+
+    const fallbackXAxis =
+      suggestion.xAxisKey ??
+      suggestion.axisConfig?.xAxisKey ??
+      suggestion.xAxisField;
     const fallbackDataKeys =
       suggestion.dataKeys ||
-      (suggestion.yAxisField ? { primary: suggestion.yAxisField } : undefined);
+      (suggestion.axisConfig?.yAxisKey
+        ? { primary: suggestion.axisConfig.yAxisKey }
+        : suggestion.yAxisField
+          ? { primary: suggestion.yAxisField }
+          : undefined);
 
     const chartWithDataSource: ChartSuggestion = {
       ...suggestion,
@@ -1044,8 +1120,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
       xAxisKey: fallbackXAxis,
       dataKeys: fallbackDataKeys,
     };
-    
-    // Open preview dialog instead of creating immediately
+
     setPreviewChart(chartWithDataSource);
   };
 
@@ -1053,22 +1128,21 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     if (!previewChart) return;
 
     const selectedDb = availableDatabases.find(db => db.value === selectedDatabase || db.id === selectedDatabase);
-    
+
     if (!selectedDb || !selectedDb.id) {
       toast.error("Database connection is required");
       return;
     }
-    
+
     onChartCreated?.({
       id: savedChart?.id,
       name: previewChart.name,
       type: previewChart.type,
-      dataSource: `Database ${selectedDb.id}`, // Format: "Database {uuid}" for extraction
+      dataSource: `Database ${selectedDb.id}`,
       query: previewChart.query,
       status: 'draft'
     });
-    
-    // Remove the suggestion from the message
+
     const updatedMessages = messages.map(msg => {
       if (msg.type === 'chart-suggestions' && msg.chartSuggestions) {
         return {
@@ -1081,18 +1155,31 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     setMessages(updatedMessages);
     setStoreMessages(updatedMessages);
 
-    // Close preview but keep AI assistant open
     setPreviewChart(null);
-    // Don't close AI assistant - let user continue generating charts
+  };
+
+  const handleProbeSaveAsDraft = (savedChart?: SavedChart) => {
+    if (!probeModeChart) return;
+    const selectedDb = availableDatabases.find(
+      (db) => db.value === selectedDatabase || db.id === selectedDatabase
+    );
+    if (!selectedDb?.id) {
+      toast.error("Database connection is required");
+      return;
+    }
+    onChartCreated?.({
+      id: savedChart?.id,
+      name: probeModeChart.name,
+      type: (savedChart?.type ?? probeModeChart.type) as ChartType,
+      dataSource: `Database ${selectedDb.id}`,
+      query: savedChart?.query ?? probeModeChart.query ?? "",
+      status: "draft",
+    });
   };
 
   const handleAddChartToDashboard = (dashboardId: number | string) => {
     if (!previewChart) return;
 
-    // When adding to dashboard from ChartPreviewDialog, the API call is already done
-    // We just need to notify that a chart was added to a dashboard so the dashboard can refresh
-    // and we stay on the current page (dashboard) instead of navigating to charts
-    // Preserve dashboardId as-is (can be number or string UUID)
     if (onChartCreated && dashboardId) {
       onChartCreated({
         name: previewChart.name,
@@ -1100,11 +1187,10 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         dataSource: previewChart.dataSource || '',
         query: previewChart.query,
         status: 'published',
-        dashboardId: dashboardId // Preserve as number or string
+        dashboardId: dashboardId
       });
     }
-    
-    // Remove the suggestion from the message
+
     const updatedMessages = messages.map(msg => {
       if (msg.type === 'chart-suggestions' && msg.chartSuggestions) {
         return {
@@ -1117,22 +1203,17 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
     setMessages(updatedMessages);
     setStoreMessages(updatedMessages);
 
-    // Close preview but keep AI assistant open
     setPreviewChart(null);
-    // Don't close AI assistant - let user continue generating charts
   };
 
   const toggleSuggestionExpand = (id: string) => {
     setExpandedSuggestion(expandedSuggestion === id ? null : id);
   };
 
-  // Parse message content to extract questions
   const parseQuestions = (content: string): { hasQuestions: boolean; parts: Array<{ type: 'text' | 'question'; content: string; questionNumber?: number }> } => {
-    // Check if content contains "Question 1:", "Question 2:", etc.
-    // Match "Question X:" followed by text until next "Question" or end
     const questionRegex = /Question\s+(\d+):\s*([^Q]+?)(?=Question\s+\d+:|$)/gi;
     const matches = Array.from(content.matchAll(questionRegex));
-    
+
     if (!matches || matches.length === 0) {
       return { hasQuestions: false, parts: [{ type: 'text', content }] };
     }
@@ -1142,8 +1223,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
 
     matches.forEach((match) => {
       if (match.index === undefined) return;
-      
-      // Add text before this question
+
       if (match.index > lastIndex) {
         const textBefore = content.substring(lastIndex, match.index).trim();
         if (textBefore) {
@@ -1151,22 +1231,20 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         }
       }
 
-      // Extract question number and content
       const questionNumber = parseInt(match[1], 10);
       const questionContent = match[2].trim();
-      
+
       if (questionNumber && questionContent) {
-        parts.push({ 
-          type: 'question', 
+        parts.push({
+          type: 'question',
           content: questionContent,
-          questionNumber 
+          questionNumber
         });
       }
 
       lastIndex = match.index + match[0].length;
     });
 
-    // Add remaining text after last question
     if (lastIndex < content.length) {
       const textAfter = content.substring(lastIndex).trim();
       if (textAfter) {
@@ -1176,14 +1254,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
 
     return { hasQuestions: true, parts };
   };
-
-  const suggestions = dynamicSuggestions.length > 0
-    ? dynamicSuggestions
-    : [
-    "I want reports on finance data for last financial year",
-    "Show me sales trends for Q4",
-    "Customer demographics breakdown"
-  ];
 
   const handleGetStarted = () => {
     setShowWelcomeScreen(false);
@@ -1199,14 +1269,12 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
 
   return (
     <>
-      {/* Centered Modal Dialog */}
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent 
+        <DialogContent
           className="w-full p-0 flex flex-col overflow-hidden"
           style={{ maxWidth: '65vw', maxHeight: '90vh', height: '85vh' }}
           hideCloseButton={true}
         >
-          {/* Header */}
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -1229,7 +1297,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
             </div>
           </DialogHeader>
 
-          {/* Editing Chart Context Banner */}
           {editingChart && (
             <div className="px-6 py-4 bg-muted/50 border-b border-border shrink-0">
               <div className="flex items-center gap-3">
@@ -1258,7 +1325,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
             </div>
           )}
 
-          {/* Messages */}
           <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-background min-h-0">
             {connectionError && (
               <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -1267,248 +1333,235 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
             )}
             <AnimatePresence>
               {messages.map((message) => (
-              <div key={message.id}>
-                {message.type === 'user' && (
-                  <div className="flex justify-end">
-                    <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-gradient-to-r from-primary to-accent text-white">
-                      <p className="text-sm leading-relaxed">{message.content}</p>
-                    </div>
-                  </div>
-                )}
-
-                {(message.type === 'ai' || message.type === 'database-prompt') && (() => {
-                  const { hasQuestions, parts } = parseQuestions(message.content);
-                  
-                  return (
-                    <div className="flex justify-start items-start gap-3">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
-                        <Sparkles className="w-4 h-4 text-white" />
-                      </div>
-                      <div className="max-w-[85%] space-y-3">
-                        {hasQuestions ? (
-                          parts.map((part, idx) => {
-                            if (part.type === 'question') {
-                              return (
-                                <div
-                                  key={idx}
-                                  className="rounded-xl px-4 py-3 bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 text-foreground"
-                                >
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <div className="w-6 h-6 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0">
-                                      <span className="text-xs font-semibold text-white">{part.questionNumber}</span>
-                                    </div>
-                                    <p className="text-sm font-medium text-foreground flex-1">
-                                      Question {part.questionNumber}:
-                                    </p>
-                                  </div>
-                                  <p className="text-sm leading-relaxed text-foreground ml-8">
-                                    {part.content}
-                                  </p>
-                                </div>
-                              );
-                            } else {
-                              return part.content ? (
-                                <div
-                                  key={idx}
-                                  className="rounded-2xl px-4 py-3 bg-card border border-border text-foreground"
-                                >
-                                  <p className="text-sm leading-relaxed whitespace-pre-line">{part.content}</p>
-                                </div>
-                              ) : null;
-                            }
-                          })
-                        ) : (
-                          <div className="rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
-                            <p className="text-sm leading-relaxed whitespace-pre-line">{message.content}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-              {message.type === 'chart-suggestions' && (
-                <div className="space-y-3">
-                  <div className="flex justify-start items-start gap-3">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
-                      <Sparkles className="w-4 h-4 text-white" />
-                    </div>
-                    <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
-                      <p className="text-sm leading-relaxed">{message.content}</p>
-                    </div>
-                  </div>
-
-                  {message.chartSuggestions && message.chartSuggestions.length > 0 && (
-                    <div className="space-y-3">
-                      {message.chartSuggestions.map((suggestion) => {
-                        const Icon = chartTypeIcons[suggestion.type];
-                        const isExpanded = expandedSuggestion === suggestion.id;
-                        
-                        return (
-                          <Card key={suggestion.id} className="border-border p-3">
-                            <div className="space-y-3">
-                              <div className="flex items-start gap-3">
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${chartTypeColors[suggestion.type]}`}>
-                                  <Icon className="w-5 h-5" />
-                                </div>
-                                
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <h4 className="text-sm text-foreground">{suggestion.name}</h4>
-                                    <Badge variant="outline" className="capitalize text-xs">
-                                      {suggestion.type}
-                                    </Badge>
-                                  </div>
-                                  <p className="text-xs text-muted-foreground">{suggestion.description}</p>
-                                </div>
-                              </div>
-
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => toggleSuggestionExpand(suggestion.id)}
-                                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors border border-border rounded-lg hover:bg-muted/50"
-                                >
-                                  <Code className="w-3.5 h-3.5" />
-                                  {isExpanded ? 'Hide' : 'View'} Details
-                                  {isExpanded ? (
-                                    <ChevronUp className="w-3.5 h-3.5" />
-                                  ) : (
-                                    <ChevronDown className="w-3.5 h-3.5" />
-                                  )}
-                                </button>
-
-                                <GradientButton
-                                  onClick={() => handleCreateChart(suggestion)}
-                                  size="sm"
-                                  className="gap-2"
-                                >
-                                  Preview
-                                </GradientButton>
-                              </div>
-
-                              {isExpanded && (
-                                <div className="space-y-3 pt-2 border-t border-border">
-                                  <div>
-                                    <p className="text-xs text-muted-foreground mb-2">AI Reasoning:</p>
-                                    <p className="text-xs text-foreground bg-muted/50 p-2 rounded-lg">
-                                      {suggestion.reasoning}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-muted-foreground mb-2">SQL Query:</p>
-                                    <pre className="text-xs bg-muted/50 p-2 rounded-lg overflow-x-auto">
-                                      <code className="text-foreground">{suggestion.query}</code>
-                                    </pre>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </Card>
-                        );
-                      })}
-                      
-                      {/* Let AI Generate Charts Button */}
-                      <div className="flex justify-center pt-2">
-                        <Button
-                          onClick={handleRegenerateCharts}
-                          disabled={isGenerating || !wsClient || !wsClient.isConnected()}
-                          size="sm"
-                          className="gap-2 bg-gradient-to-r from-accent to-primary hover:opacity-90 text-white shadow-md transition-all disabled:opacity-50"
-                        >
-                          <RotateCcw className="w-4 h-4" />
-                          Let AI Generate Charts
-                        </Button>
+                <div key={message.id}>
+                  {message.type === 'user' && (
+                    <div className="flex justify-end">
+                      <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-gradient-to-r from-primary to-accent text-white">
+                        <p className="text-sm leading-relaxed">{message.content}</p>
                       </div>
                     </div>
                   )}
+
+                  {(message.type === 'ai' || message.type === 'database-prompt') && (() => {
+                    const { hasQuestions, parts } = parseQuestions(message.content);
+
+                    return (
+                      <div className="flex justify-start items-start gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
+                          <Sparkles className="w-4 h-4 text-white" />
+                        </div>
+                        <div className="max-w-[85%] space-y-3">
+                          {hasQuestions ? (
+                            parts.map((part, idx) => {
+                              if (part.type === 'question') {
+                                return (
+                                  <div
+                                    key={idx}
+                                    className="rounded-xl px-4 py-3 bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 text-foreground"
+                                  >
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <div className="w-6 h-6 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0">
+                                        <span className="text-xs font-semibold text-white">{part.questionNumber}</span>
+                                      </div>
+                                      <p className="text-sm font-medium text-foreground flex-1">
+                                        Question {part.questionNumber}:
+                                      </p>
+                                    </div>
+                                    <p className="text-sm leading-relaxed text-foreground ml-8">
+                                      {part.content}
+                                    </p>
+                                  </div>
+                                );
+                              } else {
+                                return part.content ? (
+                                  <div
+                                    key={idx}
+                                    className="rounded-2xl px-4 py-3 bg-card border border-border text-foreground"
+                                  >
+                                    <p className="text-sm leading-relaxed whitespace-pre-line">{part.content}</p>
+                                  </div>
+                                ) : null;
+                              }
+                            })
+                          ) : (
+                            <div className="rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
+                              <p className="text-sm leading-relaxed whitespace-pre-line">{message.content}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {message.type === 'chart-suggestions' && (
+                    <div className="space-y-3">
+                      <div className="flex justify-start items-start gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
+                          <Sparkles className="w-4 h-4 text-white" />
+                        </div>
+                        <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
+                          <p className="text-sm leading-relaxed">{message.content}</p>
+                        </div>
+                      </div>
+
+                      {message.chartSuggestions && message.chartSuggestions.length > 0 && (
+                        <div className="space-y-3">
+                          {message.chartSuggestions.map((suggestion) => {
+                            const Icon = chartTypeIcons[suggestion.type];
+                            const isExpanded = expandedSuggestion === suggestion.id;
+
+                            return (
+                              <Card key={suggestion.id} className="border-border p-3">
+                                <div className="space-y-3">
+                                  <div className="flex items-start gap-3">
+                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${chartTypeColors[suggestion.type]}`}>
+                                      <Icon className="w-5 h-5" />
+                                    </div>
+
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <h4 className="text-sm text-foreground">{suggestion.name}</h4>
+                                        <Badge variant="outline" className="capitalize text-xs">
+                                          {suggestion.type}
+                                        </Badge>
+                                      </div>
+                                      <p className="text-xs text-muted-foreground">{suggestion.description}</p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex flex-col gap-2">
+                                    <div className="flex gap-2">
+                                      <button
+                                        onClick={() => toggleSuggestionExpand(suggestion.id)}
+                                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors border border-border rounded-lg hover:bg-muted/50"
+                                      >
+                                        <Code className="w-3.5 h-3.5" />
+                                        {isExpanded ? 'Hide' : 'View'} Details
+                                        {isExpanded ? (
+                                          <ChevronUp className="w-3.5 h-3.5" />
+                                        ) : (
+                                          <ChevronDown className="w-3.5 h-3.5" />
+                                        )}
+                                      </button>
+
+                                      <GradientButton
+                                        onClick={() => handleCreateChart(suggestion)}
+                                        size="sm"
+                                        className="gap-2"
+                                      >
+                                        Preview
+                                      </GradientButton>
+
+                                      {suggestion.query && (
+                                        <GradientButton
+                                          onClick={() => handleOpenProbeMode(suggestion)}
+                                          size="sm"
+                                          className="gap-2 shadow-md glow hover:shadow-xl transition-all"
+                                        >
+                                          <Microscope className="w-3.5 h-3.5" />
+                                          Probe Mode
+                                        </GradientButton>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {isExpanded && (
+                                    <div className="space-y-3 pt-2 border-t border-border">
+                                      <div>
+                                        <p className="text-xs text-muted-foreground mb-2">AI Reasoning:</p>
+                                        <p className="text-xs text-foreground bg-muted/50 p-2 rounded-lg">
+                                          {suggestion.reasoning}
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs text-muted-foreground mb-2">SQL Query:</p>
+                                        <pre className="text-xs bg-muted/50 p-2 rounded-lg overflow-x-auto">
+                                          <code className="text-foreground">{suggestion.query}</code>
+                                        </pre>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </Card>
+                            );
+                          })}
+
+                          <div className="flex justify-center pt-2">
+                            <Button
+                              onClick={handleRegenerateCharts}
+                              disabled={isGenerating || !wsClient || !wsClient.isConnected()}
+                              size="sm"
+                              className="gap-2 bg-gradient-to-r from-accent to-primary hover:opacity-90 text-white shadow-md transition-all disabled:opacity-50"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                              Let AI Generate Charts
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
-          </AnimatePresence>
-
-          {isGenerating && (
-            <div className="flex justify-start items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
-                <Sparkles className="w-4 h-4 text-white" />
-              </div>
-              <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
-                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
-                  <span className="text-sm text-muted-foreground ml-2">Generating charts...</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {isSettingUp && (
-            <div className="flex justify-start items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
-                <Sparkles className="w-4 h-4 text-white" />
-              </div>
-              <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
-                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Welcome Screen - Show "Let's Get Started" button */}
-          {showWelcomeScreen && messages.length > 0 && messages[0].type === 'ai' && (
-            <div className="flex justify-center pt-4 pb-6">
-              <GradientButton
-                onClick={handleGetStarted}
-                className="w-full max-w-md h-12 text-base font-medium gap-2"
-              >
-                <Sparkles className="w-5 h-5" />
-                Let's Get Started
-              </GradientButton>
-            </div>
-          )}
-
-          {/* Show "Let AI Generate Charts" button after database selection when no charts exist */}
-          {selectedDatabase && !showWelcomeScreen && !showDatabaseSelection && !messages.some(m => m.type === 'chart-suggestions') && !isGenerating && (
-            <div className="flex justify-center pt-4 pb-6">
-              <Button
-                onClick={handleRegenerateCharts}
-                disabled={isGenerating || !wsClient || !wsClient.isConnected()}
-                className="gap-2 bg-gradient-to-r from-accent to-primary hover:opacity-90 text-white shadow-md transition-all disabled:opacity-50"
-              >
-                <Sparkles className="w-5 h-5" />
-                Let AI Generate Charts
-              </Button>
-            </div>
-          )}
-
-          {/* Suggestions */}
-          {messages.length <= 4 && selectedDatabase && !messages.some(m => m.type === 'chart-suggestions') && !editingChart && dynamicSuggestions.length > 0 && (
-            <div className="space-y-2 pt-4">
-              <p className="text-xs text-muted-foreground px-2">Try asking:</p>
-              {suggestions.map((suggestion, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    setInput(suggestion);
-                    // Refocus input after selecting suggestion
-                    setTimeout(() => {
-                      inputRef.current?.focus();
-                    }, 100);
-                  }}
-                  className="w-full text-left px-4 py-3 rounded-lg border border-border hover:border-accent hover:bg-accent/5 transition-all text-sm text-foreground"
-                >
-                  {suggestion}
-                </button>
               ))}
-            </div>
-          )}
-        </div>
+            </AnimatePresence>
 
-          {/* Database Selection (Above Input) */}
+            {isGenerating && (
+              <div className="flex justify-start items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
+                  <Sparkles className="w-4 h-4 text-white" />
+                </div>
+                <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
+                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                    <span className="text-sm text-muted-foreground ml-2">Generating charts...</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {isSettingUp && (
+              <div className="flex justify-start items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
+                  <Sparkles className="w-4 h-4 text-white" />
+                </div>
+                <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
+                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showWelcomeScreen && messages.length > 0 && messages[0].type === 'ai' && (
+              <div className="flex justify-center pt-4 pb-6">
+                <GradientButton
+                  onClick={handleGetStarted}
+                  className="w-full max-w-md h-12 text-base font-medium gap-2"
+                >
+                  <Sparkles className="w-5 h-5" />
+                  Let's Get Started
+                </GradientButton>
+              </div>
+            )}
+
+            {selectedDatabase && !showWelcomeScreen && !showDatabaseSelection && !messages.some(m => m.type === 'chart-suggestions') && !isGenerating && (
+              <div className="flex justify-center pt-4 pb-6">
+                <Button
+                  onClick={handleRegenerateCharts}
+                  disabled={isGenerating || !wsClient || !wsClient.isConnected()}
+                  className="gap-2 bg-gradient-to-r from-accent to-primary hover:opacity-90 text-white shadow-md transition-all disabled:opacity-50"
+                >
+                  <Sparkles className="w-5 h-5" />
+                  Let AI Generate Charts
+                </Button>
+              </div>
+            )}
+          </div>
+
           {showDatabaseSelection && (
             <div className="px-6 pb-4 border-t border-border bg-background shrink-0">
               <div className="space-y-2.5 pt-4">
@@ -1526,31 +1579,29 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                     No database connections available. Please add a database connection to get started.
                   </div>
                 ) : (
-                <div className="flex flex-wrap gap-2">
-                  {availableDatabases.map((db) => (
-                    <button
-                      key={db.value}
-                      onClick={() => handleDatabaseSelect(db.value)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all ${
-                        selectedDatabase === db.value
+                  <div className="flex flex-wrap gap-2">
+                    {availableDatabases.map((db) => (
+                      <button
+                        key={db.value}
+                        onClick={() => handleDatabaseSelect(db.value)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all ${selectedDatabase === db.value
                           ? 'bg-gradient-to-r from-primary to-accent text-white shadow-sm'
                           : 'bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground border border-border'
-                      }`}
-                    >
-                      {selectedDatabase === db.value && (
-                        <Check className="w-3 h-3" />
-                      )}
-                      <Database className="w-3 h-3" />
-                      {db.label}
-                    </button>
-                  ))}
-                </div>
+                          }`}
+                      >
+                        {selectedDatabase === db.value && (
+                          <Check className="w-3 h-3" />
+                        )}
+                        <Database className="w-3 h-3" />
+                        {db.label}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
           )}
 
-          {/* Input - Only show after database is selected */}
           {selectedDatabase && !showWelcomeScreen && (
             <div className="p-6 border-t border-border bg-background shrink-0">
               <div className="flex gap-3">
@@ -1589,7 +1640,6 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         </DialogContent>
       </Dialog>
 
-      {/* Chart Preview Dialog */}
       <ChartPreviewDialog
         isOpen={isOpen && !!previewChart}
         onClose={() => setPreviewChart(null)}
@@ -1598,7 +1648,29 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         dashboards={dashboards}
         onAddToDashboard={handleAddChartToDashboard}
         onSaveAsDraft={handleSaveAsDraft}
+        onOpenProbeMode={
+          previewChart?.query?.trim()
+            ? () => {
+                const chartForProbe = previewChart;
+                if (!chartForProbe?.query?.trim()) return;
+                setPreviewChart(null);
+                handleOpenProbeMode(chartForProbe as ChartSuggestion);
+              }
+            : undefined
+        }
       />
+
+      {/* Probe Mode — opens directly from the chart card, no preview step needed */}
+      {!!probeModeChart && (
+        <ProbeModeDialog
+          isOpen={!!probeModeChart}
+          onClose={() => setProbeModeChart(null)}
+          chart={probeModeChart as any}
+          dashboards={dashboards}
+          projectId={projectId}
+          onSaveAsDraft={handleProbeSaveAsDraft}
+        />
+      )}
 
     </>
   );

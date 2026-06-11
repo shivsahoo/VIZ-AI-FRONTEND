@@ -18,6 +18,7 @@
  */
 
 import { createContext, useContext, useState, ReactNode } from 'react';
+import type { ChartType } from '../components/features/charts/core/chartTypes';
 
 /**
  * Data structure for a pinned chart
@@ -32,7 +33,7 @@ export interface PinnedChartData {
   /** Last update timestamp (human-readable) */
   lastUpdated: string;
   /** Type of chart visualization */
-  chartType: 'line' | 'bar' | 'pie' | 'area';
+  chartType: ChartType;
   /** Chart category/tag */
   category: string;
   /** Associated dashboard name */

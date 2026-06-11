@@ -5,6 +5,8 @@
  * Integrated with the FastAPI backend.
  */
 
+import type { ChartType } from "../components/features/charts/core/chartTypes";
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
@@ -170,9 +172,9 @@ function sanitizeErrorMessage(errorText: string, statusCode: number): string {
     // Extract title from HTML if possible
     const titleMatch = errorText.match(/<title>(.*?)<\/title>/i);
     const h1Match = errorText.match(/<h1>(.*?)<\/h1>/i);
-    
+
     const extractedTitle = titleMatch?.[1] || h1Match?.[1] || '';
-    
+
     // Map common HTTP error codes to user-friendly messages
     const errorMessages: Record<number, string> = {
       400: 'Invalid request. Please check your input and try again.',
@@ -186,12 +188,12 @@ function sanitizeErrorMessage(errorText: string, statusCode: number): string {
       503: 'Service unavailable. The server is temporarily down for maintenance.',
       504: 'Request timeout. The server took too long to respond. Please try again.',
     };
-    
+
     // Use specific message for status code, or generic message
     if (errorMessages[statusCode]) {
       return errorMessages[statusCode];
     }
-    
+
     // If we extracted a title, try to make it user-friendly
     if (extractedTitle) {
       const cleanTitle = extractedTitle
@@ -201,13 +203,13 @@ function sanitizeErrorMessage(errorText: string, statusCode: number): string {
         .replace(/Not Found/i, 'Resource not found')
         .replace(/Unauthorized/i, 'Authentication required')
         .replace(/Forbidden/i, 'Access denied');
-      
+
       return cleanTitle + '. Please try again later.';
     }
-    
+
     return 'An unexpected error occurred. Please try again later.';
   }
-  
+
   // If it's not HTML, return as-is (but limit length)
   return errorText.length > 500 ? errorText.substring(0, 500) + '...' : errorText;
 }
@@ -217,7 +219,7 @@ function sanitizeErrorMessage(errorText: string, statusCode: number): string {
  */
 async function handleResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get('content-type');
-  
+
   if (!response.ok) {
     let errorMessage = `HTTP error! status: ${response.status}`;
     try {
@@ -239,7 +241,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
   if (contentType?.includes('application/json')) {
     return await response.json();
   }
-  
+
   return {} as T;
 }
 
@@ -608,7 +610,12 @@ export const getProjects = async (): Promise<ApiResponse<Project[]>> => {
 /**
  * Create new project
  */
-export const createProject = async (data: { name: string; description: string }): Promise<ApiResponse<Project>> => {
+export const createProject = async (data: {
+  name: string;
+  description: string;
+  primary_domain: string;
+  additional_kpis?: string | null;
+}): Promise<ApiResponse<Project>> => {
   try {
     const response = await apiRequest<{
       message: string;
@@ -624,6 +631,8 @@ export const createProject = async (data: { name: string; description: string })
       body: JSON.stringify({
         name: data.name,
         description: data.description,
+        primary_domain: data.primary_domain,
+        additional_kpis: data.additional_kpis ?? null,
       }),
     });
 
@@ -718,29 +727,6 @@ export const updateProject = async (projectId: string, data: Partial<Project>): 
       error: {
         code: 'UPDATE_PROJECT_FAILED',
         message: error.message || 'Failed to update project',
-      },
-    };
-  }
-};
-
-/**
- * Update project KPI information
- */
-export const updateProjectKpiInfo = async (projectId: string, kpiInfo: string): Promise<ApiResponse<void>> => {
-  try {
-    await apiRequest(`/api/v1/backend/projects/${projectId}/kpi-info`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        kpi_info: kpiInfo,
-      }),
-    });
-    return { success: true };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: {
-        code: 'UPDATE_PROJECT_KPI_FAILED',
-        message: error.message || 'Failed to update project KPI information',
       },
     };
   }
@@ -850,8 +836,8 @@ export const getDashboards = async (projectId: string): Promise<ApiResponse<Dash
       created_by: string;
       is_favorite?: boolean;
     }> = Array.isArray(response)
-      ? response
-      : (response as any).dashboards || [];
+        ? response
+        : (response as any).dashboards || [];
 
     return {
       success: true,
@@ -927,9 +913,6 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
 
 /**
  * Create new dashboard
- * @deprecated Dashboard creation is now handled through WebSocket events.
- * This function is kept for backward compatibility but should not be used for new dashboard creation.
- * Use DashboardCreationBot component with WebSocket for dashboard creation workflow.
  */
 export const createDashboard = async (projectId: string, data: { name: string; description: string }): Promise<ApiResponse<Dashboard>> => {
   try {
@@ -945,7 +928,7 @@ export const createDashboard = async (projectId: string, data: { name: string; d
     }>(`/api/v1/backend/projects/${projectId}/dashboard`, {
       method: 'POST',
       body: JSON.stringify({
-        title: data.name,
+        dashboard_name: data.name,
         description: data.description,
       }),
     });
@@ -1010,7 +993,7 @@ export const deleteDashboard = async (projectId: string, dashboardId: string): P
 export interface Chart {
   id: string;
   name: string;
-  type: 'line' | 'bar' | 'pie' | 'area';
+  type: ChartType;
   projectId: string;
   databaseId?: string;
   query?: string;
@@ -1018,6 +1001,8 @@ export interface Chart {
     xAxis?: string;
     yAxis?: string;
     color?: string;
+    /** Saved series/measure column names for stacked/multi-series charts. */
+    seriesKeys?: string[];
   };
   createdAt: string;
   updatedAt: string;
@@ -1035,6 +1020,12 @@ export interface ChartData {
   };
 }
 
+/** Pass-through to execute-query so the backend returns full tabular rows with optional axis hints. */
+export interface ChartDataAxisHints {
+  xAxis?: string | null;
+  yAxis?: string | null;
+}
+
 /**
  * Get charts for a project
  */
@@ -1048,10 +1039,12 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
         query: string;
         type: string; // Backend uses 'type' which is actually chart_type
         datasourceConnectionId: string | null; // Backend uses camelCase
+        data_connection_id?: string | null; // Alternative field name
         created_at: string;
         isFavorite?: boolean;
         x_axis?: string | null;
         y_axis?: string | null;
+        series_keys?: string[] | null;
         is_time_based?: boolean;
       }>;
     }>(`/api/v1/backend/charts?project_id=${projectId}`);
@@ -1062,22 +1055,30 @@ export const getCharts = async (projectId: string): Promise<ApiResponse<Chart[]>
     return {
       success: true,
       data: chartsArray
-        .filter((chart) => chart.datasourceConnectionId) // Filter charts with connections
-        .map((chart) => ({
-          id: chart.id,
-          name: chart.title,
-          type: mapChartType(chart.type), // Backend returns 'type' which is chart_type
-          projectId, // Will need to get from backend or context
-          databaseId: chart.datasourceConnectionId || undefined,
-          query: chart.query,
-          config: {
-            xAxis: chart.x_axis ?? undefined,
-            yAxis: chart.y_axis ?? undefined,
-          },
-          createdAt: chart.created_at,
-          updatedAt: chart.created_at,
-          is_time_based: chart.is_time_based ?? false,
-        })),
+        // Include all charts — don't drop charts that lack a connection ID here;
+        // ChartsView already handles "missing query/connection" gracefully.
+        .map((chart) => {
+          const connectionId = chart.datasourceConnectionId || chart.data_connection_id || undefined;
+          return {
+            id: chart.id,
+            name: chart.title,
+            type: mapChartType(chart.type), // Backend returns 'type' which is chart_type
+            projectId, // Will need to get from backend or context
+            databaseId: connectionId,
+            query: chart.query,
+            config: {
+              xAxis: chart.x_axis ?? undefined,
+              yAxis: chart.y_axis ?? undefined,
+              // Restore series keys for stacked/multi-series charts
+              ...(chart.series_keys && chart.series_keys.length > 0
+                ? { seriesKeys: chart.series_keys }
+                : {}),
+            },
+            createdAt: chart.created_at,
+            updatedAt: chart.created_at,
+            is_time_based: chart.is_time_based ?? false,
+          };
+        }),
     };
   } catch (error: any) {
     return {
@@ -1169,16 +1170,31 @@ export const getUserDashboardCharts = async (): Promise<ApiResponse<Array<{
 /**
  * Map backend chart type to frontend type
  */
-function mapChartType(backendType?: string | null): 'line' | 'bar' | 'pie' | 'area' {
+function mapChartType(backendType?: string | null): ChartType {
   if (!backendType) {
     return 'line';
   }
   const normalized = backendType.toString().toLowerCase();
-  const typeMap: Record<string, 'line' | 'bar' | 'pie' | 'area'> = {
+  const typeMap: Record<string, ChartType> = {
     line: 'line',
     bar: 'bar',
     pie: 'pie',
     area: 'area',
+    scatter: 'scatter',
+    heatmap: 'heatmap',
+    funnel: 'funnel',
+    map: 'map',
+    stackedlinechart: 'stackedlinechart',
+    stacked_line_chart: 'stackedlinechart',
+    stackedhorizontalbar: 'stackedhorizontalbar',
+    stacked_horizontal_bar: 'stackedhorizontalbar',
+    clustering: 'clustering',
+    cluster: 'clustering',
+    clustering_chart: 'clustering',
+    multiyaxischart: 'multiyaxischart',
+    multi_y_axis_chart: 'multiyaxischart',
+    multiyaxis: 'multiyaxischart',
+    donut: 'donut',
   };
   return typeMap[normalized] || 'line';
 }
@@ -1203,30 +1219,60 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
     if (data.config?.yAxis) {
       requestBody.y_axis = data.config.yAxis;
     }
+    // Send series keys so stacked-chart layout can be restored on reload
+    const seriesKeys = (data.config as any)?.seriesKeys;
+    if (Array.isArray(seriesKeys) && seriesKeys.length > 0) {
+      requestBody.series_keys = seriesKeys;
+    }
 
     const response = await apiRequest<{
-      id: string;
-      title: string;
-      query: string;
-      chart_type: string;
+      id?: string;
+      chart_id?: string;
+      title?: string;
+      query?: string;
+      chart_type?: string;
+      message?: string;
     }>(`/api/v1/backend/projects/${projectId}/save-chart`, {
       method: 'POST',
       body: JSON.stringify(requestBody),
     });
 
+    const savedId = response.id ?? response.chart_id;
+    const savedTitle = response.title ?? (requestBody.title as string) ?? data.name ?? 'New Chart';
+    const savedQuery =
+      response.query !== undefined && response.query !== null
+        ? response.query
+        : (data.query ?? '');
+    const savedChartType = response.chart_type ?? (requestBody.chart_type as string) ?? data.type ?? 'line';
+
+    if (!savedId) {
+      return {
+        success: false,
+        error: {
+          code: 'CREATE_CHART_INVALID_RESPONSE',
+          message:
+            'Chart was saved but the server did not return a chart id. Refresh the page or update the backend.',
+        },
+      };
+    }
+
     return {
       success: true,
       data: {
-        id: response.id,
-        name: response.title,
-        type: mapChartType(response.chart_type),
+        id: savedId,
+        name: savedTitle,
+        type: mapChartType(savedChartType),
         projectId,
         databaseId: data.databaseId,
-        query: response.query,
+        query: savedQuery,
         config: {
           xAxis: data.config?.xAxis,
           yAxis: data.config?.yAxis,
           color: data.config?.color,
+          // Preserve series keys so stacked chart layout survives a refresh
+          ...((data.config as any)?.seriesKeys?.length
+            ? { seriesKeys: (data.config as any).seriesKeys }
+            : {}),
         },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -1250,7 +1296,7 @@ export const createChart = async (projectId: string, data: Partial<Chart>): Prom
 export const addChartToDashboard = async (data: {
   title: string;
   query: string;
-  chart_type: 'line' | 'bar' | 'pie' | 'area';
+  chart_type: ChartType;
   dashboard_id: string;
   data_connection_id: string; // Required - must be a valid UUID
   report?: string;
@@ -1259,17 +1305,18 @@ export const addChartToDashboard = async (data: {
   is_time_based?: boolean;
   x_axis?: string | null;
   y_axis?: string | null;
+  series_keys?: string[];
 }): Promise<ApiResponse<{ chart_id: string }>> => {
   try {
     // Prepare request body - only include fields that have values
     const requestBody: any = {
-        title: data.title,
-        query: data.query,
-        type: data.type || data.chart_type,
-        is_time_based: data.is_time_based ?? false,
-        chart_type: data.chart_type,
-        dashboard_id: data.dashboard_id,
-        data_connection_id: data.data_connection_id,
+      title: data.title,
+      query: data.query,
+      type: data.type || data.chart_type,
+      is_time_based: data.is_time_based ?? false,
+      chart_type: data.chart_type,
+      dashboard_id: data.dashboard_id,
+      data_connection_id: data.data_connection_id,
     };
 
     // Only include report if it has a value (not empty string)
@@ -1291,6 +1338,9 @@ export const addChartToDashboard = async (data: {
     }
     if (data.y_axis) {
       requestBody.y_axis = data.y_axis;
+    }
+    if (Array.isArray(data.series_keys) && data.series_keys.length > 0) {
+      requestBody.series_keys = data.series_keys;
     }
 
     const response = await apiRequest<{
@@ -1324,16 +1374,17 @@ export const addChartToDashboard = async (data: {
  * @param bypassCache - If true, bypasses cache and always fetches fresh data
  */
 export const getChartData = async (
-  chartId: string, 
-  datasourceConnectionId: string, 
+  chartId: string,
+  datasourceConnectionId: string,
   query: string,
   fromDate?: string,
   toDate?: string,
-  bypassCache: boolean = false
+  bypassCache: boolean = false,
+  axisHints?: ChartDataAxisHints | null
 ): Promise<ApiResponse<ChartData>> => {
   // Import cache utilities
   const { getCachedChartData, setCachedChartData, clearChartCache } = await import('../utils/chartDataCache');
-  
+
   // Check cache first (unless bypassing)
   if (!bypassCache) {
     const cachedData = getCachedChartData(chartId, datasourceConnectionId, query, fromDate, toDate);
@@ -1347,19 +1398,35 @@ export const getChartData = async (
     // Clear cache if bypassing to ensure fresh data
     clearChartCache(chartId, datasourceConnectionId, query, fromDate, toDate);
   }
-  
+
   try {
-    const requestBody: { query: string; from_date?: string; to_date?: string } = {
+    const requestBody: {
+      query: string;
+      from_date?: string;
+      to_date?: string;
+      response_format: 'tabular' | 'legacy';
+      x_axis?: string | null;
+      y_axis?: string | null;
+    } = {
       query: query,
+      response_format: 'tabular',
     };
-    
+
     if (fromDate) {
       requestBody.from_date = fromDate;
     }
     if (toDate) {
       requestBody.to_date = toDate;
     }
-    
+    const xHint = axisHints?.xAxis?.trim();
+    const yHint = axisHints?.yAxis?.trim();
+    if (xHint) {
+      requestBody.x_axis = xHint;
+    }
+    if (yHint) {
+      requestBody.y_axis = yHint;
+    }
+
     const response = await apiRequest<{
       data?: any[];
       row_count?: number;
@@ -1574,7 +1641,7 @@ export const deleteChart = async (chartId: string, dashboardId?: number | string
         },
       };
     }
-    
+
     // Delete chart directly using general delete endpoint
     const response = await apiRequest<{
       message: string;
@@ -1614,8 +1681,95 @@ export interface Database {
   status: 'connected' | 'disconnected' | 'error';
   lastChecked: string;
   schema?: string | null;
+  dsGraphJson?: string | null;
+  hasDsGraph?: boolean;
   connectionString?: string | null;
   consentGiven?: boolean;
+}
+
+export interface DSGraphNode {
+  id: string;
+  label: string;
+  table: string;
+  schema?: string | null;
+  catalog?: string | null;
+  column_count: number;
+  columns: Array<{ name: string; type: string; is_primary_key: boolean }>;
+  pk_columns: string[];
+}
+
+export interface DSGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  source_column: string;
+  target_column: string;
+  label: string;
+  relationship_type: string;
+}
+
+export interface DSGraphPayload {
+  nodes: DSGraphNode[];
+  edges: DSGraphEdge[];
+  stats: {
+    table_count: number;
+    relation_count: number;
+    orphan_table_count: number;
+  };
+}
+
+export interface OntologyNode {
+  id: string;
+  label: string;
+  type: string;
+  meta?: Record<string, any>;
+}
+
+export interface OntologyEdge {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  type: string;
+  meta?: Record<string, any>;
+}
+
+export interface OntologyGraphPayload {
+  nodes: OntologyNode[];
+  edges: OntologyEdge[];
+  stats: Record<string, number>;
+}
+
+export interface OntologyQuestion {
+  question_id: string;
+  target_term: string;
+  question: string;
+  reason: string;
+  answer_type: "single_select" | "multi_select" | "text";
+  options: string[];
+  priority: number;
+}
+
+export interface OntologyVersionPayload {
+  ontology_version_id: string;
+  version_label: string;
+  status: string;
+  is_base: boolean;
+  graph: OntologyGraphPayload;
+  ontology: Record<string, any>;
+}
+
+export interface StartOntologyEnrichmentPayload {
+  session_id: string;
+  ontology_version_id: string;
+  initial_message: string;
+}
+
+export interface EnrichmentChatPayload {
+  session_id: string;
+  assistant_message: string;
+  extracted_updates: Record<string, any>;
+  chat_history: Array<{ role: string; content: string }>;
 }
 
 export interface DatabaseSchema {
@@ -1633,6 +1787,7 @@ export interface DatabaseSchema {
 export interface DatabaseCreationTask {
   taskId: string;
   tablesCount: number;
+  connectionId?: string;
 }
 
 /**
@@ -1652,6 +1807,8 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
         project_id: string;
         consent_given?: boolean;
         db_schema?: string;
+        ds_graph_json?: string;
+        has_ds_graph?: boolean;
         db_connection_string?: string;
       }>;
     }>(`/api/v1/backend/connections/${projectId}`);
@@ -1667,6 +1824,8 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
       project_id: string;
       consent_given?: boolean;
       db_schema?: string;
+      ds_graph_json?: string;
+      has_ds_graph?: boolean;
       db_connection_string?: string;
     }> = [];
 
@@ -1687,6 +1846,8 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
         status: 'connected' as const,
         lastChecked: new Date().toISOString(), // Backend doesn't provide created_at in this response
         schema: conn.db_schema ?? null,
+        dsGraphJson: conn.ds_graph_json ?? null,
+        hasDsGraph: conn.has_ds_graph ?? undefined,
         connectionString: conn.db_connection_string ?? null,
         consentGiven: conn.consent_given ?? undefined,
       })),
@@ -1710,6 +1871,7 @@ export const getDatabases = async (projectId: string): Promise<ApiResponse<Datab
  *   - connectionString: Full connection string (e.g., "postgresql://user:pass@host:port/db")
  *   - OR form fields: connectionName, dbType, host, port, database, username, password
  *   - Salesforce OAuth2 fields: sessionId, instanceUrl
+ *   - Databricks fields: workspaceUrl, httpPath, catalogName, schemaName, accessToken
  */
 export const createDatabase = async (
   projectId: string,
@@ -1726,6 +1888,12 @@ export const createDatabase = async (
     // Salesforce OAuth2 fields (session-based authentication only)
     sessionId?: string;
     instanceUrl?: string;
+    // Databricks fields
+    workspaceUrl?: string;
+    httpPath?: string;
+    catalogName?: string;
+    schemaName?: string;
+    accessToken?: string;
   }
 ): Promise<ApiResponse<DatabaseCreationTask>> => {
   try {
@@ -1753,11 +1921,13 @@ export const createDatabase = async (
         dbType = 'oracledb';
       } else if (dbType === 'salesforce') {
         dbType = 'salesforce';
+      } else if (dbType === 'databricks') {
+        dbType = 'databricks';
       }
-      
+
       requestBody.connection_name = data.connectionName || '';
       requestBody.db_type = dbType;
-      
+
       // Handle Salesforce connections (OAuth2 session-based authentication only)
       if (dbType === 'salesforce') {
         // Salesforce uses session_id (OAuth access_token) and instance_url
@@ -1767,6 +1937,12 @@ export const createDatabase = async (
         if (data.instanceUrl) {
           requestBody.instance_url = data.instanceUrl;
         }
+      } else if (dbType === 'databricks') {
+        requestBody.workspace_url = data.workspaceUrl || '';
+        requestBody.http_path = data.httpPath || '';
+        requestBody.catalog_name = data.catalogName || '';
+        requestBody.schema_name = data.schemaName || '';
+        requestBody.access_token = data.accessToken || '';
       } else {
         // Traditional database fields
         // Construct host with port if port is provided and different from default
@@ -1777,7 +1953,7 @@ export const createDatabase = async (
             const portNum = parseInt(portStr);
             if (!isNaN(portNum)) {
               const defaultPort = dbType === 'postgres' ? 5432 : dbType === 'mysql' ? 3306 : 1521;
-              
+
               // Only append port if it's different from default and not already in host
               if (portNum !== defaultPort && !hostWithPort.includes(':')) {
                 hostWithPort = `${hostWithPort}:${portNum}`;
@@ -1785,12 +1961,15 @@ export const createDatabase = async (
             }
           }
         }
-        
+
         requestBody.host = hostWithPort;
         requestBody.db_name = data.database || '';
         // Backend accepts both 'username' and 'name', send 'username' to match expected payload format
         requestBody.username = data.username || '';
         requestBody.password = data.password || '';
+        if (data.schemaName) {
+          requestBody.schema_name = data.schemaName;
+        }
       }
     }
 
@@ -1801,6 +1980,7 @@ export const createDatabase = async (
     const response = await apiRequest<{
       taskId: string;
       tablesCount: number;
+      connectionId?: string;
     }>(`/api/v1/backend/database/${projectId}`, {
       method: 'POST',
       body: JSON.stringify(requestBody),
@@ -1811,6 +1991,7 @@ export const createDatabase = async (
       data: {
         taskId: response.taskId,
         tablesCount: response.tablesCount,
+        connectionId: response.connectionId,
       },
     };
   } catch (error: any) {
@@ -1941,6 +2122,149 @@ export const getDatabaseSchema = async (databaseId: string): Promise<ApiResponse
   }
 };
 
+export const getDatabaseDSGraph = async (
+  connectionId: string
+): Promise<ApiResponse<DSGraphPayload>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      graph: DSGraphPayload;
+    }>(`/api/v1/backend/connections/${connectionId}/ds-graph`);
+
+    return {
+      success: true,
+      data: response.graph,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: "FETCH_DS_GRAPH_FAILED",
+        message: error.message || "Failed to fetch datasource graph",
+      },
+    };
+  }
+};
+
+export const bootstrapOntology = async (
+  connectionId: string
+): Promise<ApiResponse<OntologyVersionPayload>> => {
+  try {
+    const response = await apiRequest<OntologyVersionPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/bootstrap`,
+      { method: "POST" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "BOOTSTRAP_ONTOLOGY_FAILED", message: error.message || "Failed to bootstrap ontology" },
+    };
+  }
+};
+
+export const getLatestOntology = async (
+  connectionId: string
+): Promise<ApiResponse<OntologyVersionPayload>> => {
+  try {
+    const response = await apiRequest<OntologyVersionPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/latest`,
+      { method: "GET" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GET_LATEST_ONTOLOGY_FAILED", message: error.message || "Failed to fetch latest ontology" },
+    };
+  }
+};
+
+export const downloadLatestOntologyTTL = async (connectionId: string): Promise<ApiResponse<string>> => {
+  try {
+    const token = localStorage.getItem('vizai_access_token');
+    const url = `${API_BASE_URL}/api/v1/backend/connections/${connectionId}/ontology/latest.ttl`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "include",
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || "Failed to fetch ontology TTL");
+    }
+    const ttl = await response.text();
+    return { success: true, data: ttl };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "DOWNLOAD_ONTOLOGY_TTL_FAILED", message: error.message || "Failed to download ontology TTL" },
+    };
+  }
+};
+
+export const startOntologyEnrichment = async (
+  connectionId: string
+): Promise<ApiResponse<StartOntologyEnrichmentPayload>> => {
+  try {
+    const response = await apiRequest<StartOntologyEnrichmentPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/enrichment/start`,
+      { method: "POST" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "START_ONTOLOGY_ENRICHMENT_FAILED", message: error.message || "Failed to start ontology enrichment" },
+    };
+  }
+};
+
+export const applyOntologyEnrichment = async (
+  connectionId: string,
+  sessionId: string,
+  answers: Array<{ question_id: string; answer: string | string[] }>
+): Promise<ApiResponse<OntologyVersionPayload>> => {
+  try {
+    const response = await apiRequest<OntologyVersionPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/enrichment/${sessionId}/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify({ answers }),
+      },
+      120000 // 120 seconds — LLM enrichment + DB save can take up to 30s
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "APPLY_ONTOLOGY_ENRICHMENT_FAILED", message: error.message || "Failed to apply ontology enrichment" },
+    };
+  }
+};
+
+export const sendOntologyEnrichmentChat = async (
+  connectionId: string,
+  sessionId: string,
+  message: string
+): Promise<ApiResponse<EnrichmentChatPayload>> => {
+  try {
+    const response = await apiRequest<EnrichmentChatPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/enrichment/${sessionId}/chat`,
+      {
+        method: "POST",
+        body: JSON.stringify({ message }),
+      }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "ONTOLOGY_ENRICHMENT_CHAT_FAILED", message: error.message || "Failed to send enrichment message" },
+    };
+  }
+};
+
 // ============================================================================
 // AI / INSIGHTS
 // ============================================================================
@@ -2036,6 +2360,7 @@ export interface KeyMetricAnalysis {
   kpi_name: string;
   value_interpretation: string;
   business_impact: string;
+  trend?: 'positive' | 'negative' | 'neutral';
   reasoning?: string;
 }
 
@@ -2239,7 +2564,7 @@ export const getLatestBusinessInsight = async (
     const queryParams = new URLSearchParams({
       project_id: projectId,
     });
-    
+
     if (userId) {
       queryParams.append('user_id', userId);
     }
@@ -2475,12 +2800,12 @@ export const inviteUser = async (
       email: data.email,
       role_id: data.role_id,
     };
-    
+
     // Only include password if provided
     if (data.password) {
       requestBody.password = data.password;
     }
-    
+
     const response = await apiRequest<{
       message: string;
       user_id: string;
@@ -2791,21 +3116,21 @@ const api = {
   login,
   register,
   logout,
-  
+
   // Projects
   getProjects,
   createProject,
   getProject,
   updateProject,
   deleteProject,
-  
+
   // Dashboards
   getDashboards,
   createDashboard,
   deleteDashboard,
   getDashboardCharts,
   getFavorites,
-  
+
   // Charts
   getCharts,
   filterCharts,
@@ -2817,29 +3142,29 @@ const api = {
   updateFavoriteChart,
   deleteChart,
   getUserDashboardCharts,
-  
+
   // Databases
   getDatabases,
   createDatabase,
   testDatabaseConnection,
   getDatabaseSchema,
   updateConnection,
-  
+
   // AI/Insights
   naturalLanguageQuery,
   generateInsights,
   createDashboardFromPrompt,
-  
+
   // Users/Teams
   getTeamMembers,
   inviteUser,
   addUserToDashboard,
-  
+
   // Roles
   getRoles,
   createRole,
   getPermissions,
-  
+
   // Audit
   getAuditLogs,
 };
@@ -3002,5 +3327,436 @@ export const deleteHomeInsight = async (insightId: string): Promise<ApiResponse<
         message: error.message || 'Failed to delete home insight',
       },
     };
+  }
+};
+
+// ============================================================================
+// SHARE TOKEN / EMBED
+// ============================================================================
+
+export interface ShareTokenDetail {
+  token_id: string;
+  dashboard_id: string;
+  embed_url: string;
+  iframe_snippet: string;
+  is_active: boolean;
+  created_at: string;
+  expires_at: string | null;
+  access_count: number;
+  allowed_domains_snapshot: string[] | null;
+}
+
+/**
+ * Create or retrieve a share token for a dashboard
+ */
+export const createShareToken = async (
+  dashboardId: string,
+  expiresInDays: number | null = null
+): Promise<ApiResponse<ShareTokenDetail>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      token: ShareTokenDetail;
+    }>(`/api/v1/backend/dashboards/${dashboardId}/share-token`, {
+      method: 'POST',
+      body: JSON.stringify({ expires_in_days: expiresInDays }),
+    });
+
+    return {
+      success: true,
+      data: response.token,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'CREATE_SHARE_TOKEN_FAILED',
+        message: error.message || 'Failed to create share token',
+      },
+    };
+  }
+};
+
+/**
+ * Get the existing active share token for a dashboard
+ */
+export const getShareToken = async (
+  dashboardId: string
+): Promise<ApiResponse<ShareTokenDetail | null>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      token: ShareTokenDetail | null;
+    }>(`/api/v1/backend/dashboards/${dashboardId}/share-token`);
+
+    return {
+      success: true,
+      data: response.token,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GET_SHARE_TOKEN_FAILED',
+        message: error.message || 'Failed to get share token',
+      },
+    };
+  }
+};
+
+/**
+ * Revoke the active share token for a dashboard
+ */
+export const revokeShareToken = async (
+  dashboardId: string
+): Promise<ApiResponse<{ message: string; dashboard_id: string }>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      dashboard_id: string;
+    }>(`/api/v1/backend/dashboards/${dashboardId}/share-token`, {
+      method: 'DELETE',
+    });
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'REVOKE_SHARE_TOKEN_FAILED',
+        message: error.message || 'Failed to revoke share token',
+      },
+    };
+  }
+};
+
+
+// ============================================================================
+// APP REGISTRATION
+// ============================================================================
+
+export interface AppDetail {
+  app_id: string;
+  company_name: string;
+  domain_url: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+/**
+ * Create a new app registration
+ */
+export const createApp = async (
+  companyName: string,
+  domainUrl: string
+): Promise<ApiResponse<AppDetail>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      app: AppDetail;
+    }>('/api/v1/apps', {
+      method: 'POST',
+      body: JSON.stringify({
+        company_name: companyName,
+        domain_url: domainUrl,
+      }),
+    });
+
+    return {
+      success: true,
+      data: response.app,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'CREATE_APP_FAILED',
+        message: error.message || 'Failed to create app',
+      },
+    };
+  }
+};
+
+/**
+ * List all active apps for the current user
+ */
+export const listApps = async (): Promise<ApiResponse<AppDetail[]>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      apps: AppDetail[];
+    }>('/api/v1/apps');
+
+    return {
+      success: true,
+      data: response.apps,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'LIST_APPS_FAILED',
+        message: error.message || 'Failed to list apps',
+      },
+    };
+  }
+};
+
+/**
+ * Soft-delete an app
+ */
+export const deleteApp = async (
+  appId: string
+): Promise<ApiResponse<{ message: string; app_id: string }>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      app_id: string;
+    }>(`/api/v1/apps/${appId}`, {
+      method: 'DELETE',
+    });
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'DELETE_APP_FAILED',
+        message: error.message || 'Failed to delete app',
+      },
+    };
+  }
+};
+
+
+// ============================================================================
+// DASHBOARD ALLOWED DOMAINS
+// ============================================================================
+
+export interface AllowedDomainDetail {
+  app_id: string;
+  company_name: string;
+  domain_url: string;
+  added_at: string;
+}
+
+/**
+ * Set allowed domains for a dashboard (replaces existing)
+ */
+export const setAllowedDomains = async (
+  dashboardId: string,
+  appIds: string[]
+): Promise<ApiResponse<AllowedDomainDetail[]>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      dashboard_id: string;
+      allowed_domains: AllowedDomainDetail[];
+    }>(`/api/v1/dashboards/${dashboardId}/allowed-domains`, {
+      method: 'POST',
+      body: JSON.stringify({ app_ids: appIds }),
+    });
+
+    return {
+      success: true,
+      data: response.allowed_domains,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'SET_ALLOWED_DOMAINS_FAILED',
+        message: error.message || 'Failed to set allowed domains',
+      },
+    };
+  }
+};
+
+/**
+ * Get allowed domains for a dashboard
+ */
+export const getAllowedDomains = async (
+  dashboardId: string
+): Promise<ApiResponse<AllowedDomainDetail[]>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      dashboard_id: string;
+      allowed_domains: AllowedDomainDetail[];
+    }>(`/api/v1/dashboards/${dashboardId}/allowed-domains`);
+
+    return {
+      success: true,
+      data: response.allowed_domains,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GET_ALLOWED_DOMAINS_FAILED',
+        message: error.message || 'Failed to get allowed domains',
+      },
+    };
+  }
+};
+
+/**
+ * Remove an allowed domain from a dashboard
+ */
+export const removeAllowedDomain = async (
+  dashboardId: string,
+  appId: string
+): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{
+      message: string;
+      dashboard_id: string;
+      app_id: string;
+    }>(`/api/v1/dashboards/${dashboardId}/allowed-domains/${appId}`, {
+      method: 'DELETE',
+    });
+
+    return {
+      success: true,
+      data: response,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'REMOVE_ALLOWED_DOMAIN_FAILED',
+        message: error.message || 'Failed to remove allowed domain',
+      },
+    };
+  }
+};
+
+
+// ============================================================================
+// OBSERVABILITY API
+// ============================================================================
+
+export interface LLMTrace {
+  id: string;
+  session_id: string | null;
+  chart_id: string | null;
+  project_id: string | null;
+  user_id: string | null;
+  ai_service: string;
+  llm_provider: string | null;
+  model_name: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  latency_ms: number | null;
+  sql_generated: string | null;
+  sql_retries: number;
+  schema_tables_used: string[] | null;
+  agent_steps: any[] | null;
+  status: 'success' | 'error' | 'timeout' | 'cancelled';
+  error_message: string | null;
+  created_at: string;
+  // only present in detail view
+  prompt_text?: string | null;
+  completion_text?: string | null;
+}
+
+export interface TraceListResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  items: LLMTrace[];
+}
+
+export interface UsageAnalytics {
+  summary: {
+    total_calls: number;
+    total_tokens: number;
+    total_prompt_tokens: number;
+    total_completion_tokens: number;
+    total_cost_usd: number;
+    avg_latency_ms: number;
+    error_count: number;
+    error_rate: number;
+  };
+  daily_trend: Array<{
+    day: string;
+    ai_service: string;
+    tokens: number;
+    cost_usd: number;
+    calls: number;
+  }>;
+  service_breakdown: Array<{
+    ai_service: string;
+    calls: number;
+    tokens: number;
+    cost_usd: number;
+    avg_latency_ms: number;
+    errors: number;
+  }>;
+  model_breakdown: Array<{
+    model_name: string;
+    llm_provider: string;
+    calls: number;
+    tokens: number;
+    cost_usd: number;
+  }>;
+}
+
+export const getTraces = async (params: {
+  project_id?: string;
+  ai_service?: string;
+  status?: string;
+  date_from?: string;
+  date_to?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<ApiResponse<TraceListResponse>> => {
+  try {
+    const query = new URLSearchParams();
+    if (params.project_id) query.set('project_id', params.project_id);
+    if (params.ai_service) query.set('ai_service', params.ai_service);
+    if (params.status) query.set('status', params.status);
+    if (params.date_from) query.set('date_from', params.date_from);
+    if (params.date_to) query.set('date_to', params.date_to);
+    if (params.page) query.set('page', String(params.page));
+    if (params.page_size) query.set('page_size', String(params.page_size));
+    const data = await apiRequest<TraceListResponse>(`/api/v1/observability/traces?${query}`);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: { code: 'TRACES_FETCH_FAILED', message: error.message || 'Failed to fetch traces' } };
+  }
+};
+
+export const getTraceDetail = async (traceId: string): Promise<ApiResponse<LLMTrace>> => {
+  try {
+    const data = await apiRequest<LLMTrace>(`/api/v1/observability/traces/${traceId}`);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: { code: 'TRACE_DETAIL_FAILED', message: error.message || 'Failed to fetch trace' } };
+  }
+};
+
+export const getUsageAnalytics = async (params: {
+  project_id?: string;
+  date_from?: string;
+  date_to?: string;
+}): Promise<ApiResponse<UsageAnalytics>> => {
+  try {
+    const query = new URLSearchParams();
+    if (params.project_id) query.set('project_id', params.project_id);
+    if (params.date_from) query.set('date_from', params.date_from);
+    if (params.date_to) query.set('date_to', params.date_to);
+    const data = await apiRequest<UsageAnalytics>(`/api/v1/observability/analytics?${query}`);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: { code: 'ANALYTICS_FETCH_FAILED', message: error.message || 'Failed to fetch analytics' } };
   }
 };

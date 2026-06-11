@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, Pin, Trash2, Plus, Clock, Filter, Calendar as CalendarIcon, X, Download } from "lucide-react";
+import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, ChartScatter, Grid3x3, Funnel, Globe, Pin, Trash2, Plus, Clock, Filter, Calendar as CalendarIcon, X, Download } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -72,28 +72,19 @@ if (typeof document !== 'undefined') {
   }
 }
 import type { ChartDataConfig } from "../utils/chartData";
-import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 import {
-  LineChart as RechartsLine,
-  Line,
-  BarChart as RechartsBar,
-  Bar,
-  AreaChart as RechartsArea,
-  Area,
-  PieChart as RechartsPie,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Legend,
-} from "recharts";
-
+  getDefaultChartDataConfig,
+  inferChartDataConfig,
+  inferExtendedChartConfig,
+  extendedToChartDataConfig,
+  isExtendedChartType,
+} from "../utils/chartData";
+import type { ChartAxisConfig, ChartType } from "../components/features/charts/core/chartTypes";
+import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../utils/databaseMetadata";
 interface Chart {
   id: number | string;
   name: string;
-  type: 'line' | 'bar' | 'pie' | 'area';
+  type: ChartType;
   dataSource: string;
   databaseId?: string;
   createdAt: string;
@@ -106,6 +97,13 @@ interface Chart {
   isGenerated?: boolean;
   isFavorite?: boolean;
   is_time_based?: boolean;
+  /** Saved axis/series config from the backend (x_axis, y_axis, seriesKeys). */
+  config?: {
+    xAxis?: string;
+    yAxis?: string;
+    /** All measure/series column names for stacked/multi-series charts. */
+    seriesKeys?: string[];
+  };
   dateRange?: {
     startDate: Date | null;
     endDate: Date | null;
@@ -115,7 +113,7 @@ interface Chart {
 interface ChartSuggestion {
   id: string;
   name: string;
-  type: 'line' | 'bar' | 'pie' | 'area';
+  type: ChartType;
   description: string;
   query: string;
   reasoning: string;
@@ -131,6 +129,7 @@ interface ChartSuggestion {
   dataError?: string;
   databaseId?: string;
   dataConnectionId?: string;
+  axisConfig?: ChartAxisConfig;
 }
 
 interface Dashboard {
@@ -232,17 +231,27 @@ const chartTypeIcons = {
   line: LineChart,
   bar: BarChart3,
   pie: PieChart,
-  area: AreaChart
+  area: AreaChart,
+  scatter: ChartScatter,
+  clustering: ChartScatter,
+  multiyaxischart: BarChart3,
+  heatmap: Grid3x3,
+  funnel: Funnel,
+  map: Globe,
 };
 
 const chartTypeColors = {
   line: "from-blue-500/20 to-blue-600/20 border-blue-500/30",
   bar: "from-purple-500/20 to-purple-600/20 border-purple-500/30",
   pie: "from-green-500/20 to-green-600/20 border-green-500/30",
-  area: "from-orange-500/20 to-orange-600/20 border-orange-500/30"
+  area: "from-orange-500/20 to-orange-600/20 border-orange-500/30",
+  scatter: "from-cyan-500/20 to-cyan-600/20 border-cyan-500/30",
+  clustering: "from-sky-500/20 to-sky-600/20 border-sky-500/30",
+  multiyaxischart: "from-indigo-500/20 to-indigo-600/20 border-indigo-500/30",
+  heatmap: "from-pink-500/20 to-pink-600/20 border-pink-500/30",
+  funnel: "from-violet-500/20 to-violet-600/20 border-violet-500/30",
+  map: "from-emerald-500/20 to-emerald-600/20 border-emerald-500/30",
 };
-
-const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))"];
 
 interface ChartDataStatus {
   data?: any[];
@@ -251,162 +260,6 @@ interface ChartDataStatus {
   error?: string;
 }
 
-const getDefaultChartDataConfig = (): ChartDataConfig => ({
-  data: [],
-  dataKeys: { primary: 'value' },
-  xAxisKey: 'label',
-});
-
-const inferChartDataConfig = (rawData: any[] | undefined, chartType: Chart['type']): ChartDataConfig => {
-  if (!rawData || rawData.length === 0) {
-    return getDefaultChartDataConfig();
-  }
-
-  const normalizedRows = rawData.map((row, index) => {
-    if (row && typeof row === 'object' && !Array.isArray(row)) {
-      return { ...row };
-    }
-    return {
-      value: typeof row === 'number' ? row : Number(row) || 0,
-      label: `Row ${index + 1}`,
-    };
-  });
-
-  const sample = normalizedRows[0];
-  const keys = Object.keys(sample);
-
-  if (keys.length === 0) {
-    return getDefaultChartDataConfig();
-  }
-
-  const numericKeys = keys.filter((key) => typeof sample[key] === 'number' || (!isNaN(Number(sample[key])) && sample[key] !== null && sample[key] !== undefined));
-  
-  // Identify string keys for potential categorical data
-  const stringKeys = keys.filter(
-    (key) => typeof sample[key] === "string" || typeof sample[key] === "object"
-  );
-  
-  let primaryKey = numericKeys[0] || keys[1] || keys[0];
-  let secondaryKey = numericKeys.find((key) => key !== primaryKey);
-
-  let potentialXAxisKey = keys.find((key) => key !== primaryKey && typeof sample[key] !== 'number') || keys.find((key) => key !== primaryKey);
-
-  if (!potentialXAxisKey) {
-    potentialXAxisKey = 'index';
-  }
-
-  // Handle case where there are NO numeric columns at all (backend sends string data)
-  // We'll aggregate by counting occurrences of each category for bar charts
-  if (numericKeys.length === 0 && chartType === 'bar') {
-    console.log('[ChartsView/inferChartDataConfig] No numeric columns found for bar chart, aggregating...');
-    console.log('[ChartsView/inferChartDataConfig] String keys:', stringKeys);
-    console.log('[ChartsView/inferChartDataConfig] Sample data:', sample);
-    
-    // Find the categorical column (usually "value" or last string column)
-    const categoryKey = stringKeys.find(key => 
-      key.toLowerCase().includes('value') || 
-      key.toLowerCase().includes('name') ||
-      key.toLowerCase().includes('category') ||
-      key.toLowerCase().includes('institute')
-    ) || stringKeys[stringKeys.length - 1];
-    
-    console.log('[ChartsView/inferChartDataConfig] Category key selected:', categoryKey);
-    
-    if (categoryKey) {
-      // Count occurrences of each category
-      const counts = new Map<string, number>();
-      normalizedRows.forEach(row => {
-        const category = String(row[categoryKey] || 'Unknown');
-        counts.set(category, (counts.get(category) || 0) + 1);
-      });
-      
-      // Convert to chart data format
-      const aggregatedData = Array.from(counts.entries()).map(([name, count]) => ({
-        name,
-        value: count
-      }));
-      
-      console.log('[ChartsView/inferChartDataConfig] Aggregated data:', aggregatedData);
-      
-      return {
-        data: aggregatedData,
-        dataKeys: { primary: 'value' },
-        xAxisKey: 'name',
-      };
-    }
-  }
-
-  const data = normalizedRows.map((row, index) => {
-    const coercedRow: Record<string, any> = { ...row };
-    if (!(potentialXAxisKey in coercedRow)) {
-      coercedRow[potentialXAxisKey] = index + 1;
-    }
-
-    coercedRow[primaryKey] =
-      typeof row[primaryKey] === 'number'
-        ? row[primaryKey]
-        : Number(row[primaryKey]) || 0;
-
-    if (secondaryKey) {
-      coercedRow[secondaryKey] =
-        typeof row[secondaryKey] === 'number'
-          ? row[secondaryKey]
-          : Number(row[secondaryKey]) || 0;
-    }
-
-    return coercedRow;
-  });
-
-  if (chartType === 'pie') {
-    const nameKey = potentialXAxisKey === 'index' ? 'label' : potentialXAxisKey;
-    return {
-      data: data.map((row, index) => ({
-        name: row[nameKey] ?? row[potentialXAxisKey] ?? `Slice ${index + 1}`,
-        value: row[primaryKey],
-      })),
-      dataKeys: { primary: 'value' },
-      xAxisKey: 'name',
-    };
-  }
-
-  // Sort data by x-axis key for line and area charts to ensure proper connections
-  let sortedData = data;
-  if (chartType === 'line' || chartType === 'area') {
-    sortedData = [...data].sort((a, b) => {
-      const aVal = a[potentialXAxisKey];
-      const bVal = b[potentialXAxisKey];
-      
-      // Handle date strings
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        const aDate = new Date(aVal).getTime();
-        const bDate = new Date(bVal).getTime();
-        if (!isNaN(aDate) && !isNaN(bDate)) {
-          return aDate - bDate;
-        }
-        // If not valid dates, do string comparison
-        return aVal.localeCompare(bVal);
-      }
-      
-      // Handle numeric values
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        return aVal - bVal;
-      }
-      
-      // Fallback to string comparison
-      return String(aVal).localeCompare(String(bVal));
-    });
-  }
-
-  return {
-    data: sortedData,
-    dataKeys: {
-      primary: primaryKey,
-      ...(secondaryKey ? { secondary: secondaryKey } : {}),
-    },
-    xAxisKey: potentialXAxisKey,
-  };
-};
-
 interface ChartsViewProps {
   currentUser?: { id: number; name: string; email: string };
   projectId?: number | string;
@@ -414,7 +267,7 @@ interface ChartsViewProps {
   pendingChartFromAI?: {
     id?: string;
     name: string;
-    type: 'line' | 'bar' | 'pie' | 'area';
+    type: ChartType;
     dataSource: string;
     query: string;
     status: 'draft' | 'published';
@@ -422,7 +275,7 @@ interface ChartsViewProps {
   } | null;
   onChartFromAIProcessed?: () => void;
   onOpenAIAssistant?: () => void;
-  onEditChart?: (chart: { name: string; type: 'line' | 'bar' | 'pie' | 'area'; description?: string }) => void;
+  onEditChart?: (chart: { name: string; type: ChartType; description?: string }) => void;
 }
 
 // Helper function to format time ago
@@ -535,7 +388,13 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         ? formatDateForAPI(dateRange.endDate)
         : undefined;
 
-      const response = await getChartData(chartKey, chart.databaseId, chart.query, fromDate, toDate);
+      // Pass saved axis hints so execute-query returns the right column metadata
+      const axisHints =
+        chart.config?.xAxis || chart.config?.yAxis
+          ? { xAxis: chart.config.xAxis ?? null, yAxis: chart.config.yAxis ?? null }
+          : undefined;
+
+      const response = await getChartData(chartKey, chart.databaseId, chart.query, fromDate, toDate, false, axisHints);
 
       if (response.success && response.data) {
         setChartDataStatus((prev) => ({
@@ -785,6 +644,15 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           isGenerated: false,
           isFavorite: (chart as any).isFavorite || false,
           is_time_based: chart.is_time_based ?? false,
+          // Carry saved axis/series config so axis hints survive the list view
+          config: chart.config
+            ? {
+                xAxis: chart.config.xAxis ?? undefined,
+                yAxis: chart.config.yAxis ?? undefined,
+                seriesKeys:
+                  (chart.config as any).seriesKeys ?? undefined,
+              }
+            : undefined,
         }));
       } else {
         toast.error(chartsResponse.error?.message || "Failed to load charts");
@@ -825,6 +693,11 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
                 isGenerated: false,
                 isFavorite: false,
                 is_time_based: chart.is_time_based ?? false,
+                // Carry saved axis info from dashboard chart response
+                config:
+                  chart.x_axis || chart.y_axis
+                    ? { xAxis: chart.x_axis ?? undefined, yAxis: chart.y_axis ?? undefined }
+                    : undefined,
               };
             })
           );
@@ -837,6 +710,13 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         const key = String(chart.id);
         if (combinedChartsMap.has(key)) {
           const existing = combinedChartsMap.get(key)!;
+          const mergedQuery =
+            chart.query?.trim()
+              ? chart.query
+              : existing.query?.trim()
+                ? existing.query
+                : chart.query ?? existing.query;
+          const mergedDatabaseId = chart.databaseId ?? existing.databaseId;
           combinedChartsMap.set(key, {
             ...existing,
             ...chart,
@@ -844,10 +724,22 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             lastUpdated: chart.lastUpdated || existing.lastUpdated,
             status: chart.status || existing.status,
             dataSource: chart.dataSource || existing.dataSource,
-            query: chart.query ?? existing.query,
+            databaseId: mergedDatabaseId,
+            query: mergedQuery,
             isGenerated: chart.isGenerated ?? existing.isGenerated,
             isFavorite: chart.isFavorite ?? existing.isFavorite,
             is_time_based: chart.is_time_based ?? existing.is_time_based ?? false,
+            // Merge config: prefer whichever has more data
+            config: (() => {
+              const a = existing.config;
+              const b = chart.config;
+              if (!a && !b) return undefined;
+              return {
+                xAxis: b?.xAxis ?? a?.xAxis,
+                yAxis: b?.yAxis ?? a?.yAxis,
+                seriesKeys: b?.seriesKeys ?? a?.seriesKeys,
+              };
+            })(),
           });
         } else {
           combinedChartsMap.set(key, chart);
@@ -894,7 +786,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   const handleCreateChartFromAI = async (chartData: {
     id?: string;
     name: string;
-    type: 'line' | 'bar' | 'pie' | 'area';
+    type: ChartType;
     dataSource: string;
     query: string;
     status: 'draft' | 'published';
@@ -1065,7 +957,30 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       fetchChartDataForChart(chart);
     }
 
-    const preparedData = status?.data ? inferChartDataConfig(status.data, chart.type) : undefined;
+    let preparedData: ChartDataConfig | undefined;
+    let preparedAxis: ChartAxisConfig | undefined;
+    let effectiveChartType: ChartType = chart.type;
+    if (status?.data) {
+      if (isExtendedChartType(chart.type)) {
+        const ext = inferExtendedChartConfig(status.data, chart.type, {
+          xAxisKey: chart.config?.xAxis ?? undefined,
+          yAxisKey: chart.config?.yAxis ?? undefined,
+        });
+        preparedData = extendedToChartDataConfig(ext);
+        preparedAxis = ext.axisConfig;
+        effectiveChartType = ext.fallbackType ?? chart.type;
+      } else {
+        preparedData = inferChartDataConfig(
+          status.data,
+          chart.type as "line" | "bar" | "pie" | "area",
+          {
+            xAxisHint: chart.config?.xAxis ?? null,
+            yAxisHint: chart.config?.yAxis ?? null,
+            seriesKeysHint: chart.config?.seriesKeys ?? null,
+          },
+        );
+      }
+    }
 
     // Find which dashboards this chart belongs to - use current dashboards state
     const chartDashboards = chart.dashboardId 
@@ -1075,7 +990,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     const chartAsSuggestion: ChartSuggestion & { dataSource?: string } = {
       id: `existing-${chart.id}`,
       name: chart.name,
-      type: chart.type,
+      type: effectiveChartType,
       description: `${chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} chart from ${dataSourceLabel}`,
       query: chart.query || "",
       reasoning: `This is an existing chart from your ${dataSourceLabel} database.`,
@@ -1084,6 +999,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       data: preparedData?.data,
       dataKeys: preparedData?.dataKeys,
       xAxisKey: preparedData?.xAxisKey,
+      axisConfig: preparedAxis,
       isLoadingData: status ? status.loading : Boolean(chart.query && chart.databaseId),
       dataError: status?.error,
       databaseId: chart.databaseId ? String(chart.databaseId) : undefined,
@@ -1173,7 +1089,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         const newCharts: Chart[] = response.data.generated_charts.map((chart) => ({
           id: chart.id,
           name: chart.title,
-          type: mapChartType(chart.chart_type) as 'line' | 'bar' | 'pie' | 'area',
+          type: mapChartType(chart.chart_type),
           dataSource: selectedDb?.name || "Unknown Database",
           databaseId: selectedDatabaseForGenerate,
           createdAt: new Date().toISOString(),
@@ -1202,16 +1118,31 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   };
 
   // Helper to map chart type
-  const mapChartType = (type: string | undefined | null): 'line' | 'bar' | 'pie' | 'area' => {
+  const mapChartType = (type: string | undefined | null): ChartType => {
     if (!type) {
       return 'line';
     }
     const normalized = type.toLowerCase();
-    const typeMap: Record<string, 'line' | 'bar' | 'pie' | 'area'> = {
+    const typeMap: Record<string, ChartType> = {
       line: 'line',
       bar: 'bar',
       pie: 'pie',
       area: 'area',
+      scatter: 'scatter',
+      heatmap: 'heatmap',
+      funnel: 'funnel',
+      map: 'map',
+      stackedlinechart: 'stackedlinechart',
+      stacked_line_chart: 'stackedlinechart',
+      stackedhorizontalbar: 'stackedhorizontalbar',
+      stacked_horizontal_bar: 'stackedhorizontalbar',
+      clustering: 'clustering',
+      cluster: 'clustering',
+      clustering_chart: 'clustering',
+      multiyaxischart: 'multiyaxischart',
+      multi_y_axis_chart: 'multiyaxischart',
+      multiyaxis: 'multiyaxischart',
+      donut: 'donut',
     };
     return typeMap[normalized] || 'line';
   };
@@ -1260,6 +1191,9 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         dashboard_id: selectedDashboardForAdd,
         data_connection_id: databaseId,
         type: chart.type,
+        x_axis: chart.config?.xAxis,
+        y_axis: chart.config?.yAxis,
+        series_keys: chart.config?.seriesKeys,
       });
 
       if (response.success) {
@@ -1315,12 +1249,40 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
     const chartKey = String(chart.id);
     const status = chartDataStatus[chartKey];
     const hasQueryAndConnection = Boolean(chart.query && chart.databaseId);
-    const preparedData = status?.data ? inferChartDataConfig(status.data, chart.type) : getDefaultChartDataConfig();
+    let preparedData: ChartDataConfig;
+    let listAxis: ChartAxisConfig | undefined;
+    let displayChartType: ChartType = chart.type;
+    if (status?.data) {
+      if (isExtendedChartType(chart.type)) {
+        const ext = inferExtendedChartConfig(status.data, chart.type, {
+          xAxisKey: chart.config?.xAxis ?? undefined,
+          yAxisKey: chart.config?.yAxis ?? undefined,
+        });
+        preparedData = extendedToChartDataConfig(ext);
+        listAxis = ext.axisConfig;
+        displayChartType = ext.fallbackType ?? chart.type;
+      } else {
+        preparedData = inferChartDataConfig(
+          status.data,
+          chart.type as "line" | "bar" | "pie" | "area" | "stackedhorizontalbar" | "stackedlinechart" | "multiyaxischart",
+          {
+            xAxisHint: chart.config?.xAxis ?? null,
+            yAxisHint: chart.config?.yAxis ?? null,
+            seriesKeysHint: chart.config?.seriesKeys ?? null,
+          },
+        );
+      }
+    } else {
+      preparedData = getDefaultChartDataConfig();
+    }
     const isLoading = status ? status.loading : hasQueryAndConnection;
     const error = status?.error;
 
     return (
-      <div className="relative h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden p-4 flex items-center justify-center" data-chart-visualization="true">
+      <div
+        className="relative h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden px-4 flex flex-col"
+        data-chart-visualization="true"
+      >
         {isLoading && hasQueryAndConnection && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/90 backdrop-blur-md rounded-lg z-10">
             {/* Three dot loader */}
@@ -1342,14 +1304,14 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         )}
 
         {!isLoading && error && (
-          <div className="text-center text-muted-foreground text-xs">
+          <div className="flex flex-1 flex-col items-center justify-center px-2 text-center text-muted-foreground text-xs">
             <p className="font-medium text-foreground mb-1">Unable to load data</p>
             <p className="max-w-[220px] mx-auto leading-relaxed">{error}</p>
           </div>
         )}
 
         {!isLoading && !error && !hasQueryAndConnection && (
-          <div className="text-center text-muted-foreground text-xs">
+          <div className="flex flex-1 flex-col items-center justify-center px-2 text-center text-muted-foreground text-xs">
             <p className="font-medium text-foreground mb-1">Missing query configuration</p>
             <p className="max-w-[220px] mx-auto leading-relaxed">
               This chart does not have a saved SQL query or database connection. Edit the chart to provide both before viewing live data.
@@ -1358,7 +1320,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         )}
 
         {!isLoading && !error && preparedData.data.length === 0 && hasQueryAndConnection && (
-          <div className="text-center text-muted-foreground text-xs">
+          <div className="flex flex-1 flex-col items-center justify-center px-2 text-center text-muted-foreground text-xs">
             <p className="font-medium text-foreground mb-1">No data returned</p>
             <p className="max-w-[220px] mx-auto leading-relaxed">
               This chart&apos;s query did not return any rows. Try adjusting the query or filters.
@@ -1367,151 +1329,32 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         )}
 
         {!isLoading && !error && preparedData.data.length > 0 && hasQueryAndConnection && (
-          <ChartCard
-            type={chart.type}
-            data={preparedData.data}
-            dataKeys={preparedData.dataKeys}
-            xAxisKey={preparedData.xAxisKey}
-            showLegend={!!preparedData.dataKeys.secondary && chart.type !== 'pie'}
-            height={240}
-          />
+          <div className="min-h-0 flex-1 w-full">
+            <ChartCard
+              type={displayChartType}
+              data={preparedData.data}
+              dataKeys={[
+                preparedData.dataKeys.primary,
+                ...(preparedData.dataKeys.secondary
+                  ? [preparedData.dataKeys.secondary]
+                  : []),
+                ...(preparedData.extraKeys ?? []),
+              ]}
+              xAxisKey={preparedData.xAxisKey}
+              axisConfig={listAxis}
+              showLegend={
+                (!!preparedData.dataKeys.secondary || (preparedData.extraKeys?.length ?? 0) > 0) &&
+                displayChartType !== "pie"
+              }
+              height={280}
+            />
+          </div>
         )}
       </div>
     );
   };
 
-  const renderDateRangeButton = (chart: Chart) => {
-    const chartKey = String(chart.id);
-    const isOpen = openDatePicker === chartKey;
 
-    return (
-      <div 
-        data-date-picker="true"
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        onMouseDown={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        onMouseUp={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        className="relative"
-      >
-        <DatePicker
-          selectsRange
-          open={isOpen}
-          onClickOutside={() => setOpenDatePicker(null)}
-          onInputClick={() => {
-            setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
-          }}
-          startDate={chartDateRanges[String(chart.id)]?.startDate || chart.dateRange?.startDate || null}
-          endDate={chartDateRanges[String(chart.id)]?.endDate || chart.dateRange?.endDate || null}
-          onChange={(dates) => {
-            const [start, end] = dates as [Date | null, Date | null];
-            const chartKey = String(chart.id);
-            setChartDateRanges(prev => ({
-              ...prev,
-              [chartKey]: { startDate: start, endDate: end }
-            }));
-            
-            // Update chart object
-            setCharts(prev => prev.map(c => 
-              c.id === chart.id 
-                ? { ...c, dateRange: { startDate: start, endDate: end } }
-                : c
-            ));
-            
-            // Fetch data if both dates are set or both are cleared
-            // Use the updated date range directly to avoid state timing issues
-            if ((start && end) || (!start && !end)) {
-              const updatedChart = { ...chart, dateRange: { startDate: start, endDate: end } };
-              // Pass the date range directly to ensure we use the latest values
-              const dateRangeToUse = { startDate: start, endDate: end };
-              fetchChartDataForChart(updatedChart, dateRangeToUse);
-            }
-          }}
-          placeholderText="Date range"
-          dateFormat="MMM d, yyyy"
-          showPopperArrow={false}
-          popperPlacement="top-end"
-          customInput={
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              className="h-8 pl-3 pr-3 text-xs bg-white shadow-md hover:bg-gray-50 text-foreground hover:text-foreground border-border relative inline-flex items-center gap-2"
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                // Toggle date picker
-                setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
-              }}
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-              }}
-              onMouseUp={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-              }}
-            >
-              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-foreground" />
-              <span className="text-xs whitespace-nowrap">
-                {(() => {
-                  const range = chartDateRanges[String(chart.id)] || chart.dateRange;
-                  const start = range?.startDate;
-                  const end = range?.endDate;
-                  if (start && end) {
-                    return `${formatDateForDisplay(start)} - ${formatDateForDisplay(end)}`;
-                  }
-                  if (start) {
-                    return `${formatDateForDisplay(start)} - End date`;
-                  }
-                  return "Date range";
-                })()}
-              </span>
-              {(chartDateRanges[String(chart.id)]?.startDate || chart.dateRange?.startDate) && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    const chartKey = String(chart.id);
-                    setChartDateRanges(prev => ({
-                      ...prev,
-                      [chartKey]: { startDate: null, endDate: null }
-                    }));
-                    setCharts(prev => prev.map(c => 
-                      c.id === chart.id 
-                        ? { ...c, dateRange: { startDate: null, endDate: null } }
-                        : c
-                    ));
-                    const updatedChart = { ...chart, dateRange: { startDate: null, endDate: null } };
-                    fetchChartDataForChart(updatedChart, { startDate: null, endDate: null });
-                  }}
-                  className="w-5 h-5 flex items-center justify-center hover:bg-red-100 rounded transition-colors shrink-0"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                  onMouseUp={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                >
-                  <X className="h-3.5 w-3.5 text-red-600" strokeWidth={2.5} />
-                </button>
-              )}
-            </Button>
-          }
-        />
-      </div>
-    );
-  };
 
   const handleExportChart = async (chart: Chart) => {
     try {
@@ -1540,15 +1383,26 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   };
 
   const renderChartCard = (chart: Chart, isGenerated: boolean = false) => {
-    const Icon = chartTypeIcons[chart.type];
+    const Icon =
+      chartTypeIcons[chart.type as keyof typeof chartTypeIcons] ?? LineChart;
     const dashboard = resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId));
     const dataSourceLabel = getDatabaseLabel(chart);
-    const colorClass = {
+    const colorClass: Record<string, string> = {
       line: 'text-[#06B6D4] bg-[#06B6D4]/10',
       bar: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
       pie: 'text-[#10B981] bg-[#10B981]/10',
-      area: 'text-[#F59E0B] bg-[#F59E0B]/10'
-    }[chart.type];
+      donut: 'text-[#10B981] bg-[#10B981]/10',
+      area: 'text-[#F59E0B] bg-[#F59E0B]/10',
+      scatter: 'text-[#06B6D4] bg-[#06B6D4]/10',
+      clustering: 'text-[#0EA5E9] bg-[#0EA5E9]/10',
+      multiyaxischart: 'text-[#6366F1] bg-[#6366F1]/10',
+      heatmap: 'text-[#EC4899] bg-[#EC4899]/10',
+      funnel: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
+      map: 'text-[#10B981] bg-[#10B981]/10',
+      stackedlinechart: 'text-[#06B6D4] bg-[#06B6D4]/10',
+      stackedhorizontalbar: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
+    };
+    const chartColorClass = colorClass[chart.type as string] ?? 'text-muted-foreground bg-muted/20';
     const chartName = chart.name?.trim() || "Untitled Chart";
 
     return (
@@ -1577,7 +1431,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
         <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-card via-card/95 to-transparent pb-8">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2.5 flex-1 min-w-0">
-              <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${colorClass} transition-smooth group-hover:scale-110`}>
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${chartColorClass} transition-smooth group-hover:scale-110`}>
                 <Icon className="w-4 h-4" />
               </div>
               <div className="flex-1 min-w-0">
@@ -1684,8 +1538,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
           {renderChartPreview(chart)}
         </div>
 
-        {/* Bottom Section - Status Badge and Date Range */}
-        <div className="px-4 pb-3 flex items-center justify-between gap-4" data-date-picker="true">
+        <div className="px-4 pb-3 flex items-center justify-between gap-4">
           {/* Status Badge */}
           <div>
             {chart.status === 'published' && dashboard && (
@@ -1695,13 +1548,6 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
               <StatusBadge status="draft" />
             )}
           </div>
-          
-          {/* Date Range Picker */}
-          {chart.is_time_based === true && (
-            <div>
-              {renderDateRangeButton(chart)}
-            </div>
-          )}
         </div>
       </Card>
     );

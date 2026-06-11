@@ -1,3 +1,5 @@
+import type { ChartAxisConfig, ChartType } from "../components/features/charts/core/chartTypes";
+
 export interface ChartDataConfig {
   data: any[];
   dataKeys: {
@@ -5,6 +7,24 @@ export interface ChartDataConfig {
     secondary?: string;
   };
   xAxisKey: string;
+  /**
+   * Additional series keys beyond primary/secondary for charts with 3+ measures
+   * (e.g. stackedhorizontalbar, stackedlinechart, multiyaxischart).
+   */
+  extraKeys?: string[];
+}
+
+/** Optional axis column names from execute-query metadata or saved chart config. */
+export interface InferChartDataOptions {
+  xAxisHint?: string | null;
+  yAxisHint?: string | null;
+  /**
+   * Saved series/measure column names from a previous chart save.
+   * When provided and all keys are present in the actual data, bypasses
+   * the pivot-detection heuristic and restores the exact multi-series layout.
+   * Applies to: stackedhorizontalbar, stackedlinechart, multiyaxischart.
+   */
+  seriesKeysHint?: string[] | null;
 }
 
 export const getDefaultChartDataConfig = (): ChartDataConfig => ({
@@ -13,9 +33,40 @@ export const getDefaultChartDataConfig = (): ChartDataConfig => ({
   xAxisKey: "label",
 });
 
+const STRICT_ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(?:[T\s]|$)/;
+
+function looksLikeDate(value: unknown): boolean {
+  return typeof value === "string" && STRICT_ISO_DATE_RE.test(value.trim());
+}
+
+function compareAxisValues(aVal: unknown, bVal: unknown): number {
+  if (typeof aVal === "string" && typeof bVal === "string") {
+    if (looksLikeDate(aVal) && looksLikeDate(bVal)) {
+      return new Date(aVal).getTime() - new Date(bVal).getTime();
+    }
+    return aVal.localeCompare(bVal, undefined, { numeric: true });
+  }
+
+  if (typeof aVal === "number" && typeof bVal === "number") {
+    return aVal - bVal;
+  }
+
+  return String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
+}
+
 export const inferChartDataConfig = (
   rawData: any[] | undefined,
-  chartType: "line" | "bar" | "pie" | "area"
+  chartType:
+    | "line"
+    | "bar"
+    | "pie"
+    | "donut"
+    | "area"
+    | "stackedlinechart"
+    | "stackedhorizontalbar"
+    | "clustering"
+    | "multiyaxischart",
+  options?: InferChartDataOptions
 ): ChartDataConfig => {
   if (!rawData || rawData.length === 0) {
     return getDefaultChartDataConfig();
@@ -46,12 +97,66 @@ export const inferChartDataConfig = (
         sample[key] !== undefined)
   );
 
+  if (normalizedRows.length === 1 && numericKeys.length === 1 && keys.length <= 2) {
+    const valueKey = numericKeys[0];
+    const labelKey = keys.find((key) => key !== valueKey);
+    const singleLabel =
+      labelKey && sample[labelKey] != null && sample[labelKey] !== ""
+        ? String(sample[labelKey])
+        : valueKey;
+
+    return {
+      data: [{ label: singleLabel, value: Number(sample[valueKey]) || 0 }],
+      dataKeys: { primary: "value" },
+      xAxisKey: "label",
+    };
+  }
+
   // Detect if we have a categorical grouping column (for multi-series charts)
   // This happens when we have: x-axis, category, value columns
   const stringKeys = keys.filter(
     (key) => typeof sample[key] === "string" || typeof sample[key] === "object"
   );
   
+  // ── Saved series-keys hint (overrides pivot inference) ────────────────────
+  // When the caller provides seriesKeysHint (e.g. restored from a saved chart
+  // config) and all hint keys are actually present in the data columns, we skip
+  // the grouping/pivot heuristic and directly use those saved series keys.
+  // This is the primary fix for stackedhorizontalbar losing its stacking after
+  // a save/reload cycle.
+  const isStackedType =
+    chartType === "stackedhorizontalbar" ||
+    chartType === "stackedlinechart" ||
+    chartType === "multiyaxischart";
+
+  if (isStackedType && options?.seriesKeysHint && options.seriesKeysHint.length > 0) {
+    const hints = options.seriesKeysHint;
+    // Verify all hinted series keys actually exist in the current data
+    const allHintsPresent = hints.every((k) => keys.includes(k));
+    if (allHintsPresent) {
+      // Determine x-axis: prefer xAxisHint, then the first non-series column
+      const seriesSet = new Set(hints);
+      const xKey =
+        (options.xAxisHint && keys.includes(options.xAxisHint)
+          ? options.xAxisHint
+          : null) ??
+        keys.find((k) => !seriesSet.has(k) && !numericKeys.includes(k)) ??
+        keys.find((k) => !seriesSet.has(k)) ??
+        keys[0];
+
+      const [primary, secondary, ...rest] = hints;
+      return {
+        data: normalizedRows,
+        dataKeys: {
+          primary,
+          ...(secondary ? { secondary } : {}),
+        },
+        xAxisKey: xKey,
+        ...(rest.length > 0 ? { extraKeys: rest } : {}),
+      };
+    }
+  }
+
   // Check if we have a pattern like: date/month column, category column (user_type, status, etc.), and value column
   // This indicates we need to pivot the data
   const hasGroupingColumn = stringKeys.length >= 2 && numericKeys.length >= 1;
@@ -59,14 +164,20 @@ export const inferChartDataConfig = (
   let valueColumn: string | null = null;
   let xAxisColumn: string | null = null;
 
-  if (hasGroupingColumn && (chartType === "line" || chartType === "area" || chartType === "bar")) {
+  if (
+    hasGroupingColumn &&
+    (chartType === "line" ||
+      chartType === "area" ||
+      chartType === "bar" ||
+      chartType === "stackedlinechart" ||
+      chartType === "stackedhorizontalbar" ||
+      chartType === "multiyaxischart")
+  ) {
     // Find the x-axis column (usually date/time related or first string column)
     xAxisColumn = stringKeys.find(key => {
       const val = sample[key];
       if (typeof val === 'string') {
-        // Check if it's a date
-        const date = new Date(val);
-        if (!isNaN(date.getTime())) {
+        if (looksLikeDate(val)) {
           return true;
         }
         // Or check if key name suggests it's a time/date column
@@ -125,21 +236,7 @@ export const inferChartDataConfig = (
     pivotedData.sort((a, b) => {
       const aVal = a[xAxisColumn!];
       const bVal = b[xAxisColumn!];
-      
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        const aDate = new Date(aVal).getTime();
-        const bDate = new Date(bVal).getTime();
-        if (!isNaN(aDate) && !isNaN(bDate)) {
-          return aDate - bDate;
-        }
-        return aVal.localeCompare(bVal);
-      }
-      
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        return aVal - bVal;
-      }
-      
-      return String(aVal).localeCompare(String(bVal));
+      return compareAxisValues(aVal, bVal);
     });
 
     // Use first category as primary, second as secondary if available
@@ -168,6 +265,16 @@ export const inferChartDataConfig = (
 
   if (!potentialXAxisKey) {
     potentialXAxisKey = "index";
+  }
+
+  const hintX = options?.xAxisHint?.trim();
+  const hintY = options?.yAxisHint?.trim();
+  if (hintY && keys.includes(hintY)) {
+    primaryKey = hintY;
+  }
+  secondaryKey = numericKeys.find((key) => key !== primaryKey);
+  if (hintX && keys.includes(hintX)) {
+    potentialXAxisKey = hintX;
   }
 
   // Handle case where there are NO numeric columns at all
@@ -233,7 +340,7 @@ export const inferChartDataConfig = (
     return coercedRow;
   });
 
-  if (chartType === "pie") {
+  if (chartType === "pie" || chartType === "donut") {
     const nameKey = potentialXAxisKey === "index" ? "label" : potentialXAxisKey;
     return {
       data: data.map((row, index) => ({
@@ -247,29 +354,11 @@ export const inferChartDataConfig = (
 
   // Sort data by x-axis key for line and area charts to ensure proper connections
   let sortedData = data;
-  if (chartType === "line" || chartType === "area") {
+  if (chartType === "line" || chartType === "area" || chartType === "stackedlinechart") {
     sortedData = [...data].sort((a, b) => {
       const aVal = a[potentialXAxisKey];
       const bVal = b[potentialXAxisKey];
-      
-      // Handle date strings
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        const aDate = new Date(aVal).getTime();
-        const bDate = new Date(bVal).getTime();
-        if (!isNaN(aDate) && !isNaN(bDate)) {
-          return aDate - bDate;
-        }
-        // If not valid dates, do string comparison
-        return aVal.localeCompare(bVal);
-      }
-      
-      // Handle numeric values
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        return aVal - bVal;
-      }
-      
-      // Fallback to string comparison
-      return String(aVal).localeCompare(String(bVal));
+      return compareAxisValues(aVal, bVal);
     });
   }
 
@@ -282,4 +371,368 @@ export const inferChartDataConfig = (
     xAxisKey: potentialXAxisKey,
   };
 };
+
+/** Chart kinds that use `inferExtendedChartConfig` instead of `inferChartDataConfig`. */
+export const EXTENDED_CHART_TYPES: ChartType[] = [
+  "scatter",
+  "clustering",
+  "multiyaxischart",
+  "heatmap",
+  "funnel",
+  "map",
+];
+
+export function isExtendedChartType(
+  t: string | undefined | null,
+): t is ChartType {
+  return !!t && EXTENDED_CHART_TYPES.includes(t as ChartType);
+}
+
+/** Map snake_case API `axis_config` into `ChartAxisConfig`. */
+export function mapApiAxisConfigToChart(raw: unknown): ChartAxisConfig {
+  if (!raw || typeof raw !== "object") return {};
+  const o = raw as Record<string, unknown>;
+  return {
+    xAxisKey: (o.x_axis_key ?? o.xAxisKey) as string | undefined,
+    yAxisKey: (o.y_axis_key ?? o.yAxisKey) as string | undefined,
+    valueKey: (o.value_key ?? o.valueKey) as string | undefined,
+    categoryKey: (o.category_key ?? o.categoryKey) as string | undefined,
+    regionKey: (o.region_key ?? o.regionKey) as string | undefined,
+    metricKey: (o.metric_key ?? o.metricKey) as string | undefined,
+  };
+}
+
+export interface ExtendedChartInferResult {
+  data: Record<string, any>[];
+  dataKeys: string[];
+  xAxisKey: string;
+  axisConfig: ChartAxisConfig;
+  /** When set, callers should render this type instead of the requested extended type (e.g. bar instead of scatter). */
+  fallbackType?: ChartType;
+}
+
+/** Whether most sampled values in a column parse as finite numbers. */
+function isNumeric(rows: Record<string, any>[], key: string): boolean {
+  const sample = rows.slice(0, 10);
+  if (sample.length === 0) return false;
+  const ok = sample.filter((r) => {
+    const v = r[key];
+    return (
+      typeof v === "number" ||
+      (v !== null &&
+        v !== undefined &&
+        v !== "" &&
+        !Number.isNaN(Number(v)))
+    );
+  }).length;
+  return ok > sample.length * 0.7;
+}
+
+/**
+ * Derives tabular series config for scatter, heatmap, funnel, and map.
+ * For line/bar/area/pie delegates to `inferChartDataConfig` unchanged.
+ */
+export function inferExtendedChartConfig(
+  rows: Record<string, any>[] | undefined,
+  chartType: ChartType,
+  axisConfig?: ChartAxisConfig,
+  inferOptions?: InferChartDataOptions,
+): ExtendedChartInferResult {
+  if (!rows || rows.length === 0) {
+    return {
+      data: [],
+      dataKeys: [],
+      xAxisKey: "",
+      axisConfig: axisConfig ?? {},
+    };
+  }
+
+  const columns = Object.keys(rows[0]);
+
+  switch (chartType) {
+    case "scatter":
+    case "clustering": {
+      const allColumns = Object.keys(rows[0]);
+      const numericCols = allColumns.filter((c) => isNumeric(rows, c));
+
+      if (numericCols.length < 2) {
+        const legacy = inferChartDataConfig(
+          rows,
+          "bar",
+          inferOptions,
+        );
+        return {
+          data: legacy.data,
+          dataKeys: [
+            legacy.dataKeys.primary,
+            ...(legacy.dataKeys.secondary
+              ? [legacy.dataKeys.secondary]
+              : []),
+          ],
+          xAxisKey: legacy.xAxisKey,
+          axisConfig: {
+            ...axisConfig,
+            xAxisKey: legacy.xAxisKey,
+            yAxisKey: legacy.dataKeys.primary,
+          },
+          fallbackType: "bar",
+        };
+      }
+
+      // Scatter/clustering must always use numeric axes.
+      // If incoming axis hints are categorical (common in probe mode metadata),
+      // ignore them and fall back to numeric columns from actual result rows.
+      let xKey = axisConfig?.xAxisKey;
+      if (!xKey || !numericCols.includes(xKey)) {
+        xKey = numericCols[0];
+      }
+      let yKey = axisConfig?.yAxisKey;
+      if (!yKey || !numericCols.includes(yKey) || yKey === xKey) {
+        yKey =
+          numericCols.find((c) => c !== xKey) ??
+          numericCols[1];
+      }
+
+      // Guard: if either key is still undefined (e.g. numericCols was empty
+      // despite the length check above), fall back to a plain bar chart.
+      if (!xKey || !yKey) {
+        const legacy = inferChartDataConfig(rows, "bar", inferOptions);
+        return {
+          data: legacy.data,
+          dataKeys: [
+            legacy.dataKeys.primary,
+            ...(legacy.dataKeys.secondary ? [legacy.dataKeys.secondary] : []),
+          ],
+          xAxisKey: legacy.xAxisKey,
+          axisConfig: {
+            ...axisConfig,
+            xAxisKey: legacy.xAxisKey,
+            yAxisKey: legacy.dataKeys.primary,
+          },
+          fallbackType: "bar",
+        };
+      }
+
+      const xDistinct = new Set(rows.map((r) => r[xKey as string])).size;
+      const yDistinct = new Set(rows.map((r) => r[yKey as string])).size;
+
+      if (yDistinct > xDistinct * 2) {
+        const t: string = xKey;
+        xKey = yKey;
+        yKey = t;
+      }
+
+      const xD = new Set(rows.map((r) => r[xKey as string])).size;
+      const yD = new Set(rows.map((r) => r[yKey as string])).size;
+
+      // Only downgrade to bar for truly degenerate scatter shapes.
+      // Small-but-valid numeric spreads (common with aggregated business data)
+      // should still render as scatter when explicitly requested.
+      if (xD <= 1 || yD <= 1) {
+        const legacy = inferChartDataConfig(rows, "bar", {
+          ...inferOptions,
+          xAxisHint: xKey,
+          yAxisHint: yKey,
+        });
+        return {
+          data: legacy.data,
+          dataKeys: [
+            legacy.dataKeys.primary,
+            ...(legacy.dataKeys.secondary
+              ? [legacy.dataKeys.secondary]
+              : []),
+          ],
+          xAxisKey: legacy.xAxisKey,
+          axisConfig: {
+            ...axisConfig,
+            xAxisKey: legacy.xAxisKey,
+            yAxisKey: legacy.dataKeys.primary,
+          },
+          fallbackType: "bar",
+        };
+      }
+
+      return {
+        data: rows,
+        dataKeys: [yKey],
+        xAxisKey: xKey,
+        axisConfig: {
+          ...axisConfig,
+          xAxisKey: xKey,
+          yAxisKey: yKey,
+          categoryKey:
+            axisConfig?.categoryKey ??
+            allColumns.find(
+              (c) => c !== xKey && c !== yKey && !numericCols.includes(c),
+            ) ??
+            undefined,
+        },
+      };
+    }
+
+    case "multiyaxischart": {
+      const categoricalColumns = columns.filter((c) => !isNumeric(rows, c));
+      const numericColumns = columns.filter((c) => isNumeric(rows, c));
+      const xKey =
+        axisConfig?.xAxisKey ??
+        categoricalColumns[0] ??
+        columns[0];
+      const metrics = numericColumns.filter((c) => c !== xKey).slice(0, 3);
+
+      if (!xKey || metrics.length < 2) {
+        const legacy = inferChartDataConfig(rows, "bar", inferOptions);
+        return {
+          data: legacy.data,
+          dataKeys: [
+            legacy.dataKeys.primary,
+            ...(legacy.dataKeys.secondary ? [legacy.dataKeys.secondary] : []),
+          ],
+          xAxisKey: legacy.xAxisKey,
+          axisConfig: {
+            ...axisConfig,
+            xAxisKey: legacy.xAxisKey,
+            yAxisKey: legacy.dataKeys.primary,
+          },
+          fallbackType: "bar",
+        };
+      }
+
+      return {
+        data: rows,
+        dataKeys: metrics,
+        xAxisKey: xKey,
+        axisConfig: {
+          ...axisConfig,
+          xAxisKey: xKey,
+          yAxisKey: metrics[0],
+        },
+      };
+    }
+
+    case "heatmap": {
+      const categoricalColumns = columns.filter((c) => !isNumeric(rows, c));
+      const numericColumns = columns.filter((c) => isNumeric(rows, c));
+      const xKey =
+        axisConfig?.xAxisKey ??
+        categoricalColumns[0] ??
+        columns[0];
+      const yKey =
+        axisConfig?.categoryKey ??
+        categoricalColumns.find((c) => c !== xKey) ??
+        columns.find((c) => c !== xKey && !numericColumns.includes(c)) ??
+        columns[1] ??
+        xKey;
+      const valKey =
+        axisConfig?.valueKey ??
+        numericColumns.find((c) => c !== xKey && c !== yKey) ??
+        numericColumns[0] ??
+        columns[2] ??
+        columns[0];
+
+      if (
+        !xKey ||
+        !yKey ||
+        !valKey ||
+        xKey === yKey ||
+        xKey === valKey ||
+        yKey === valKey
+      ) {
+        return {
+          data: [],
+          dataKeys: [],
+          xAxisKey: "",
+          axisConfig: axisConfig ?? {},
+          fallbackType: "bar",
+        };
+      }
+
+      return {
+        data: rows,
+        dataKeys: [valKey],
+        xAxisKey: xKey,
+        axisConfig: {
+          ...axisConfig,
+          xAxisKey: xKey,
+          categoryKey: yKey,
+          valueKey: valKey,
+        },
+      };
+    }
+
+    case "funnel": {
+      const labelKey = axisConfig?.xAxisKey ?? columns[0];
+      const valKey =
+        axisConfig?.valueKey ??
+        columns.find((c) => isNumeric(rows, c)) ??
+        columns[1] ??
+        columns[0];
+      return {
+        data: rows,
+        dataKeys: [valKey],
+        xAxisKey: labelKey,
+        axisConfig: { ...axisConfig, xAxisKey: labelKey, valueKey: valKey },
+      };
+    }
+
+    case "map": {
+      const regionKey = axisConfig?.regionKey ?? columns[0];
+      const metricKey =
+        axisConfig?.metricKey ??
+        columns.find((c) => isNumeric(rows, c)) ??
+        columns[1] ??
+        columns[0];
+      return {
+        data: rows,
+        dataKeys: [metricKey],
+        xAxisKey: regionKey,
+        axisConfig: { ...axisConfig, regionKey, metricKey },
+      };
+    }
+
+    default: {
+      const legacy = inferChartDataConfig(
+        rows,
+        chartType as
+          | "line"
+          | "bar"
+          | "pie"
+          | "donut"
+          | "area"
+          | "stackedlinechart"
+          | "stackedhorizontalbar"
+          | "clustering"
+          | "multiyaxischart",
+        inferOptions,
+      );
+      return {
+        data: legacy.data,
+        dataKeys: [
+          legacy.dataKeys.primary,
+          ...(legacy.dataKeys.secondary
+            ? [legacy.dataKeys.secondary]
+            : []),
+        ],
+        xAxisKey: legacy.xAxisKey,
+        axisConfig: { ...axisConfig },
+      };
+    }
+  }
+}
+
+/** Convert extended infer result into legacy `ChartDataConfig` shape for existing UI. */
+export function extendedToChartDataConfig(
+  ext: ExtendedChartInferResult,
+): ChartDataConfig {
+  const secondary = ext.dataKeys[1];
+  const extraKeys = ext.dataKeys.slice(2);
+  return {
+    data: ext.data,
+    dataKeys: {
+      primary: ext.dataKeys[0] ?? "value",
+      ...(secondary ? { secondary } : {}),
+    },
+    xAxisKey: ext.xAxisKey,
+    ...(extraKeys.length > 0 ? { extraKeys } : {}),
+  };
+}
 

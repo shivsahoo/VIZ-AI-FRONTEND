@@ -4,12 +4,11 @@
 
 This guide explains how to integrate the WebSocket API for conversational workflows in the VizAI frontend application.
 
-## The 4 Main Workflow Events
+## Main Workflow Events
 
 1. **`project_info`** - Collect project metadata and generate enhanced description through conversational questions (up to 5 questions)
-2. **`kpi_info`** - Collect KPIs through conversational questions (up to 5 questions)
-3. **`dashboard_creation`** - Create a dashboard with name, optional description, and KPI-related questions
-4. **`chart_creation`** - Generate chart specifications using QueryGenerator based on context
+2. **`dashboard_creation`** - Create a dashboard with name and optional description
+3. **`chart_creation`** - Generate chart specifications using QueryGenerator based on context
 
 ## WebSocket URL
 
@@ -28,7 +27,7 @@ Note: The service automatically converts `https://` to `wss://` for secure WebSo
 
 The WebSocket service is located at `src/services/websocket.ts`. It has been updated with:
 - Correct WebSocket URL
-- Helper methods for all 4 workflow events
+- Helper methods for the workflow events
 - Proper TypeScript types
 - Error handling and reconnection logic
 
@@ -110,45 +109,7 @@ wsClient?.projectInfo({
 });
 ```
 
-#### 4.2 KPI Info (`kpi_info`)
-
-**Purpose**: Collect KPIs through conversational questions
-
-**Initial Request**:
-```typescript
-wsClient?.kpiInfo({
-  project_name: "My Analytics Project",
-  project_description: "Enhanced description from project_info",
-  project_domain: "data analytics",
-  product_description: "Enhanced description from project_info questions", // Optional, has priority
-  data_connection_id: "connection-uuid-123" // Optional but recommended once a DB is connected
-});
-```
-
-**Handle Responses**:
-```typescript
-wsClient?.on('kpi_info', (response) => {
-  if (response.status === 'collecting') {
-    // Show question to user
-    const question = response.message;
-  } else if (response.status === 'completed') {
-    // Get KPIs
-    const kpis = response.state?.kpis; // Array of KPI strings
-    const kpisSummary = response.state?.kpis_summary; // Comma-separated string
-    // Use KPIs for project/dashboard creation
-  }
-});
-```
-
-**Send User Response**:
-```typescript
-wsClient?.kpiInfo({
-  user_response: "Revenue, User Growth, Conversion Rate",
-  data_connection_id: "connection-uuid-123"
-});
-```
-
-#### 4.3 Dashboard Creation (`dashboard_creation`)
+#### 4.2 Dashboard Creation (`dashboard_creation`)
 
 **Purpose**: Create dashboard with conversational flow
 
@@ -209,8 +170,8 @@ wsClient?.chartCreation({
   db_type: "mysql", // "mysql", "postgres", or "sqlite"
   role: "Analyst",
   domain: "data analytics", // Optional
-  kpi_info: "Revenue, User Growth", // Optional - Project-level KPIs
-  dashboard_kpi_info: "Active Users", // Optional - Dashboard-level KPIs (has priority)
+  product_name: "My Product", // Optional
+  product_description: "Product description", // Optional
   product_info: "Product description", // Optional
   conversation_summary: "User wants to track metrics", // Optional
   min_max_dates: ["2024-01-01", "2024-12-31"], // Optional
@@ -401,8 +362,8 @@ async function createChartsFromNLQ(
       db_schema: JSON.stringify(dbSchema),
       db_type: dbType,
       role: "Analyst",
-      kpi_info: kpiInfo,
-      dashboard_kpi_info: dashboardKpiInfo
+      product_name: productName,
+      product_description: productDescription,
     });
   });
 }
@@ -459,11 +420,8 @@ Enhance chart creation with WebSocket:
 
 4. **Date Placeholders**: Chart queries may contain `[MIN_DATE]` and `[MAX_DATE]` placeholders that need to be replaced with actual dates.
 
-5. **Priority**: Dashboard KPIs have priority over project KPIs when both are provided in chart_creation.
-
 6. **Max Questions**: 
    - `project_info`: 5 questions max
-   - `kpi_info`: 5 questions max
    - `dashboard_creation`: 5 KPI-related questions (after name/description)
 
 7. **Chart Limits**: Chart creation generates 1-7 charts based on context, capped at 7 maximum.
@@ -503,10 +461,9 @@ Enhance chart creation with WebSocket:
 ## Next Steps
 
 1. Integrate `project_info` in project creation flow
-2. Integrate `kpi_info` after project creation
-3. Integrate `dashboard_creation` in dashboard creation flow
-4. Integrate `chart_creation` in AI assistant/chart creation flow
-5. Add UI components for conversational questions
-6. Add loading states and error handling
-7. Test end-to-end workflows
+2. Integrate `dashboard_creation` in dashboard creation flow
+3. Integrate `chart_creation` in AI assistant/chart creation flow
+4. Add UI components for conversational questions
+5. Add loading states and error handling
+6. Test end-to-end workflows
 

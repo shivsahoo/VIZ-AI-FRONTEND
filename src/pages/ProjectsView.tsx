@@ -1,14 +1,14 @@
 import { useState, useEffect, type MouseEvent } from "react";
-import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2, Loader2, Search } from "lucide-react";
+import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2, Loader2, Search, Globe, Building2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { GradientButton } from "../components/shared/GradientButton";
 import { OnboardingFlow } from "./OnboardingFlow";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
-import { KPIInfoBot } from "../components/features/ai/KPIInfoBot";
 import { toast } from "sonner";
-import { getProjects, createProject, getCurrentUser, deleteProject, updateProjectKpiInfo, type Project as ApiProject } from "../services/api";
+import { getProjects, createProject, getCurrentUser, deleteProject, listApps, deleteApp, type Project as ApiProject, type AppDetail } from "../services/api";
+import { CreateAppModal } from "../components/features/apps/CreateAppModal";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,28 +64,55 @@ interface ProjectsViewProps {
 
 export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
   const [showNewProjectFlow, setShowNewProjectFlow] = useState(false);
-  const [showKPICollection, setShowKPICollection] = useState(false);
   const [projects, setProjects] = useState<UIProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<UIProject | null>(null);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
-  const [pendingProjectData, setPendingProjectData] = useState<{
-    projectId: string;
-    projectName: string;
-    projectDescription?: string;
-    projectDomain?: string;
-    enhancedDescription?: string;
-  } | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState("");
+
+  // App registration state
+  const [apps, setApps] = useState<AppDetail[]>([]);
+  const [showCreateAppModal, setShowCreateAppModal] = useState(false);
+  const [isDeletingApp, setIsDeletingApp] = useState<string | null>(null);
 
   // Fetch projects and user ID on mount
   useEffect(() => {
     fetchProjects();
     fetchUserId();
+    fetchApps();
   }, []);
+
+  const fetchApps = async () => {
+    try {
+      const response = await listApps();
+      if (response.success && response.data) {
+        setApps(response.data);
+        console.log(`[APP][STEP 3] App list refreshed — ${response.data.length} apps visible`);
+      }
+    } catch (error) {
+      console.error("Failed to fetch apps:", error);
+    }
+  };
+
+  const handleDeleteApp = async (appId: string) => {
+    setIsDeletingApp(appId);
+    try {
+      const response = await deleteApp(appId);
+      if (response.success) {
+        setApps((prev) => prev.filter((a) => a.app_id !== appId));
+        toast.success("App deleted");
+      } else {
+        toast.error(response.error?.message || "Failed to delete app");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete app");
+    } finally {
+      setIsDeletingApp(null);
+    }
+  };
 
   const fetchUserId = async () => {
     try {
@@ -161,6 +188,11 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         const response = await createProject({
           name: projectData.name,
           description: description,
+          primary_domain:
+            projectData.context?.primary_domain ??
+            projectData.context?.domain ??
+            "Other",
+          additional_kpis: projectData.context?.additional_kpis?.trim() || null,
         });
 
         if (!response.success || !response.data) {
@@ -183,10 +215,10 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         updatedAt: createdAt,
         owner: '', // Will be populated by backend
         memberCount: 1,
-        databaseCount: 1, // Database was connected in the flow
+        databaseCount: 0, // Database is connected later from Home/Databases
         dashboardCount: 0,
         dashboards: 0,
-        databases: 1,
+        databases: 0,
         team: 1,
         lastActive: "just now",
         gradient: colors.gradient,
@@ -194,20 +226,6 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
       };
       setProjects([newProject, ...projects]);
       
-      // KPIs were already collected during onboarding Step 3 (DatabaseContextBot)
-      // Save KPI information if available from onboarding
-      const kpisSummary = projectData.context?.kpisSummary;
-      if (kpisSummary) {
-        try {
-          const response = await updateProjectKpiInfo(projectId, kpisSummary);
-          if (!response.success) {
-            console.error("Failed to save KPI info:", response.error?.message);
-          }
-        } catch (error) {
-          console.error("Error saving KPI info:", error);
-        }
-      }
-
       // Navigate directly to the created project (skip second KPI collection)
       setShowNewProjectFlow(false);
       
@@ -222,62 +240,6 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     } catch (err: any) {
       toast.error(err.message || "An error occurred while setting up project");
     }
-  };
-
-  const handleKPICollectionComplete = async (data: {
-    kpis: string[];
-    kpisSummary: string;
-  }) => {
-    // KPI collection complete - save KPIs to project
-    console.log("KPIs collected:", data);
-    
-    if (pendingProjectData) {
-      // Save KPI information to the project
-      if (data.kpisSummary) {
-        try {
-          const response = await updateProjectKpiInfo(
-            pendingProjectData.projectId, 
-            data.kpisSummary
-          );
-          
-          if (!response.success) {
-            console.error("Failed to save KPI info:", response.error?.message);
-            // Don't block navigation if KPI save fails, just log it
-          }
-        } catch (error) {
-          console.error("Error saving KPI info:", error);
-          // Don't block navigation if KPI save fails
-        }
-      }
-      
-      // Show success toast with project details
-      toast.success(
-        `🎉 Project "${pendingProjectData.projectName}" created successfully! Redirecting to your workspace...`,
-        {
-          duration: 3000,
-        }
-      );
-      
-      // Navigate to the created project after a brief delay
-      setTimeout(() => {
-        setShowKPICollection(false);
-        onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId, true); // true indicates this is a new project
-        setPendingProjectData(null);
-      }, 500);
-    } else {
-      toast.success("KPIs collected successfully!");
-      setShowKPICollection(false);
-      setPendingProjectData(null);
-    }
-  };
-
-  const handleKPICollectionCancel = () => {
-    // Skip KPI collection and select the project
-    setShowKPICollection(false);
-    if (pendingProjectData) {
-      onProjectSelect(pendingProjectData.projectName, pendingProjectData.projectId, true); // true indicates this is a new project
-    }
-    setPendingProjectData(null);
   };
 
   const handleNewProjectCancel = () => {
@@ -344,25 +306,6 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
           onComplete={handleNewProjectComplete} 
           onCancel={handleNewProjectCancel}
         />
-      </div>
-    );
-  }
-
-  // If collecting KPIs, show KPI collection flow
-  if (showKPICollection && pendingProjectData && currentUserId) {
-    return (
-      <div className="min-h-full bg-background flex items-center justify-center p-8">
-        <div className="w-full max-w-3xl">
-          <KPIInfoBot
-            userId={currentUserId}
-            projectName={pendingProjectData.projectName}
-            projectDescription={pendingProjectData.projectDescription}
-            projectDomain={pendingProjectData.projectDomain}
-            productDescription={pendingProjectData.enhancedDescription}
-            onComplete={handleKPICollectionComplete}
-            onCancel={handleKPICollectionCancel}
-          />
-        </div>
       </div>
     );
   }
@@ -559,6 +502,107 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         })()}
 
       </div>
+
+      {/* Registered Apps Section */}
+      <div className="px-8 py-12 max-w-7xl mx-auto border-t border-border">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-2xl text-foreground mb-1">Registered Apps</h2>
+            <p className="text-muted-foreground">
+              External applications that can embed your dashboards
+            </p>
+          </div>
+          <Button
+            id="create-app-btn"
+            variant="outline"
+            onClick={() => {
+              setShowCreateAppModal(true);
+              console.log(`[APP][STEP 1] User clicked "Create app"`);
+            }}
+            className="border-border"
+          >
+            <Globe className="w-4 h-4 mr-2" />
+            Create App
+          </Button>
+        </div>
+
+        {apps.length === 0 ? (
+          <Card className="p-8 text-center border border-dashed border-border">
+            <Globe className="w-12 h-12 mx-auto mb-3 text-muted-foreground" />
+            <h3 className="text-base font-medium text-foreground mb-1">
+              No registered apps
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
+              Register an app to enable domain-locked dashboard embedding.
+              Each app represents an external website that can display your dashboards.
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreateAppModal(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Create Your First App
+            </Button>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            {apps.map((app) => (
+              <Card
+                key={app.app_id}
+                className="p-4 border border-border hover:border-primary/30 transition-colors"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Building2 className="w-5 h-5 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {app.company_name}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {app.domain_url}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => handleDeleteApp(app.app_id)}
+                    disabled={isDeletingApp === app.app_id}
+                    title="Delete app"
+                  >
+                    {isDeletingApp === app.app_id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Clock className="w-3 h-3" />
+                  <span>
+                    Created{" "}
+                    {new Date(app.created_at).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Create App Modal */}
+      <CreateAppModal
+        open={showCreateAppModal}
+        onOpenChange={setShowCreateAppModal}
+        onAppCreated={fetchApps}
+      />
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog
