@@ -24,6 +24,9 @@ const MAX_CACHE_SIZE = 100; // Maximum number of cached entries
 /**
  * Generate a cache key from query parameters
  */
+/** Bumped when chart execute response shape changes (e.g. legacy label/value vs tabular rows). */
+const CHART_CACHE_FORMAT_TAG = 'tabular_v2';
+
 function generateCacheKey(
   chartId: string,
   datasourceConnectionId: string,
@@ -40,7 +43,8 @@ function generateCacheKey(
     datasourceConnectionId,
     normalizedQuery,
     fromDate || '',
-    toDate || ''
+    toDate || '',
+    CHART_CACHE_FORMAT_TAG,
   ];
   
   // Simple hash function for the key

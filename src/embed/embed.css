@@ -1,0 +1,518 @@
+/*
+ * VizAI Embed — Theme-aware CSS
+ *
+ * Design:
+ *  - :root defaults are deliberately "neutral" (transparent bg, inherit text)
+ *    so the iframe visually blends with the parent by default.
+ *  - [data-theme="light"] / [data-theme="dark"] provide explicit palettes when
+ *    the parent sends a set_theme postMessage.
+ *  - [data-theme="custom"] is set when the parent provides a raw background
+ *    colour; only --embed-bg and --embed-card-bg are overridden via inline
+ *    style on <html>; all other tokens remain from whichever base theme was
+ *    last active.
+ *
+ *  CSS custom properties exposed:
+ *    --embed-bg          root / body background
+ *    --embed-card-bg     chart card background
+ *    --embed-text        primary text colour
+ *    --embed-text-muted  secondary / subtitle text
+ *    --embed-border      divider / card border
+ *    --embed-primary     accent / brand colour
+ *    --embed-error-bg    error state background
+ *    --embed-error-border error state border
+ *    --embed-error-text  error state text
+ */
+
+/* ── Base (transparent / inherit) ────────────────────────────────────────────
+   No background is applied at this level.
+   The parent page colour bleeds through the iframe naturally.             */
+:root {
+  --embed-bg: transparent;
+  --embed-card-bg: rgba(255, 255, 255, 0.08);
+  --embed-text: inherit;
+  --embed-text-muted: rgba(100, 116, 139, 1);
+  --embed-border: rgba(148, 163, 184, 0.2);
+  --embed-primary: #6366f1;
+  --embed-error-bg: rgba(254, 242, 242, 0.9);
+  --embed-error-border: #fecaca;
+  --embed-error-text: #dc2626;
+}
+
+/* ── Light theme ─────────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --embed-bg: #f8fafc;
+  --embed-card-bg: #ffffff;
+  --embed-text: #1e293b;
+  --embed-text-muted: #64748b;
+  --embed-border: #e2e8f0;
+  --embed-primary: #6366f1;
+  --embed-error-bg: #fef2f2;
+  --embed-error-border: #fecaca;
+  --embed-error-text: #dc2626;
+}
+
+/* ── Dark theme ──────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --embed-bg: #0f1117;
+  --embed-card-bg: #1a1d27;
+  --embed-text: #e4e4e7;
+  --embed-text-muted: #9ca3af;
+  --embed-border: #2a2d3a;
+  --embed-primary: #6366f1;
+  --embed-error-bg: #1c1017;
+  --embed-error-border: #7f1d1d;
+  --embed-error-text: #fca5a5;
+}
+
+/* ── Custom background mode ──────────────────────────────────────────────────
+   When [data-theme="custom"] the parent has injected --embed-bg directly
+   on the <html> element via inline style. Card bg is derived via alpha so
+   it sits above the custom backdrop.                                      */
+[data-theme="custom"] {
+  /* --embed-bg is set inline by JS, so we only set card / text here */
+  --embed-card-bg: rgba(255, 255, 255, 0.12);
+  --embed-text: #1e293b;
+  --embed-text-muted: #475569;
+  --embed-border: rgba(0, 0, 0, 0.12);
+  --embed-error-bg: rgba(254, 242, 242, 0.9);
+  --embed-error-border: #fecaca;
+  --embed-error-text: #dc2626;
+}
+
+/* Dark custom background: if custom bg is dark, use light text */
+[data-theme="custom"].embed-bg-dark {
+  --embed-card-bg: rgba(255, 255, 255, 0.08);
+  --embed-text: #e4e4e7;
+  --embed-text-muted: #9ca3af;
+  --embed-border: rgba(255, 255, 255, 0.1);
+  --embed-error-bg: #1c1017;
+  --embed-error-border: #7f1d1d;
+  --embed-error-text: #fca5a5;
+}
+
+/* ── Reset ───────────────────────────────────────────────────────────────── */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ── Body / root ─────────────────────────────────────────────────────────── */
+html,
+body {
+  /* Allow parent background to show through when --embed-bg is transparent */
+  background: var(--embed-bg);
+  color: var(--embed-text);
+  /* Smooth theme transitions */
+  transition: background 0.25s ease, color 0.25s ease;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  padding: 24px;
+  min-width: 0;
+}
+
+#embed-root {}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.embed-header {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--embed-border);
+  transition: border-color 0.25s ease;
+}
+
+.embed-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--embed-text);
+  transition: color 0.25s ease;
+}
+
+.embed-header .subtitle {
+  font-size: 13px;
+  color: var(--embed-text-muted);
+  margin-top: 4px;
+  transition: color 0.25s ease;
+}
+
+/* ── Charts grid ─────────────────────────────────────────────────────────── */
+/*
+ * Grafana-style full-width stacked rows.
+ *
+ * Every chart panel spans the full iframe width — identical behaviour to
+ * Grafana's default "panel" layout and Metabase's single-column dashboard.
+ * This maximises the chart canvas area and eliminates wasted whitespace on
+ * all viewport sizes.
+ *
+ * All breakpoints use 1fr (no multi-column logic needed).
+ */
+/* ── Charts grid ─────────────────────────────────────────── */
+
+/* ── Dashboard density layout ───────────────────────── */
+
+#charts-grid,
+.charts-grid {
+
+  display: grid;
+
+  grid-template-columns:
+
+    repeat(auto-fit,
+
+      minmax(380px,
+        1fr));
+
+  gap: 20px;
+
+  width: 100%;
+
+  align-items: start;
+
+}
+
+
+/* Wider screens → allow more charts */
+
+@media(min-width:1600px) {
+
+  #charts-grid,
+  .charts-grid {
+
+    grid-template-columns:
+
+      repeat(auto-fit,
+
+        minmax(320px,
+          1fr));
+
+  }
+
+}
+
+
+/* Tablet */
+
+@media(max-width:900px) {
+
+  #charts-grid,
+  .charts-grid {
+
+    grid-template-columns:
+
+      repeat(auto-fit,
+
+        minmax(300px,
+          1fr));
+
+  }
+
+}
+
+
+/* Mobile */
+
+@media(max-width:600px) {
+
+  #charts-grid,
+  .charts-grid {
+
+    grid-template-columns: 1fr;
+
+  }
+
+}
+
+/* ── Chart card ──────────────────────────────────────────────────────────── */
+/*
+ * Premium dashboard panel — Grafana / Superset aesthetic:
+ *  - Subtle top-border accent stripe (brand colour).
+ *  - Frosted-glass backdrop (blurs parent bg when supported).
+ *  - Lift shadow on hover.
+ */
+.chart-card {
+  background: var(--embed-card-bg);
+  min-height: 320px;
+  padding: 16px;
+
+  border: 1px solid var(--embed-border);
+  /* Accent stripe at the top of every panel */
+  border-top: 2px solid var(--embed-primary);
+  border-radius: 12px;
+  padding: 20px 20px 16px;
+  overflow: hidden;
+  /* Prevent canvas overflow from breaking grid */
+  min-width: 0;
+  /* Smooth glass-like panel */
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  transition:
+    background 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.22s ease,
+    transform 0.18s ease;
+}
+
+.chart-card:hover {
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.18),
+    0 2px 8px rgba(99, 102, 241, 0.12);
+  transform: translateY(-2px);
+}
+
+/* Panel title row — label + optional action slots (future) */
+.chart-card h3 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  color: var(--embed-text-muted);
+  transition: color 0.25s ease;
+  /* Truncate long titles */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Chart container ─────────────────────────────────────────────────────── */
+/*
+ * Full-width panels benefit from more vertical space so the chart has room
+ * to breathe. ECharts height prop is the source of truth for render height;
+ * min-height here just prevents a jarring collapse before the canvas paints.
+ */
+.chart-container {
+  position: relative;
+  min-height: 380px;
+  /* taller floor — matches ChartCard height={420} */
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+/* ── Skeleton loader ─────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg,
+      var(--embed-border) 25%,
+      transparent 50%,
+      var(--embed-border) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+  height: 380px;
+  /* matches updated chart-container min-height */
+  transition: background 0.25s ease;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ── Error state ─────────────────────────────────────────────────────────── */
+.error-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  background: var(--embed-error-bg);
+  border: 1px dashed var(--embed-error-border);
+  border-radius: 8px;
+  color: var(--embed-error-text);
+  font-size: 14px;
+  text-align: center;
+  padding: 20px;
+  transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.powered-by {
+  text-align: center;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--embed-border);
+  font-size: 12px;
+  color: var(--embed-text-muted);
+  transition: border-color 0.25s ease, color 0.25s ease;
+}
+
+/* ── Date Range Picker ───────────────────────────────────────────────────── */
+/*
+ * All colours use --embed-* variables so the picker inherits light / dark /
+ * custom themes automatically with no extra JS.
+ */
+.date-range-picker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--embed-card-bg);
+  border: 1px solid var(--embed-border);
+  border-radius: 8px;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.date-range-picker__inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.date-range-picker__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 120px;
+  min-width: 110px;
+}
+
+.date-range-picker__label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--embed-text-muted);
+  transition: color 0.2s ease;
+}
+
+.date-range-picker__input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--embed-text);
+  background: var(--embed-bg);
+  border: 1px solid var(--embed-border);
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+  /* Ensure the native date picker icon is visible */
+  color-scheme: inherit;
+}
+
+.date-range-picker__input:focus {
+  border-color: var(--embed-primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.18);
+}
+
+.date-range-picker__input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.date-range-picker__separator {
+  font-size: 14px;
+  color: var(--embed-text-muted);
+  flex-shrink: 0;
+  padding-top: 16px;
+  /* align with input, not label */
+  transition: color 0.2s ease;
+}
+
+/* Reset button */
+.date-range-picker__reset {
+  flex-shrink: 0;
+  padding-top: 16px;
+  /* align with inputs */
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--embed-text-muted);
+  line-height: 1;
+  border-radius: 4px;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.date-range-picker__reset:hover {
+  color: var(--embed-primary);
+  transform: rotate(-30deg);
+}
+
+/* Validation error */
+.date-range-picker__error {
+  font-size: 11px;
+  color: var(--embed-error-text);
+  margin: 0;
+  padding: 0 2px;
+  transition: color 0.2s ease;
+}
+
+/* ── Loading overlay ─────────────────────────────────────────────────────── */
+.date-filter-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  backdrop-filter: blur(2px);
+  z-index: 2;
+}
+
+.date-filter-loading-text {
+  font-size: 12px;
+  color: var(--embed-text-muted);
+  transition: color 0.2s ease;
+}
+
+.date-filter-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--embed-border);
+  border-top-color: var(--embed-primary);
+  border-radius: 50%;
+  animation: embed-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes embed-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Date picker skeleton (while bounds are loading) ─────────────────────── */
+.date-range-picker--skeleton {
+  height: 56px;
+  background: linear-gradient(
+    90deg,
+      var(--embed-border) 25%,
+      transparent 50%,
+      var(--embed-border) 75%
+      );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  pointer-events: none;
+}
+
+/* ── Narrow card: stack fields vertically ───────────────────────────────── */
+@media (max-width: 400px) {
+  .date-range-picker__inputs {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .date-range-picker__separator {
+    display: none;
+  }
+  .date-range-picker__reset {
+    padding-top: 0;
+    align-self: flex-end;
+  }
+}
+

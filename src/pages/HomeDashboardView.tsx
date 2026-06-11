@@ -86,11 +86,14 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
   const normalizeChartType = useCallback((chartType?: string | null): 'line' | 'bar' | 'pie' | 'area' => {
     if (!chartType) {
       return 'line';
-    }
+    }      
     const normalized = chartType.toString().toLowerCase();
     if (normalized === 'bar' || normalized === 'column') return 'bar';
     if (normalized === 'pie' || normalized === 'donut') return 'pie';
     if (normalized === 'area') return 'area';
+    if (normalized === 'stackedlinechart' || normalized === 'stacked_line_chart') return 'line';
+    if (normalized === 'stackedhorizontalbar' || normalized === 'stacked_horizontal_bar') return 'bar';
+    if (normalized === 'clustering' || normalized === 'cluster' || normalized === 'clustering_chart') return 'line';
     if (normalized === 'line') return 'line';
     return 'line'; // Default fallback
   }, []);
@@ -150,7 +153,10 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     try {
       const response = await getChartData(chartKey, chart.databaseId!, chart.query!);
       if (response.success && response.data) {
-        const config = inferChartDataConfig(response.data.data, chart.chartType);
+        const config = inferChartDataConfig(response.data.data, chart.chartType, {
+          xAxisHint: response.data.metadata?.xAxis ?? null,
+          yAxisHint: response.data.metadata?.yAxis ?? null,
+        });
         setFavoriteChartDataStatus((prev) => ({
           ...prev,
           [chartKey]: {
@@ -399,7 +405,10 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
           <ChartCard
             type={chart.chartType}
             data={config.data}
-            dataKeys={config.dataKeys}
+            dataKeys={[
+              config.dataKeys.primary,
+              ...(config.dataKeys.secondary ? [config.dataKeys.secondary] : []),
+            ]}
             xAxisKey={config.xAxisKey}
             showLegend={!!config.dataKeys.secondary && chart.chartType !== 'pie'}
             height={260}

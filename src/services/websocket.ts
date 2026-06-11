@@ -3,7 +3,6 @@
  * 
  * Handles WebSocket connections for conversational workflows:
  * - project_info: Collect project metadata
- * - kpi_info: Collect KPIs
  * - dashboard_creation: Create dashboard with conversational flow
  * - chart_creation: Generate chart specifications
  */
@@ -56,13 +55,35 @@ export interface ChartSpec {
   title: string;
   query: string;
   type: "time_series" | "aggregate";
-  chart_type: "bar" | "line" | "area" | "pie" | "donut" | "scatter";
+  chart_type:
+    | "bar"
+    | "line"
+    | "area"
+    | "pie"
+    | "donut"
+    | "scatter"
+    | "heatmap"
+    | "funnel"
+    | "map"
+    | "stackedlinechart"
+    | "StackedLineChart"
+    | "stackedhorizontalbar"
+    | "StackedHorizontalBar"
+    | "clustering"
+    | "Clustering"
+    | "multiyaxischart"
+    | "MultiYAxisChart";
   report?: string;
   relevance: number;
   is_time_based: boolean;
   data_connection_id: string;
   x_axis?: string | null;
   y_axis?: string | null;
+  /** Optional extended axis metadata (heatmap / funnel / map / etc.) */
+  value_key?: string | null;
+  category_key?: string | null;
+  region_key?: string | null;
+  metric_key?: string | null;
   min_max_dates?: [string, string] | null;
 }
 
@@ -85,9 +106,15 @@ export class VizAIWebSocket {
     onOpen: [],
     onClose: [],
   };
+  // Unique ID for this WebSocket client instance — used as LangGraph thread_id on the backend.
+  // AI Assistant creates a new VizAIWebSocket whenever the chat panel opens, so each visit
+  // gets a fresh thread; all chart requests while the panel is open reuse this same ID so
+  // LangGraph memory stays coherent for that session. Probe Mode uses its own client/ID.
+  readonly connectionId: string = crypto.randomUUID();
 
   constructor(userId: string) {
     this.userId = userId;
+    console.log('[WebSocket] Connection ID (thread_id):', this.connectionId);
   }
 
   /**
@@ -221,8 +248,14 @@ export class VizAIWebSocket {
       return;
     }
 
-    // Prepare payload with auth token inside payload
-    const payload: Record<string, any> = { domain: 'admin', ...message.payload };
+    // Prepare payload with auth token and connection ID inside payload.
+    // connectionId is included in every message so the backend can use it as the
+    // LangGraph thread_id, scoping memory to this specific connection instance.
+    const payload: Record<string, any> = {
+      domain: 'admin',
+      ...message.payload,
+      websocket_id: this.connectionId,
+    };
     
     // Include auth token in payload (default behavior)
     if (includeAuthToken) {
@@ -349,28 +382,6 @@ export class VizAIWebSocket {
   }
 
   /**
-   * 2. KPI Info - Collect KPIs through conversational questions
-   * 
-   * @param payload - Initial KPI data or user response
-   *   - Initial: { project_name?, project_description?, project_domain?, product_description? }
-   *   - Follow-up: { user_response: string }
-   */
-  kpiInfo(payload: {
-    project_name?: string;
-    project_description?: string;
-    project_domain?: string;
-    product_description?: string;
-    data_connection_id?: string;
-    user_response?: string;
-  }): void {
-    this.send({
-      event_type: 'kpi_info',
-      user_id: this.userId,
-      payload,
-    });
-  }
-
-  /**
    * 3. Dashboard Creation - Create dashboard with conversational flow
    * 
    * @param payload - Initial dashboard data or user response
@@ -397,11 +408,13 @@ export class VizAIWebSocket {
     nlq_query: string;
     data_connection_id: string;
     db_schema: string; // JSON string of database schema
-    db_type: "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce";
+    db_type: "mysql" | "postgres" | "sqlite" | "oracledb" | "salesforce" | "databricks";
+    ontology_context?: Record<string, any>;
+    ontology_constraints?: Record<string, any>;
     role: string;
     domain?: string;
-    kpi_info?: string; // Project-level KPIs
-    dashboard_kpi_info?: string; // Dashboard-level KPIs (has priority)
+    product_name?: string;
+    product_description?: string;
     product_info?: string;
     conversation_summary?: string;
     min_max_dates?: [string, string]; // [min_date, max_date]
@@ -424,15 +437,59 @@ export class VizAIWebSocket {
   }
 
   /**
-   * 5. Chart Regeneration - Append 3 new chart suggestions based on prior context
+   * 5. Probe Mode - Deep-dive conversational agent anchored to a single chart.
+   *
+   * Each probe session uses its own VizAIWebSocket instance, so its connectionId
+   * becomes an isolated LangGraph thread_id. The backend still keeps chat memory,
+   * but you must send `current_working_sql` and `current_chart_type` on every turn
+   * so edits (e.g. sort) apply to the latest query/type, not a summarized old state.
+   *
+   * @param payload.is_first_message  Must be true on the very first turn so the
+   *   backend can embed chart context into the agent's memory thread.
+   */
+  probeMode(payload: {
+    user_message: string;
+    is_first_message: boolean;
+    /** Always send so the backend can execute the query on every turn */
+    data_connection_id?: string;
+    /** Keep stable session baseline; backend merges with current_* each turn */
+    original_query?: string;
+    original_chart_title?: string;
+    original_chart_type?: string;
+    original_chart_spec?: ChartSpec;
+    /** Send on first turn; backend caches by websocket/thread_id for follow-ups */
+    db_schema?: string;
+    /** Optional enriched ontology context for semantic grounding in probe mode */
+    ontology_context?: Record<string, any>;
+    /** Optional normalized ontology constraints for business-safe SQL decisions */
+    ontology_constraints?: Record<string, any>;
+    db_type?: 'mysql' | 'postgres' | 'sqlite' | 'oracledb' | 'salesforce' | 'databricks';
+    /**
+     * Every turn: last executed SQL and chart type so the agent does not rely on
+     * summarized memory (fixes e.g. sort applied to an old line-chart query after a bar conversion).
+     */
+    current_working_sql?: string;
+    current_chart_type?: string;
+  }): void {
+    this.send({
+      event_type: 'probe_mode',
+      user_id: this.userId,
+      payload,
+    });
+  }
+
+  /**
+   * 6. Chart Regeneration - Append 3 new chart suggestions based on prior context
    */
   regenerate(payload: {
     data_connection_id: string;
+    ontology_context?: Record<string, any>;
+    ontology_constraints?: Record<string, any>;
     role?: string;
     domain?: string;
     product_info?: string;
-    kpi_info?: string;
-    dashboard_kpi_info?: string;
+    product_name?: string;
+    product_description?: string;
     min_max_dates?: [string, string];
   }): void {
     const formattedPayload: Record<string, any> = { ...payload };

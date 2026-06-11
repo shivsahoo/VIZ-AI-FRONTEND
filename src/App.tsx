@@ -40,6 +40,7 @@ export default function App() {
     return 'home';
   });
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
+  const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
   const [chartCreatedTrigger, setChartCreatedTrigger] = useState(0);
   const [dashboardRefreshTrigger, setDashboardRefreshTrigger] = useState(0);
   const [pendingChartFromAI, setPendingChartFromAI] = useState<{
@@ -114,10 +115,6 @@ export default function App() {
             role: response.data.role === 'admin' ? 'super_admin' : 'project_user', // Map role
           });
           setIsAuthenticated(true);
-          
-          // Check onboarding status
-          const hasCompletedOnboardingBefore = localStorage.getItem('vizai_onboarding_completed') === 'true';
-          setHasCompletedOnboarding(hasCompletedOnboardingBefore);
           setShowOnboarding(false);
           
           // Note: Project restoration will happen after projects are fetched
@@ -268,8 +265,8 @@ export default function App() {
     setSelectedProjectId(finalProjectId);
     
     setCurrentView('workspace');
-    // Redirect to charts page for new projects, home for existing projects
-    setWorkspaceTab(isNewProject ? 'charts' : 'home');
+    // New projects → databases tab (to add a connection), existing projects → home
+    setWorkspaceTab(isNewProject ? 'databases' : 'home');
     
     // Store last visited project for ALL users (not just project_user)
     localStorage.setItem('vizai_last_project', projectName);
@@ -312,12 +309,10 @@ export default function App() {
     name: string;
     description: string;
     context: Record<string, string>;
-    database: any;
+    database?: any;
   }) => {
     setShowOnboarding(false);
     setHasCompletedOnboarding(true);
-    // Mark onboarding as completed in localStorage
-    localStorage.setItem('vizai_onboarding_completed', 'true');
     // In production, you would save the project data to the backend here
     console.log("Project created:", projectData);
     
@@ -339,8 +334,6 @@ export default function App() {
   const handleOnboardingCancel = () => {
     setShowOnboarding(false);
     setHasCompletedOnboarding(true);
-    // Mark onboarding as completed to prevent showing it again
-    localStorage.setItem('vizai_onboarding_completed', 'true');
     setCurrentView('home');
     toast.info("Setup cancelled. You can create a project anytime from the home page.");
   };
@@ -453,6 +446,7 @@ export default function App() {
             setEditingChart(chart);
             setIsAIAssistantOpen(true);
           }}
+          onInsightsGeneratingChange={setIsGeneratingInsights}
         />
       );
     }
@@ -558,6 +552,7 @@ export default function App() {
               activeTab={workspaceTab}
               onTabChange={setWorkspaceTab}
               onOpenAIAssistant={() => setIsAIAssistantOpen(prev => !prev)}
+              disabled={isGeneratingInsights}
             />
           )}
           
@@ -567,7 +562,7 @@ export default function App() {
           </main>
 
           {/* AI Assistant Panel - Only visible when in workspace (except Databases and Team pages) */}
-          {isInWorkspace && workspaceTab !== 'databases' && workspaceTab !== 'team' && (
+          {isInWorkspace && workspaceTab !== 'databases' && workspaceTab !== 'team' && workspaceTab !== 'observability' && (
                     <AIAssistant
           isOpen={isAIAssistantOpen}
           onOpenChange={(open) => {

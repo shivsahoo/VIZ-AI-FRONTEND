@@ -36,10 +36,22 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
   const [password, setPassword] = useState("");
   const [useSSL, setUseSSL] = useState(false);
   const [additionalParams, setAdditionalParams] = useState("");
-  
+  const [pgSchemaName, setPgSchemaName] = useState("");
+
   // Salesforce OAuth2 fields (session-based authentication only)
   const [sessionId, setSessionId] = useState("");
   const [instanceUrl, setInstanceUrl] = useState("");
+  const [workspaceUrl, setWorkspaceUrl] = useState("");
+  const [httpPath, setHttpPath] = useState("");
+  const [catalogName, setCatalogName] = useState("");
+  const [schemaName, setSchemaName] = useState("");
+  const [accessToken, setAccessToken] = useState("");
+
+  useEffect(() => {
+    if (dbType === "databricks" && connectionMethod === "string") {
+      setConnectionMethod("form");
+    }
+  }, [dbType, connectionMethod]);
 
   // Progress Overlay State
   const [showProgressOverlay, setShowProgressOverlay] = useState(false);
@@ -299,6 +311,15 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
           toast.error("Instance URL must be your Salesforce instance (e.g., https://na45.salesforce.com), not a login URL");
           return;
         }
+      } else if (dbType === "databricks") {
+        if (!normalizedConnectionName) {
+          toast.error("Please provide a connection name");
+          return;
+        }
+        if (!workspaceUrl.trim() || !httpPath.trim() || !catalogName.trim() || !schemaName.trim() || !accessToken.trim()) {
+          toast.error("Please fill all Databricks required fields");
+          return;
+        }
       } else {
         // Validation for traditional databases
         if (
@@ -338,9 +359,21 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
             instanceUrl: instanceUrl.trim(),
             consentGiven: true,
           };
+        } else if (dbType === "databricks") {
+          requestData = {
+            connectionName: normalizedConnectionName,
+            dbType: dbType,
+            workspaceUrl: workspaceUrl.trim(),
+            httpPath: httpPath.trim(),
+            catalogName: catalogName.trim(),
+            schemaName: schemaName.trim(),
+            accessToken: accessToken.trim(),
+            consentGiven: true,
+          };
         } else {
           // Traditional database request data
           const portValue = port && port.trim() ? port.trim() : undefined;
+          const schemaValue = pgSchemaName.trim() || undefined;
           
           requestData = {
             connectionName: normalizedConnectionName,
@@ -350,6 +383,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
             database: database.trim(),
             username: username.trim(),
             password: password || "",
+            ...(schemaValue && { schemaName: schemaValue }),
             consentGiven: true,
           };
         }
@@ -361,26 +395,23 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
         throw new Error(response.error?.message || "Failed to create database connection");
       }
 
-      if (PROGRESS_OVERLAY_ENABLED) {
-        setProgressTables({
-          total: response.data.tablesCount || 0,
-          completed: 0,
-          currentTable: "",
-        });
-        setProgressMessage("Preparing schema extraction...");
+      setProgressTables({
+        total: response.data.tablesCount || 0,
+        completed: 0,
+        currentTable: "",
+      });
+      setProgressMessage("Preparing schema extraction...");
 
-        if (response.data.taskId) {
-          console.log(
-            "[DatabaseSetupGuided] Starting schema extraction task",
-            response.data.taskId
-          );
-        } else {
-          console.warn("[DatabaseSetupGuided] Missing taskId in createDatabase response");
-        }
-
+      if (response.data.taskId) {
+        console.log(
+          "[DatabaseSetupGuided] Starting schema extraction task",
+          response.data.taskId
+        );
         await waitForSchemaExtraction(response.data.taskId, response.data.tablesCount || 0);
-        setProgressMessage("Finalizing connection details...");
+      } else {
+        console.warn("[DatabaseSetupGuided] Missing taskId in createDatabase response");
       }
+      setProgressMessage("Finalizing connection details...");
 
       const createdConnection = await fetchConnectionByName(normalizedConnectionName);
 
@@ -431,7 +462,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
           <Card className="w-full max-w-md border border-border shadow-2xl space-y-6 p-8 mx-4">
             <div className="flex flex-col items-center gap-3 text-center">
               <Loader2 className="w-8 h-8 text-primary animate-spin" />
-              <h3 className="text-xl font-semibold text-foreground">Connecting to database</h3>
+              <h3 className="text-xl font-semibold text-foreground">Connecting to datasource</h3>
               <p className="text-sm text-muted-foreground">
                 {progressMessage || "Initializing secure connection..."}
               </p>
@@ -460,64 +491,67 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
         <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center mx-auto mb-4 shadow-lg">
           <DatabaseIcon className="w-7 h-7 md:w-8 md:h-8 text-white" />
         </div>
-        <h2 className="text-2xl md:text-3xl text-foreground mb-2">Connect Your Database</h2>
+        <h2 className="text-2xl md:text-3xl text-foreground mb-2">Connect Your Datasource</h2>
         <p className="text-sm md:text-lg text-muted-foreground">
           Let's connect your first data source for "{projectName}"
         </p>
       </div>
 
       <div className="max-w-2xl mx-auto space-y-6">
-        {/* Connection Name - Always visible */}
         <div className="space-y-2">
-          <Label htmlFor="connectionName">
-            Connection Name <span className="text-destructive">*</span>
+          <Label htmlFor="dbType">
+            Datasource Type <span className="text-destructive">*</span>
           </Label>
-          <Input
-            id="connectionName"
-            placeholder="my-analytics-db"
-            value={connectionName}
-            onChange={(e) => setConnectionName(e.target.value)}
-            className="h-12"
-          />
-          <p className="text-xs text-muted-foreground">
-            A friendly name to identify this database connection
-          </p>
+          <Select value={dbType} onValueChange={setDbType}>
+            <SelectTrigger id="dbType" className="h-12">
+              <SelectValue placeholder="Select Database Type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="postgresql">PostgreSQL</SelectItem>
+              <SelectItem value="mysql">MySQL</SelectItem>
+              <SelectItem value="oracle">Oracle</SelectItem>
+              <SelectItem value="salesforce">Salesforce</SelectItem>
+              <SelectItem value="databricks">Databricks</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        <Tabs value={connectionMethod} onValueChange={setConnectionMethod} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-6 md:mb-8">
-            <TabsTrigger value="form" className="flex items-center gap-2">
-              <DatabaseIcon className="w-4 h-4" />
-              Connection Form
-            </TabsTrigger>
-            <TabsTrigger value="string" className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4" />
-              Connection String
-            </TabsTrigger>
-          </TabsList>
+        {/* Connection Name - Always visible */}
+        <div className="space-y-2">
+              <Label htmlFor="connectionName">
+                Connection Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="connectionName"
+                placeholder="my-analytics-db"
+                value={connectionName}
+                onChange={(e) => setConnectionName(e.target.value)}
+                className="h-12"
+              />
+              <p className="text-xs text-muted-foreground">
+                A friendly name to identify this datasource connection
+              </p>
+            </div>
 
-          {/* Connection Form Tab */}
-          <TabsContent value="form" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Tabs value={connectionMethod} onValueChange={setConnectionMethod} className="w-full">
+              {dbType !== "databricks" && (
+                <TabsList className="grid w-full grid-cols-2 mb-6 md:mb-8">
+                  <TabsTrigger value="form" className="flex items-center gap-2">
+                    <DatabaseIcon className="w-4 h-4" />
+                    Connection Form
+                  </TabsTrigger>
+                  <TabsTrigger value="string" className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" />
+                    Connection String
+                  </TabsTrigger>
+                </TabsList>
+              )}
 
-              <div className="space-y-2">
-                <Label htmlFor="dbType">
-                  Database Type <span className="text-destructive">*</span>
-                </Label>
-                <Select value={dbType} onValueChange={setDbType}>
-                  <SelectTrigger id="dbType" className="h-12">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="postgresql">PostgreSQL</SelectItem>
-                    <SelectItem value="mysql">MySQL</SelectItem>
-                    <SelectItem value="oracle">Oracle</SelectItem>
-                    <SelectItem value="salesforce">Salesforce</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Connection Form Tab */}
+              <TabsContent value="form" className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-              {/* Salesforce OAuth2 fields */}
+                  {/* Salesforce OAuth2 fields */}
               {dbType === "salesforce" && (
                 <>
                   <div className="space-y-2">
@@ -557,8 +591,87 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                 </>
               )}
 
-              {/* Traditional database fields (shown when NOT Salesforce) */}
-              {dbType !== "salesforce" && (
+              {/* Databricks fields */}
+              {dbType === "databricks" && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="workspaceUrl">
+                      Workspace URL <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="workspaceUrl"
+                      placeholder="dbc-xxxx.cloud.databricks.com"
+                      value={workspaceUrl}
+                      onChange={(e) => setWorkspaceUrl(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="httpPath">
+                      HTTP Path <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="httpPath"
+                      placeholder="/sql/1.0/warehouses/xxxxx or /sql/protocolv1/o/..."
+                      value={httpPath}
+                      onChange={(e) => setHttpPath(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Warehouse and cluster paths are both supported.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="catalogName">
+                      Catalog Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="catalogName"
+                      placeholder="main"
+                      value={catalogName}
+                      onChange={(e) => setCatalogName(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="schemaName">
+                      Schema Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="schemaName"
+                      placeholder="analytics"
+                      value={schemaName}
+                      onChange={(e) => setSchemaName(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div className="col-span-2 space-y-2">
+                    <Label htmlFor="accessToken">
+                      Access Token <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="accessToken"
+                      type="password"
+                      placeholder="dapi..."
+                      value={accessToken}
+                      onChange={(e) => setAccessToken(e.target.value)}
+                      className="h-12"
+                      autoComplete="off"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* Traditional database fields (shown when NOT Salesforce/Databricks) */}
+              {dbType !== "salesforce" && dbType !== "databricks" && (
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="host">
@@ -631,11 +744,27 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                       autoComplete="new-password"
                     />
                   </div>
+
+                  {dbType === "postgresql" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="pgSchemaName">Schema Name <span className="text-muted-foreground text-xs">(Optional)</span></Label>
+                      <Input
+                        id="pgSchemaName"
+                        placeholder="public"
+                        value={pgSchemaName}
+                        onChange={(e) => setPgSchemaName(e.target.value)}
+                        className="h-12"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Leave empty to use the default <code>public</code> schema
+                      </p>
+                    </div>
+                  )}
                 </>
               )}
 
               {/* SSL and Additional Parameters - only for non-Salesforce databases */}
-              {dbType !== "salesforce" && (
+              {dbType !== "salesforce" && dbType !== "databricks" && (
                 <>
                   <div className="col-span-2 flex items-center space-x-2">
                     <Checkbox
@@ -676,7 +805,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                 ) : (
                   <>
                     <Check className="w-5 h-5 mr-2" />
-                    Connect Database & Complete Setup
+                    Connect Datasource & Complete Setup
                     <ArrowRight className="w-5 h-5 ml-2" />
                   </>
                 )}
@@ -713,6 +842,9 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                 </code>
                 <code className="block text-xs bg-card p-3 rounded-lg border border-border">
                   oracle+oracledb://username:password@host/?service_name=service_name
+                </code>
+                <code className="block text-xs bg-card p-3 rounded-lg border border-border">
+                  databricks://token:ACCESS_TOKEN@dbc-xxxx.cloud.databricks.com?http_path=/sql/1.0/warehouses/xxxx&catalog=main&schema=analytics
                 </code>
               </div>
             </div>

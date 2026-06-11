@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2, Calendar as CalendarIcon, Users } from "lucide-react";
+import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2, Calendar as CalendarIcon, Link2, Globe } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { GradientButton } from "../components/shared/GradientButton";
 import { ChartCard } from "../components/features/charts/ChartCard";
 import { usePinnedCharts } from "../context/PinnedChartsContext";
-import { inferChartDataConfig, getDefaultChartDataConfig } from "../utils/chartData";
+import { inferChartDataConfig, getDefaultChartDataConfig, isExtendedChartType, inferExtendedChartConfig, extendedToChartDataConfig } from "../utils/chartData";
+import { ChartType } from "../components/features/charts/core/chartTypes";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,20 +18,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../components/ui/dialog";
-import { Checkbox } from "../components/ui/checkbox";
-import { Label } from "../components/ui/label";
 import { toast } from "sonner";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { getDashboardCharts, getChartData, deleteChart, getTeamMembers, addUserToDashboard, type ChartData, type TeamMember } from "../services/api";
+import { getDashboardCharts, getChartData, deleteChart, type ChartData } from "../services/api";
+import { ShareLinkModal } from "../components/features/dashboards/ShareLinkModal";
+import { AllowedDomainsSection } from "../components/features/dashboards/AllowedDomainsSection";
 
 // Custom styles for date picker to hide default clear button
 if (typeof document !== 'undefined') {
@@ -61,7 +54,7 @@ interface DashboardDetailViewProps {
   onBack: () => void;
   onDelete?: (dashboardId: string, dashboardName: string) => void;
   onOpenAIAssistant?: () => void;
-  onEditChart?: (chart: { name: string; type: 'line' | 'bar' | 'pie' | 'area'; description?: string }) => void;
+  onEditChart?: (chart: { name: string; type: ChartType; description?: string }) => void;
   refreshTrigger?: number;
 }
 
@@ -69,7 +62,7 @@ interface ChartCardData {
   id: string;
   title: string;
   description: string;
-  type: 'line' | 'bar' | 'pie' | 'area';
+  type: ChartType;
   query: string;
   databaseConnectionId: string;
   created_at: string;
@@ -97,13 +90,13 @@ const formatTimeAgo = (dateString: string): string => {
   return date.toLocaleDateString();
 };
 
-export function DashboardDetailView({ 
-  dashboardId, 
-  dashboardName, 
+export function DashboardDetailView({
+  dashboardId,
+  dashboardName,
   projectId: _projectId,
   onBack,
   onDelete: _onDelete,
-  onOpenAIAssistant, 
+  onOpenAIAssistant,
   onEditChart,
   refreshTrigger
 }: DashboardDetailViewProps) {
@@ -114,13 +107,10 @@ export function DashboardDetailView({
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [chartDateRanges, setChartDateRanges] = useState<Record<string, { startDate: Date | null; endDate: Date | null }>>({});
   const [openDatePicker, setOpenDatePicker] = useState<string | null>(null);
-  
-  // Member addition state
-  const [addMemberDialogOpen, setAddMemberDialogOpen] = useState(false);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [isLoadingMembers, setIsLoadingMembers] = useState(false);
-  const [isAddingMembers, setIsAddingMembers] = useState(false);
+
+  // Share link modal state
+  const [shareLinkModalOpen, setShareLinkModalOpen] = useState(false);
+  const [allowedDomainsCount, setAllowedDomainsCount] = useState(0);
   const lastRefreshTriggerRef = useRef<number>(0);
 
   // Helper to format date as YYYY-MM-DD for API calls
@@ -158,7 +148,7 @@ export function DashboardDetailView({
     const dateRange = dateRangeOverride || chartDateRanges[chartKey];
 
     // Update chart loading state
-    setCharts(prev => prev.map(c => 
+    setCharts(prev => prev.map(c =>
       c.id === chart.id ? { ...c, isLoadingData: true } : c
     ));
 
@@ -173,105 +163,36 @@ export function DashboardDetailView({
         : undefined;
 
       const response = await getChartData(
-        chart.id, 
-        chart.databaseConnectionId, 
+        chart.id,
+        chart.databaseConnectionId,
         chart.query,
         fromDate,
-        toDate
+        toDate,
+        false,
+        { xAxis: chart.xAxis ?? null, yAxis: chart.yAxis ?? null }
       );
       if (response.success && response.data) {
-        setCharts(prev => prev.map(c => 
+        setCharts(prev => prev.map(c =>
           c.id === chart.id ? { ...c, chartData: response.data, isLoadingData: false } : c
         ));
         return response.data;
       } else {
         toast.error(response.error?.message || "Failed to load chart data");
-        setCharts(prev => prev.map(c => 
+        setCharts(prev => prev.map(c =>
           c.id === chart.id ? { ...c, isLoadingData: false } : c
         ));
         return null;
       }
     } catch (error: any) {
       toast.error(error.message || "An error occurred while fetching chart data");
-      setCharts(prev => prev.map(c => 
+      setCharts(prev => prev.map(c =>
         c.id === chart.id ? { ...c, isLoadingData: false } : c
       ));
       return null;
     }
   };
 
-  // Fetch team members for adding to dashboard
-  const fetchTeamMembers = useCallback(async () => {
-    if (!_projectId) {
-      toast.error("Project ID is required to add members");
-      return;
-    }
 
-    setIsLoadingMembers(true);
-    try {
-      const response = await getTeamMembers(String(_projectId));
-      if (response.success && response.data) {
-        setTeamMembers(response.data);
-      } else {
-        toast.error(response.error?.message || "Failed to load team members");
-        setTeamMembers([]);
-      }
-    } catch (error: any) {
-      toast.error(error.message || "An error occurred while fetching team members");
-      setTeamMembers([]);
-    } finally {
-      setIsLoadingMembers(false);
-    }
-  }, [_projectId]);
-
-  // Handle opening add member dialog
-  const handleOpenAddMemberDialog = () => {
-    setSelectedUserIds([]);
-    setAddMemberDialogOpen(true);
-    fetchTeamMembers();
-  };
-
-  // Handle adding users to dashboard
-  const handleAddMembers = async () => {
-    if (!_projectId) {
-      toast.error("Project ID is required");
-      return;
-    }
-
-    if (selectedUserIds.length === 0) {
-      toast.error("Please select at least one user");
-      return;
-    }
-
-    setIsAddingMembers(true);
-    try {
-      const response = await addUserToDashboard(String(_projectId), {
-        user_ids: selectedUserIds,
-        dashboard_id: dashboardId,
-      });
-
-      if (response.success) {
-        toast.success(`Successfully added ${selectedUserIds.length} user(s) to dashboard`);
-        setAddMemberDialogOpen(false);
-        setSelectedUserIds([]);
-      } else {
-        toast.error(response.error?.message || "Failed to add users to dashboard");
-      }
-    } catch (error: any) {
-      toast.error(error.message || "An error occurred while adding users");
-    } finally {
-      setIsAddingMembers(false);
-    }
-  };
-
-  // Toggle user selection
-  const toggleUserSelection = (userId: string) => {
-    setSelectedUserIds(prev => 
-      prev.includes(userId)
-        ? prev.filter(id => id !== userId)
-        : [...prev, userId]
-    );
-  };
 
   // Fetch charts for the dashboard
   const fetchDashboardCharts = useCallback(async () => {
@@ -282,14 +203,16 @@ export function DashboardDetailView({
       const response = await getDashboardCharts(dashboardId);
       if (response.success && response.data) {
         // Helper function to normalize chart type
-        const normalizeChartType = (chartType: string | null | undefined): 'line' | 'bar' | 'pie' | 'area' => {
+        const normalizeChartType = (chartType: string | null | undefined): ChartType => {
           if (!chartType) return 'line'; // Default to line if not provided
           const normalized = chartType.toLowerCase();
-          if (normalized === 'bar' || normalized === 'column') return 'bar';
-          if (normalized === 'pie' || normalized === 'donut') return 'pie';
-          if (normalized === 'area') return 'area';
-          if (normalized === 'line') return 'line';
-          return 'line'; // Default fallback
+          if (normalized === 'column') return 'bar';
+          if (normalized === 'donut') return 'donut';
+          if (normalized === 'stacked_line_chart') return 'stackedlinechart';
+          if (normalized === 'stacked_horizontal_bar') return 'stackedhorizontalbar';
+          if (normalized === 'cluster' || normalized === 'clustering_chart') return 'clustering';
+          if (normalized === 'multi_y_axis') return 'multiyaxischart';
+          return normalized as ChartType;
         };
 
         const mappedCharts: ChartCardData[] = response.data.map((chart) => ({
@@ -305,10 +228,10 @@ export function DashboardDetailView({
           is_time_based: chart.is_time_based ?? false,
         }));
         setCharts(mappedCharts);
-        
+
         // Set last updated to the most recent chart's created_at
         if (mappedCharts.length > 0) {
-          const mostRecent = mappedCharts.reduce((latest, chart) => 
+          const mostRecent = mappedCharts.reduce((latest, chart) =>
             new Date(chart.created_at) > new Date(latest.created_at) ? chart : latest
           );
           setLastUpdated(formatTimeAgo(mostRecent.created_at));
@@ -372,7 +295,7 @@ export function DashboardDetailView({
 
     try {
       const response = await deleteChart(chartId, dashboardId);
-      
+
       if (response.success) {
         setCharts(prev => prev.filter(chart => chart.id !== chartId));
         toast.success(response.data?.message || `Chart removed from dashboard`);
@@ -399,9 +322,9 @@ export function DashboardDetailView({
       dashboardName: dashboardName,
       dataSource: chartData.databaseConnectionId || 'Unknown Data Source'
     };
-    
+
     togglePin(pinnedChartData);
-    
+
     if (isPinned(numericId)) {
       toast.success(`"${chartData.title}" unpinned from Home Dashboard`);
     } else {
@@ -503,146 +426,50 @@ export function DashboardDetailView({
   // Prepare chart data for display using the same inference logic as ChartsView
   const getChartDisplayConfig = (chart: ChartCardData) => {
     if (!chart.chartData?.data || chart.chartData.data.length === 0) {
-      return getDefaultChartDataConfig();
+      return {
+        ...getDefaultChartDataConfig(),
+        effectiveType: chart.type,
+        axisConfig: undefined,
+      };
     }
 
-    // Use inferChartDataConfig to properly identify data keys and x-axis
-    // This ensures consistent behavior with ChartsView
-    const inferredConfig = inferChartDataConfig(chart.chartData.data, chart.type);
+    if (isExtendedChartType(chart.type)) {
+      const ext = inferExtendedChartConfig(chart.chartData.data, chart.type, {
+        xAxisKey: chart.chartData?.metadata?.xAxis ?? chart.xAxis ?? undefined,
+        yAxisKey: chart.chartData?.metadata?.yAxis ?? chart.yAxis ?? undefined,
+      });
+      const config = extendedToChartDataConfig(ext);
+      return {
+        data: config.data,
+        dataKeys: config.dataKeys,
+        xAxisKey: config.xAxisKey,
+        axisConfig: ext.axisConfig,
+        effectiveType: ext.fallbackType ?? chart.type,
+      };
+    }
 
-    // Override with explicit x_axis and y_axis from API if available (like DashboardDetailView used to do)
+    // Legacy standard charts
+    const inferredConfig = inferChartDataConfig(chart.chartData.data, chart.type as any, {
+      xAxisHint: chart.chartData?.metadata?.xAxis ?? chart.xAxis ?? null,
+      yAxisHint: chart.chartData?.metadata?.yAxis ?? chart.yAxis ?? null,
+    });
+
     const metadataYAxis = chart.chartData?.metadata?.yAxis;
     const metadataXAxis = chart.chartData?.metadata?.xAxis;
-    
-    // Use explicit axis fields if provided, otherwise use inferred values
-    const finalDataKeys = {
-      primary: metadataYAxis || chart.yAxis || inferredConfig.dataKeys.primary,
-      secondary: inferredConfig.dataKeys.secondary, // Keep secondary from inference
-    };
-    
-    const finalXAxisKey = metadataXAxis || chart.xAxis || inferredConfig.xAxisKey;
 
     return {
       data: inferredConfig.data,
-      dataKeys: finalDataKeys,
-      xAxisKey: finalXAxisKey,
+      dataKeys: {
+        primary: metadataYAxis || chart.yAxis || inferredConfig.dataKeys.primary,
+        secondary: inferredConfig.dataKeys.secondary,
+      },
+      xAxisKey: metadataXAxis || chart.xAxis || inferredConfig.xAxisKey,
+      axisConfig: undefined,
+      effectiveType: chart.type,
     };
   };
 
-  const renderDateRangeButton = (chart: ChartCardData) => {
-    const chartKey = String(chart.id);
-    const isOpen = openDatePicker === chartKey;
 
-    return (
-      <div 
-        data-date-picker="true"
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        onMouseDown={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        onMouseUp={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-        className="relative"
-      >
-        <DatePicker
-          selectsRange
-          open={isOpen}
-          onClickOutside={() => setOpenDatePicker(null)}
-          onInputClick={() => {
-            setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
-          }}
-          startDate={chartDateRanges[chartKey]?.startDate || null}
-          endDate={chartDateRanges[chartKey]?.endDate || null}
-          onChange={(dates) => {
-            const [start, end] = dates as [Date | null, Date | null];
-            setChartDateRanges(prev => ({
-              ...prev,
-              [chartKey]: { startDate: start, endDate: end }
-            }));
-            
-            // Fetch data if both dates are set or both are cleared
-            if ((start && end) || (!start && !end)) {
-              const dateRangeToUse = { startDate: start, endDate: end };
-              fetchChartData(chart, dateRangeToUse);
-            }
-          }}
-          placeholderText="Date range"
-          dateFormat="MMM d, yyyy"
-          showPopperArrow={false}
-          popperPlacement="top-end"
-          customInput={
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              className="h-8 pl-3 pr-3 text-xs bg-white shadow-md hover:bg-gray-50 text-foreground hover:text-foreground border-border relative inline-flex items-center gap-2"
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                // Toggle date picker
-                setOpenDatePicker(prev => prev === chartKey ? null : chartKey);
-              }}
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-              }}
-              onMouseUp={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-              }}
-            >
-              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-foreground" />
-              <span className="text-xs whitespace-nowrap">
-                {(() => {
-                  const range = chartDateRanges[chartKey];
-                  const start = range?.startDate;
-                  const end = range?.endDate;
-                  if (start && end) {
-                    return `${formatDateForDisplay(start)} - ${formatDateForDisplay(end)}`;
-                  }
-                  if (start) {
-                    return `${formatDateForDisplay(start)} - End date`;
-                  }
-                  return "Date range";
-                })()}
-              </span>
-              {chartDateRanges[chartKey]?.startDate && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    setChartDateRanges(prev => ({
-                      ...prev,
-                      [chartKey]: { startDate: null, endDate: null }
-                    }));
-                    fetchChartData(chart, { startDate: null, endDate: null });
-                  }}
-                  className="w-5 h-5 flex items-center justify-center hover:bg-red-100 rounded transition-colors shrink-0"
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                  onMouseUp={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}
-                >
-                  <X className="h-3.5 w-3.5 text-red-600" strokeWidth={2.5} />
-                </button>
-              )}
-            </Button>
-          }
-        />
-      </div>
-    );
-  };
 
   return (
     <div className="px-12 py-10">
@@ -676,17 +503,44 @@ export function DashboardDetailView({
               </div>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              onClick={handleOpenAddMemberDialog}
-              className="border-border"
-            >
-              <Users className="w-4 h-4 mr-2" />
-              Add Members
-            </Button>
-            <GradientButton 
+            {/* Allowed Domains */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Globe className="w-3.5 h-3.5" />
+                Domains:
+              </span>
+              <AllowedDomainsSection
+                dashboardId={dashboardId}
+                onDomainsChanged={setAllowedDomainsCount}
+              />
+            </div>
+
+            <div className="w-px h-6 bg-border" />
+
+            <div className="relative group">
+              <Button
+                id="create-shareable-link-btn"
+                variant="outline"
+                onClick={() => {
+                  if (allowedDomainsCount === 0) return;
+                  setShareLinkModalOpen(true);
+                  console.log(`[EMBED][STEP 6] Shareable link requested — dashboard ${dashboardId}, allowed domains: ${allowedDomainsCount}`);
+                }}
+                className="border-border"
+                disabled={allowedDomainsCount === 0}
+              >
+                <Link2 className="w-4 h-4 mr-2" />
+                Create shareable link
+              </Button>
+              {allowedDomainsCount === 0 && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-popover border border-border rounded-md shadow-lg text-xs text-muted-foreground whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                  Add at least one allowed domain first
+                </div>
+              )}
+            </div>
+            <GradientButton
               onClick={() => {
                 if (onOpenAIAssistant) {
                   onOpenAIAssistant();
@@ -704,11 +558,20 @@ export function DashboardDetailView({
         {/* Quick Stats - Show chart count */}
         {(() => {
           // Chart type configuration
-          const chartTypeConfig: Record<'line' | 'bar' | 'pie' | 'area', { label: string; description: string }> = {
+          const chartTypeConfig: Record<string, { label: string; description: string }> = {
             line: { label: 'Line Charts', description: 'time-series data' },
             bar: { label: 'Bar Charts', description: 'comparison data' },
             pie: { label: 'Pie Charts', description: 'proportion data' },
-            area: { label: 'Area Charts', description: 'cumulative data' }
+            area: { label: 'Area Charts', description: 'cumulative data' },
+            donut: { label: 'Donut Charts', description: 'proportion data' },
+            scatter: { label: 'Scatter Charts', description: 'correlation data' },
+            heatmap: { label: 'Heatmaps', description: 'density data' },
+            funnel: { label: 'Funnel Charts', description: 'conversion data' },
+            map: { label: 'Map Charts', description: 'geospatial data' },
+            stackedlinechart: { label: 'Stacked Line Charts', description: 'cumulative time-series data' },
+            stackedhorizontalbar: { label: 'Stacked Horizontal Bars', description: 'comparison data' },
+            clustering: { label: 'Clustering Charts', description: 'grouped data' },
+            multiyaxischart: { label: 'Multi-Axis Charts', description: 'multi-metric data' },
           };
 
           // Count charts by type
@@ -718,7 +581,7 @@ export function DashboardDetailView({
           }, {} as Record<string, number>);
 
           // Get chart types that have at least one chart
-          const availableChartTypes = (Object.keys(chartCounts) as Array<'line' | 'bar' | 'pie' | 'area'>)
+          const availableChartTypes = Object.keys(chartCounts)
             .filter(type => chartCounts[type] > 0)
             .sort(); // Sort for consistent ordering
 
@@ -732,10 +595,13 @@ export function DashboardDetailView({
                   <span className="text-muted-foreground">in this dashboard</span>
                 </div>
               </Card>
-              
+
               {/* Dynamic Chart Type Cards - Only show types that have charts */}
               {availableChartTypes.map((chartType) => {
-                const config = chartTypeConfig[chartType];
+                const config = chartTypeConfig[chartType] || {
+                  label: `${chartType.charAt(0).toUpperCase() + chartType.slice(1)} Charts`,
+                  description: 'visualization data'
+                };
                 const count = chartCounts[chartType];
                 return (
                   <Card key={chartType} className="p-6 border border-border flex-1 min-w-[200px]">
@@ -767,7 +633,7 @@ export function DashboardDetailView({
               <p className="text-muted-foreground mb-6 max-w-md">
                 Add charts to this dashboard to visualize your data
               </p>
-              <GradientButton 
+              <GradientButton
                 onClick={() => {
                   if (onOpenAIAssistant) {
                     onOpenAIAssistant();
@@ -795,11 +661,10 @@ export function DashboardDetailView({
                     <Button
                       variant="outline"
                       size="icon"
-                      className={`h-8 w-8 border-border ${
-                        isChartPinned
+                      className={`h-8 w-8 border-border ${isChartPinned
                           ? 'bg-primary/10 text-primary hover:bg-primary/20'
                           : 'hover:bg-muted'
-                      }`}
+                        }`}
                       onClick={() => handleTogglePin(chart)}
                       title={isChartPinned ? "Unpin from Home" : "Pin to Home"}
                     >
@@ -849,12 +714,18 @@ export function DashboardDetailView({
                     </div>
                   ) : chartConfig.data.length > 0 ? (
                     <ChartCard
-                      type={chart.type}
+                      type={chartConfig.effectiveType}
                       data={chartConfig.data}
-                      dataKeys={chartConfig.dataKeys}
+                      dataKeys={[
+                        chartConfig.dataKeys.primary,
+                        ...(chartConfig.dataKeys.secondary
+                          ? [chartConfig.dataKeys.secondary]
+                          : []),
+                      ]}
                       xAxisKey={chartConfig.xAxisKey}
+                      axisConfig={chartConfig.axisConfig}
                       height={300}
-                      showLegend={!!chartConfig.dataKeys.secondary && chart.type !== 'pie'}
+                      showLegend={!!chartConfig.dataKeys.secondary && chartConfig.effectiveType !== 'pie'}
                     />
                   ) : (
                     <div className="h-[300px] flex items-center justify-center border border-dashed border-border rounded-lg">
@@ -871,12 +742,7 @@ export function DashboardDetailView({
                     </div>
                   )}
 
-                  {/* Date Range Picker - Bottom Right */}
-                  {chart.is_time_based === true && (
-                    <div className="mt-4 flex justify-end">
-                      {renderDateRangeButton(chart)}
-                    </div>
-                  )}
+
                 </Card>
               );
             })}
@@ -889,7 +755,7 @@ export function DashboardDetailView({
             <AlertDialogHeader>
               <AlertDialogTitle>Remove Chart from Dashboard</AlertDialogTitle>
               <AlertDialogDescription>
-                Are you sure you want to remove "{chartToRemove?.title}" from this dashboard? 
+                Are you sure you want to remove "{chartToRemove?.title}" from this dashboard?
                 The chart will still be available in your Charts library.
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -905,91 +771,13 @@ export function DashboardDetailView({
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Add Members Dialog */}
-        <Dialog open={addMemberDialogOpen} onOpenChange={setAddMemberDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add Members to Dashboard</DialogTitle>
-              <DialogDescription>
-                Select team members to add to this dashboard. Only users with a role in this project can be added.
-              </DialogDescription>
-            </DialogHeader>
-            
-            <div className="py-4">
-              {isLoadingMembers ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                  <span className="ml-3 text-muted-foreground">Loading team members...</span>
-                </div>
-              ) : teamMembers.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-muted-foreground">No team members found in this project.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {teamMembers.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
-                    >
-                      <Checkbox
-                        id={`member-${member.id}`}
-                        checked={selectedUserIds.includes(member.id)}
-                        onCheckedChange={() => toggleUserSelection(member.id)}
-                      />
-                      <Label
-                        htmlFor={`member-${member.id}`}
-                        className="flex-1 cursor-pointer flex items-center justify-between"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
-                            <span className="text-sm font-medium text-foreground">
-                              {member.name.charAt(0).toUpperCase()}
-                            </span>
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-foreground">{member.name}</p>
-                            <p className="text-xs text-muted-foreground">{member.email}</p>
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="ml-2">
-                          {member.role}
-                        </Badge>
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setAddMemberDialogOpen(false);
-                  setSelectedUserIds([]);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleAddMembers}
-                disabled={selectedUserIds.length === 0 || isAddingMembers || isLoadingMembers}
-              >
-                {isAddingMembers ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Adding...
-                  </>
-                ) : (
-                  <>
-                    Add {selectedUserIds.length > 0 ? `${selectedUserIds.length} ` : ''}Member{selectedUserIds.length !== 1 ? 's' : ''}
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {/* Share Link Modal */}
+        <ShareLinkModal
+          open={shareLinkModalOpen}
+          onOpenChange={setShareLinkModalOpen}
+          dashboardId={dashboardId}
+          dashboardName={dashboardName}
+        />
       </div>
     </div>
   );

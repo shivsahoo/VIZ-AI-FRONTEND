@@ -103,8 +103,11 @@ export async function exportChartAsImage(
       ...options,
     };
 
-    // Try to find SVG element first (for Recharts)
-    const svgElement = element.querySelector('svg');
+    // ECharts (SVG renderer) and legacy charts: prefer the main plot `<svg>` inside the container.
+    const svgElement =
+      (element.querySelector('.echarts-for-react svg') as SVGElement | null) ??
+      (element.querySelector('[data-zr-dom-id] svg') as SVGElement | null) ??
+      (element.querySelector('svg') as SVGElement | null);
     
     if (svgElement) {
       // Use SVG export method for Recharts charts
@@ -233,4 +236,7 @@ export async function exportChartFromRef(
   }
   return exportChartAsImage(ref.current, chartName, options);
 }
+
+/** Same behavior as `exportChartFromRef` (container ref + base filename for the PNG). */
+export const exportChartToPng = exportChartFromRef;
 

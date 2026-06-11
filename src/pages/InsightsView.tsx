@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { 
   Lightbulb, 
   TrendingUp, 
@@ -60,6 +60,7 @@ interface Insight {
 
 interface InsightsViewProps {
   projectId?: string | number;
+  onGeneratingChange?: (generating: boolean) => void;
 }
 
 const mapDatabaseMetadataToApiDatabase = (entry: DatabaseMetadataEntry): ApiDatabase => ({
@@ -77,9 +78,16 @@ const mapDatabaseMetadataToApiDatabase = (entry: DatabaseMetadataEntry): ApiData
   consentGiven: undefined,
 });
 
-export function InsightsView({ projectId }: InsightsViewProps) {
+export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProps) {
   const [insights, setInsights] = useState<Insight[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const onGeneratingChangeRef = useRef(onGeneratingChange);
+  onGeneratingChangeRef.current = onGeneratingChange;
+
+  // Notify parent whenever the generating state changes so it can disable the sidebar.
+  useEffect(() => {
+    onGeneratingChangeRef.current?.(isGenerating);
+  }, [isGenerating]);
   const [databases, setDatabases] = useState<ApiDatabase[]>([]);
   const [selectedDatabase, setSelectedDatabase] = useState<string>("all");
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
@@ -248,6 +256,47 @@ export function InsightsView({ projectId }: InsightsViewProps) {
       }
     }
   }, [showGenerateDialog, projectId, fetchDatabases]);
+
+  const classifyKeyMetricType = (metric: any): Insight["type"] => {
+    const trendRaw = metric?.trend;
+    const trend = typeof trendRaw === "string" ? trendRaw.toLowerCase() : trendRaw;
+    if (trend === "positive") return "positive";
+    if (trend === "negative") return "negative";
+    if (trend === "neutral") return "negative";
+
+    // Fallback (handles cases like "not good" / "not improving")
+    const valueInterpretation = String(metric?.value_interpretation || "");
+    const lower = valueInterpretation.toLowerCase();
+
+    const hasPositive = [/\bgood\b/, /\bexcellent\b/, /\bimprov\w*\b/].some((re) =>
+      re.test(lower)
+    );
+    const hasNegative = [
+      /\bpoor\b/,
+      /\bworse\b/,
+      /\bdeclin\w*\b/,
+      /\bdecreas\w*\b/,
+      /\bdeteriorat\w*\b/,
+      /\bunderperform\w*\b/,
+      /\bnegative\b/,
+      /\bdrop\b/,
+      /\bdown\b/,
+    ].some((re) => re.test(lower));
+
+    const negatesPositive = [
+      /\bnot\s+good\b/,
+      /\bnot\s+excellent\b/,
+      /\bnot\s+improv\w*\b/,
+      /\bno\s+longer\s+improv\w*\b/,
+    ].some((re) => re.test(lower));
+
+    // If there are clear negative signals, prefer `negative` to avoid mislabeling issues as good.
+    if (hasNegative) return "negative";
+    if (hasPositive && !negatesPositive) return "positive";
+
+    // Default to negative when unclear/mixed to avoid false positives.
+    return "negative";
+  };
 
   const transformProjectInsights = (data: ProjectInsightsResponse): Insight[] => {
     try {
@@ -534,15 +583,13 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             const kpiName = String(metric?.kpi_name || 'Unknown KPI');
             const valueInterpretation = String(metric?.value_interpretation || '');
             const businessImpact = String(metric?.business_impact || '');
-            const isPositive = valueInterpretation.toLowerCase().includes("good") ||
-                             valueInterpretation.toLowerCase().includes("excellent") ||
-                             valueInterpretation.toLowerCase().includes("improving");
+            const type = classifyKeyMetricType(metric);
             
             rest.push({
               id: `metric-${dbInsight.database_id}-${idCounter++}`,
               title: kpiName,
               description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
-              type: isPositive ? "positive" : "negative",
+              type,
               category: "Key Metric",
               timestamp: "Just now",
               impact: "Medium",
@@ -654,15 +701,13 @@ export function InsightsView({ projectId }: InsightsViewProps) {
         const kpiName = String(metric?.kpi_name || 'Unknown KPI');
         const valueInterpretation = String(metric?.value_interpretation || '');
         const businessImpact = String(metric?.business_impact || '');
-        const isPositive = valueInterpretation.toLowerCase().includes("good") ||
-                         valueInterpretation.toLowerCase().includes("excellent") ||
-                         valueInterpretation.toLowerCase().includes("improving");
+        const type = classifyKeyMetricType(metric);
         
         transformed.push({
           id: `metric-${idCounter++}`,
           title: kpiName,
           description: businessImpact ? `${valueInterpretation} - ${businessImpact}` : valueInterpretation,
-          type: isPositive ? "positive" : "negative",
+          type,
           category: "Key Metric",
           timestamp: "Just now",
           impact: "Medium",
@@ -924,7 +969,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
             <Button 
               variant="outline"
               onClick={handleExportCSV}
-              disabled={filteredInsights.length === 0}
+              disabled={filteredInsights.length === 0 || isGenerating}
             >
               <Download className="w-4 h-4 mr-2" />
               Export Insights
@@ -1053,9 +1098,19 @@ export function InsightsView({ projectId }: InsightsViewProps) {
               <Button 
                 className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
                 onClick={() => setShowGenerateDialog(true)}
+                disabled={isGenerating}
               >
-                <Sparkles className="w-4 h-4 mr-2" />
-                Generate Insights
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Generate Insights
+                  </>
+                )}
               </Button>
             )}
           </div>
@@ -1119,6 +1174,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                               handleCopyToClipboard(insight);
                             }}
                             title="Copy to clipboard"
+                            disabled={isGenerating}
                           >
                             {copiedInsightId === insight.id ? (
                               <Check className="w-4 h-4 text-success" />
@@ -1131,6 +1187,7 @@ export function InsightsView({ projectId }: InsightsViewProps) {
                             size="sm"
                             className="whitespace-nowrap"
                             onClick={() => handleAddToHome(insight)}
+                            disabled={isGenerating}
                           >
                             + Add to Homepage
                           </Button>
