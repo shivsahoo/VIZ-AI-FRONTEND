@@ -3637,3 +3637,126 @@ export const removeAllowedDomain = async (
   }
 };
 
+
+// ============================================================================
+// OBSERVABILITY API
+// ============================================================================
+
+export interface LLMTrace {
+  id: string;
+  session_id: string | null;
+  chart_id: string | null;
+  project_id: string | null;
+  user_id: string | null;
+  ai_service: string;
+  llm_provider: string | null;
+  model_name: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  latency_ms: number | null;
+  sql_generated: string | null;
+  sql_retries: number;
+  schema_tables_used: string[] | null;
+  agent_steps: any[] | null;
+  status: 'success' | 'error' | 'timeout' | 'cancelled';
+  error_message: string | null;
+  created_at: string;
+  // only present in detail view
+  prompt_text?: string | null;
+  completion_text?: string | null;
+}
+
+export interface TraceListResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  items: LLMTrace[];
+}
+
+export interface UsageAnalytics {
+  summary: {
+    total_calls: number;
+    total_tokens: number;
+    total_prompt_tokens: number;
+    total_completion_tokens: number;
+    total_cost_usd: number;
+    avg_latency_ms: number;
+    error_count: number;
+    error_rate: number;
+  };
+  daily_trend: Array<{
+    day: string;
+    ai_service: string;
+    tokens: number;
+    cost_usd: number;
+    calls: number;
+  }>;
+  service_breakdown: Array<{
+    ai_service: string;
+    calls: number;
+    tokens: number;
+    cost_usd: number;
+    avg_latency_ms: number;
+    errors: number;
+  }>;
+  model_breakdown: Array<{
+    model_name: string;
+    llm_provider: string;
+    calls: number;
+    tokens: number;
+    cost_usd: number;
+  }>;
+}
+
+export const getTraces = async (params: {
+  project_id?: string;
+  ai_service?: string;
+  status?: string;
+  date_from?: string;
+  date_to?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<ApiResponse<TraceListResponse>> => {
+  try {
+    const query = new URLSearchParams();
+    if (params.project_id) query.set('project_id', params.project_id);
+    if (params.ai_service) query.set('ai_service', params.ai_service);
+    if (params.status) query.set('status', params.status);
+    if (params.date_from) query.set('date_from', params.date_from);
+    if (params.date_to) query.set('date_to', params.date_to);
+    if (params.page) query.set('page', String(params.page));
+    if (params.page_size) query.set('page_size', String(params.page_size));
+    const data = await apiRequest<TraceListResponse>(`/api/v1/observability/traces?${query}`);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: { code: 'TRACES_FETCH_FAILED', message: error.message || 'Failed to fetch traces' } };
+  }
+};
+
+export const getTraceDetail = async (traceId: string): Promise<ApiResponse<LLMTrace>> => {
+  try {
+    const data = await apiRequest<LLMTrace>(`/api/v1/observability/traces/${traceId}`);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: { code: 'TRACE_DETAIL_FAILED', message: error.message || 'Failed to fetch trace' } };
+  }
+};
+
+export const getUsageAnalytics = async (params: {
+  project_id?: string;
+  date_from?: string;
+  date_to?: string;
+}): Promise<ApiResponse<UsageAnalytics>> => {
+  try {
+    const query = new URLSearchParams();
+    if (params.project_id) query.set('project_id', params.project_id);
+    if (params.date_from) query.set('date_from', params.date_from);
+    if (params.date_to) query.set('date_to', params.date_to);
+    const data = await apiRequest<UsageAnalytics>(`/api/v1/observability/analytics?${query}`);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: { code: 'ANALYTICS_FETCH_FAILED', message: error.message || 'Failed to fetch analytics' } };
+  }
+};
