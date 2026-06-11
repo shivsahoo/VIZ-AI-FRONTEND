@@ -307,10 +307,9 @@ export function ChartCard(props: ChartCardProps) {
   const CARTESIAN_PAN_WIDTH_PX = 648;
 
   const horizontalPanLayerStyle = {
-    height: baseHeight,
-    maxHeight: baseHeight,
+    height: "100%",
     overflowX: "auto" as const,
-    overflowY: "hidden" as const,
+    overflowY: "visible" as const,
     minHeight: 0,
   };
 
@@ -320,12 +319,15 @@ export function ChartCard(props: ChartCardProps) {
     const needsHorizontalScroll = xCount > 14;
     const minWidth = Math.max(560, xCount * 48);
     return (
-      <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
+      <div 
+        className="w-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" 
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
         <div
           className={
             needsHorizontalScroll
               ? `${scrollXBar} w-full shrink-0 min-h-0`
-              : "h-full max-h-full overflow-hidden min-h-0"
+              : "h-full w-full min-h-0"
           }
           style={needsHorizontalScroll ? horizontalPanLayerStyle : undefined}
         >
@@ -342,12 +344,15 @@ export function ChartCard(props: ChartCardProps) {
     const needsHorizontalScroll = data.length > 10;
     const horizontalMinWidth = Math.max(720, Math.round(baseHeight * 1.6));
     return (
-      <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
+      <div 
+        className="w-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" 
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
         <div
           className={
             needsHorizontalScroll
               ? `${scrollXBar} w-full shrink-0 min-h-0`
-              : "h-full max-h-full overflow-hidden min-h-0"
+              : "h-full w-full min-h-0"
           }
           style={needsHorizontalScroll ? horizontalPanLayerStyle : undefined}
         >
@@ -381,12 +386,15 @@ export function ChartCard(props: ChartCardProps) {
     const needsHorizontal = data.length > 200;
     const minW = needsHorizontal ? Math.max(baseHeight * 1.5, 600) : undefined;
     return (
-      <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
+      <div 
+        className="w-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" 
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
         <div
           className={
             needsHorizontal
               ? `${scrollXBar} w-full shrink-0 min-h-0`
-              : "h-full max-h-full overflow-hidden min-h-0"
+              : "h-full w-full min-h-0"
           }
           style={needsHorizontal ? horizontalPanLayerStyle : undefined}
         >
@@ -409,12 +417,15 @@ export function ChartCard(props: ChartCardProps) {
     const needsHorizontal = data.length > 15;
     const minW = needsHorizontal ? Math.max(600, data.length * 56) : undefined;
     return (
-      <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
+      <div 
+        className="w-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" 
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
         <div
           className={
             needsHorizontal
               ? `${scrollXBar} w-full shrink-0 min-h-0`
-              : "h-full max-h-full overflow-hidden min-h-0"
+              : "h-full w-full min-h-0"
           }
           style={needsHorizontal ? horizontalPanLayerStyle : undefined}
         >
@@ -461,8 +472,11 @@ export function ChartCard(props: ChartCardProps) {
 
   if (!needsHorizontalPan) {
     return (
-      <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
-        <div style={{ height: baseHeight }} className="h-full overflow-hidden">
+      <div 
+        className="w-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" 
+        style={{ height: baseHeight, minHeight: baseHeight }}
+      >
+        <div style={{ minHeight: baseHeight }} className="h-full w-full">
           {wrapped}
         </div>
       </div>
@@ -470,9 +484,12 @@ export function ChartCard(props: ChartCardProps) {
   }
 
   return (
-    <div className="w-full overflow-hidden" style={{ height: baseHeight, minHeight: baseHeight }}>
+    <div 
+      className="w-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" 
+      style={{ height: baseHeight, minHeight: baseHeight }}
+    >
       <div className={`${scrollXBar} w-full shrink-0 min-h-0`} style={horizontalPanLayerStyle}>
-        <div style={{ minWidth: minWDesired, height: baseHeight, maxHeight: baseHeight }}>
+        <div style={{ minWidth: minWDesired, minHeight: baseHeight }}>
           {wrapped}
         </div>
       </div>
