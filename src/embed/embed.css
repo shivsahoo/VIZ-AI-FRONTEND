@@ -27,41 +27,41 @@
    No background is applied at this level.
    The parent page colour bleeds through the iframe naturally.             */
 :root {
-  --embed-bg:            transparent;
-  --embed-card-bg:       rgba(255, 255, 255, 0.08);
-  --embed-text:          inherit;
-  --embed-text-muted:    rgba(100, 116, 139, 1);
-  --embed-border:        rgba(148, 163, 184, 0.2);
-  --embed-primary:       #6366f1;
-  --embed-error-bg:      rgba(254, 242, 242, 0.9);
-  --embed-error-border:  #fecaca;
-  --embed-error-text:    #dc2626;
+  --embed-bg: transparent;
+  --embed-card-bg: rgba(255, 255, 255, 0.08);
+  --embed-text: inherit;
+  --embed-text-muted: rgba(100, 116, 139, 1);
+  --embed-border: rgba(148, 163, 184, 0.2);
+  --embed-primary: #6366f1;
+  --embed-error-bg: rgba(254, 242, 242, 0.9);
+  --embed-error-border: #fecaca;
+  --embed-error-text: #dc2626;
 }
 
 /* ── Light theme ─────────────────────────────────────────────────────────── */
 [data-theme="light"] {
-  --embed-bg:            #f8fafc;
-  --embed-card-bg:       #ffffff;
-  --embed-text:          #1e293b;
-  --embed-text-muted:    #64748b;
-  --embed-border:        #e2e8f0;
-  --embed-primary:       #6366f1;
-  --embed-error-bg:      #fef2f2;
-  --embed-error-border:  #fecaca;
-  --embed-error-text:    #dc2626;
+  --embed-bg: #f8fafc;
+  --embed-card-bg: #ffffff;
+  --embed-text: #1e293b;
+  --embed-text-muted: #64748b;
+  --embed-border: #e2e8f0;
+  --embed-primary: #6366f1;
+  --embed-error-bg: #fef2f2;
+  --embed-error-border: #fecaca;
+  --embed-error-text: #dc2626;
 }
 
 /* ── Dark theme ──────────────────────────────────────────────────────────── */
 [data-theme="dark"] {
-  --embed-bg:            #0f1117;
-  --embed-card-bg:       #1a1d27;
-  --embed-text:          #e4e4e7;
-  --embed-text-muted:    #9ca3af;
-  --embed-border:        #2a2d3a;
-  --embed-primary:       #6366f1;
-  --embed-error-bg:      #1c1017;
-  --embed-error-border:  #7f1d1d;
-  --embed-error-text:    #fca5a5;
+  --embed-bg: #0f1117;
+  --embed-card-bg: #1a1d27;
+  --embed-text: #e4e4e7;
+  --embed-text-muted: #9ca3af;
+  --embed-border: #2a2d3a;
+  --embed-primary: #6366f1;
+  --embed-error-bg: #1c1017;
+  --embed-error-border: #7f1d1d;
+  --embed-error-text: #fca5a5;
 }
 
 /* ── Custom background mode ──────────────────────────────────────────────────
@@ -70,24 +70,24 @@
    it sits above the custom backdrop.                                      */
 [data-theme="custom"] {
   /* --embed-bg is set inline by JS, so we only set card / text here */
-  --embed-card-bg:       rgba(255, 255, 255, 0.12);
-  --embed-text:          #1e293b;
-  --embed-text-muted:    #475569;
-  --embed-border:        rgba(0, 0, 0, 0.12);
-  --embed-error-bg:      rgba(254, 242, 242, 0.9);
-  --embed-error-border:  #fecaca;
-  --embed-error-text:    #dc2626;
+  --embed-card-bg: rgba(255, 255, 255, 0.12);
+  --embed-text: #1e293b;
+  --embed-text-muted: #475569;
+  --embed-border: rgba(0, 0, 0, 0.12);
+  --embed-error-bg: rgba(254, 242, 242, 0.9);
+  --embed-error-border: #fecaca;
+  --embed-error-text: #dc2626;
 }
 
 /* Dark custom background: if custom bg is dark, use light text */
 [data-theme="custom"].embed-bg-dark {
-  --embed-card-bg:       rgba(255, 255, 255, 0.08);
-  --embed-text:          #e4e4e7;
-  --embed-text-muted:    #9ca3af;
-  --embed-border:        rgba(255, 255, 255, 0.1);
-  --embed-error-bg:      #1c1017;
-  --embed-error-border:  #7f1d1d;
-  --embed-error-text:    #fca5a5;
+  --embed-card-bg: rgba(255, 255, 255, 0.08);
+  --embed-text: #e4e4e7;
+  --embed-text-muted: #9ca3af;
+  --embed-border: rgba(255, 255, 255, 0.1);
+  --embed-error-bg: #1c1017;
+  --embed-error-border: #7f1d1d;
+  --embed-error-text: #fca5a5;
 }
 
 /* ── Reset ───────────────────────────────────────────────────────────────── */
@@ -113,8 +113,7 @@ body {
   min-width: 0;
 }
 
-#embed-root {
-}
+#embed-root {}
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .embed-header {
@@ -154,88 +153,77 @@ body {
 /* ── Dashboard density layout ───────────────────────── */
 
 #charts-grid,
-.charts-grid{
+.charts-grid {
 
-    display:grid;
+  display: grid;
 
-    grid-template-columns:
+  grid-template-columns:
 
-        repeat(
-            auto-fit,
+    repeat(auto-fit,
 
-            minmax(
-                380px,
-                1fr
-            )
-        );
+      minmax(380px,
+        1fr));
 
-    gap:20px;
+  gap: 20px;
 
-    width:100%;
+  width: 100%;
 
-    align-items:start;
+  align-items: start;
 
 }
 
 
 /* Wider screens → allow more charts */
 
-@media(min-width:1600px){
+@media(min-width:1600px) {
 
-    #charts-grid,
-    .charts-grid{
+  #charts-grid,
+  .charts-grid {
 
-        grid-template-columns:
+    grid-template-columns:
 
-            repeat(
-                auto-fit,
+      repeat(auto-fit,
 
-                minmax(
-                    320px,
-                    1fr
-                )
-            );
+        minmax(320px,
+          1fr));
 
-    }
+  }
 
 }
 
 
 /* Tablet */
 
-@media(max-width:900px){
+@media(max-width:900px) {
 
-    #charts-grid,
-    .charts-grid{
+  #charts-grid,
+  .charts-grid {
 
-        grid-template-columns:
+    grid-template-columns:
 
-            repeat(
-                auto-fit,
+      repeat(auto-fit,
 
-                minmax(
-                    300px,
-                    1fr
-                )
-            );
+        minmax(300px,
+          1fr));
 
-    }
+  }
 
 }
 
 
 /* Mobile */
 
-@media(max-width:600px){
+@media(max-width:600px) {
 
-    #charts-grid,
-    .charts-grid{
+  #charts-grid,
+  .charts-grid {
 
-        grid-template-columns:1fr;
+    grid-template-columns: 1fr;
 
-    }
+  }
 
 }
+
 /* ── Chart card ──────────────────────────────────────────────────────────── */
 /*
  * Premium dashboard panel — Grafana / Superset aesthetic:
@@ -245,8 +233,8 @@ body {
  */
 .chart-card {
   background: var(--embed-card-bg);
-  min-height:320px;
-  padding:16px;
+  min-height: 320px;
+  padding: 16px;
 
   border: 1px solid var(--embed-border);
   /* Accent stripe at the top of every panel */
@@ -296,29 +284,34 @@ body {
  */
 .chart-container {
   position: relative;
-  min-height: 380px; /* taller floor — matches ChartCard height={420} */
+  min-height: 380px;
+  /* taller floor — matches ChartCard height={420} */
   overflow: hidden;
   border-radius: 6px;
 }
 
 /* ── Skeleton loader ─────────────────────────────────────────────────────── */
 .skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--embed-border) 25%,
-    transparent 50%,
-    var(--embed-border) 75%
-  );
+  background: linear-gradient(90deg,
+      var(--embed-border) 25%,
+      transparent 50%,
+      var(--embed-border) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 8px;
-  height: 380px; /* matches updated chart-container min-height */
+  height: 380px;
+  /* matches updated chart-container min-height */
   transition: background 0.25s ease;
 }
 
 @keyframes shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 /* ── Error state ─────────────────────────────────────────────────────────── */
@@ -425,14 +418,16 @@ body {
   font-size: 14px;
   color: var(--embed-text-muted);
   flex-shrink: 0;
-  padding-top: 16px; /* align with input, not label */
+  padding-top: 16px;
+  /* align with input, not label */
   transition: color 0.2s ease;
 }
 
 /* Reset button */
 .date-range-picker__reset {
   flex-shrink: 0;
-  padding-top: 16px; /* align with inputs */
+  padding-top: 16px;
+  /* align with inputs */
   background: none;
   border: none;
   cursor: pointer;
@@ -442,6 +437,7 @@ body {
   border-radius: 4px;
   transition: color 0.15s ease, transform 0.15s ease;
 }
+
 .date-range-picker__reset:hover {
   color: var(--embed-primary);
   transform: rotate(-30deg);
@@ -496,10 +492,10 @@ body {
   height: 56px;
   background: linear-gradient(
     90deg,
-    var(--embed-border) 25%,
-    transparent 50%,
-    var(--embed-border) 75%
-  );
+      var(--embed-border) 25%,
+      transparent 50%,
+      var(--embed-border) 75%
+      );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   pointer-events: none;
