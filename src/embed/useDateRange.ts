@@ -1,14 +1,3 @@
-/**
- * useDateRange
- *
- * Fetches the min / max date bounds for a single time-based chart from the
- * backend's date-range discovery endpoint.
- *
- * The hook fires once on mount (when `enabled` is true). It is deliberately
- * simple and fire-once — the EmbedApp is responsible for re-fetching data;
- * date bounds are stable for the lifetime of the embed session.
- */
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DateRangeResponse } from "./types";
 
@@ -24,7 +13,6 @@ interface UseDateRangeOptions {
   apiBase: string;
   tokenId: string;
   chartId: string;
-  /** Only fires the request when true (avoids fetching for non-time-based charts) */
   enabled: boolean;
   getAuthHeaders: () => Record<string, string>;
 }
