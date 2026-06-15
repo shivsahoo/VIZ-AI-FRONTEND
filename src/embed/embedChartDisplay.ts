@@ -65,7 +65,7 @@ export function buildEmbedChartDisplayConfig(
       yAxisHint: yAxis ?? null,
     });
 
-    // Guard: ensure we always have valid dataKeys
+
     const primaryKey = inferred.dataKeys?.primary;
     if (!primaryKey) {
       console.warn("[embedChartDisplay] inferChartDataConfig returned no primary key", { chartType, xAxis, yAxis });

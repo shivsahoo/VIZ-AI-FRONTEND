@@ -28,12 +28,7 @@ import type {
   TokenRefreshResponse,
 } from "./types";
 
-// ── Theme helpers ─────────────────────────────────────────────────────────────
 
-/**
- * Detect whether a hex/rgb/hsl color string represents a "dark" background
- * by estimating relative luminance.
- */
 function isColorDark(color: string): boolean {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
@@ -42,23 +37,11 @@ function isColorDark(color: string): boolean {
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, 1, 1);
   const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
-  // Perceived luminance (ITU-R BT.709)
   const lum = 0.2126 * (r / 255) + 0.7152 * (g / 255) + 0.0722 * (b / 255);
   return lum < 0.35;
 }
 
-/**
- * Apply theme and/or a custom background colour independently.
- *
- * Logic:
- *  - If `customBg` is provided → set --embed-bg and data-theme="custom";
- *    use luminance to add/remove .embed-bg-dark for text contrast.
- *  - The `.dark` class (for ECharts contrast) is driven by the explicit
- *    `theme` state when set, or falls back to luminance of `customBg` when
- *    no named theme has been provided.
- *  - When only a named theme is given (no customBg) → clear inline bg vars
- *    and set data-theme to "light" | "dark" as before.
- */
+
 function applyEmbedTheme(theme: EmbedTheme | null, customBg?: string) {
   const html = document.documentElement;
 
@@ -74,7 +57,6 @@ function applyEmbedTheme(theme: EmbedTheme | null, customBg?: string) {
       html.classList.remove("embed-bg-dark");
     }
 
-    // Prefer explicit theme for ECharts dark class; fall back to luminance
     if (theme === "dark" || (theme === null && bgIsDark)) {
       html.classList.add("dark");
     } else {
@@ -83,7 +65,6 @@ function applyEmbedTheme(theme: EmbedTheme | null, customBg?: string) {
     return;
   }
 
-  // No custom background — clear inline vars and apply named theme
   html.style.removeProperty("--embed-bg");
   html.style.removeProperty("--embed-card-bg");
   html.classList.remove("embed-bg-dark");
@@ -97,7 +78,7 @@ function applyEmbedTheme(theme: EmbedTheme | null, customBg?: string) {
   }
 }
 
-/** Detect system preference as a fallback when parent sends no theme. */
+
 function systemPrefersDark(): boolean {
   return typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-color-scheme: dark)").matches;
@@ -126,12 +107,6 @@ function fetchWithTimeout(
   ]);
 }
 
-// ── Height Broadcaster ────────────────────────────────────────────────────────
-// Height broadcasting is handled by useIframeHeightBroadcaster() which is
-// called at the top level of EmbedApp. The hook owns ResizeObserver,
-// MutationObserver, rAF coalescing, and deduplication internally.
-
-// ── Chart-level Error Boundary ────────────────────────────────────────────────
 
 interface ChartErrorBoundaryProps {
   chartTitle: string;
@@ -185,7 +160,6 @@ class ChartErrorBoundary extends Component<
   }
 }
 
-// ── EmbedChartCard — memoised per-chart render ────────────────────────────────
 
 interface EmbedChartCardProps {
   chart: EmbedChartState;
@@ -215,27 +189,21 @@ function EmbedChartCard({
     [chart.rows, chart.type, chart.xAxis, chart.yAxis],
   );
 
-  /**
-   * Detect whether a chart is likely time-based even when the DB flag is not set.
-   * Checks (in priority order):
-   *   1. meta.is_time_based flag from the backend
-   *   2. Whether the x_axis value in the first data row parses as a date / datetime
-   */
+  
   const isLikelyTimeBased = useMemo(() => {
     if (chart.meta.is_time_based) return true;
-    // Only sniff when we have rows and an x_axis column name
     const col = chart.xAxis;
     if (!col || !chart.rows || chart.rows.length === 0) return false;
     const sample = chart.rows[0][col];
     if (!sample) return false;
-    // Accept ISO date strings (YYYY-MM-DD…) or epoch-like numbers
+
     if (typeof sample === "string") {
       return /^\d{4}-\d{2}-\d{2}/.test(sample) || !isNaN(Date.parse(sample));
     }
     return false;
   }, [chart.meta.is_time_based, chart.xAxis, chart.rows]);
 
-  // Fetch date bounds for any chart that has an x_axis and appears time-based
+  
   const { minDate, maxDate, isLoading: rangeLoading } = useDateRange({
     apiBase,
     tokenId,
@@ -244,11 +212,8 @@ function EmbedChartCard({
     getAuthHeaders,
   });
 
-  // Show the picker only when the backend actually returned date bounds
-  // (handles the case where is_time_based is false but dates came back anyway)
   const hasRange = !!minDate && !!maxDate;
 
-  // Current picker selection (falls back to full range when no selection yet)
   const currentStart = chart.dateRange?.start ?? minDate ?? "";
   const currentEnd   = chart.dateRange?.end   ?? maxDate ?? "";
 
@@ -302,7 +267,7 @@ function EmbedChartCard({
   );
 }
 
-// ── EmbedApp ──────────────────────────────────────────────────────────────────
+
 
 interface EmbedAppProps {
   tokenId: string;
@@ -319,22 +284,13 @@ export function EmbedApp({
   charts: initialChartMetas,
   initialAccessToken,
 }: EmbedAppProps) {
-  // Height broadcasting — delegates to the dedicated hook (ResizeObserver +
-  // MutationObserver + rAF coalescing + deduplication).
+  
   useIframeHeightBroadcaster();
-
-  // Start with null = "auto" — we apply it after mount based on parent signal
-  // or system preference, avoiding a flash of the wrong theme.
-  // theme and customBg are fully independent: each postMessage type updates
-  // only its own slice of state.
   const [theme, setTheme] = useState<EmbedTheme | null>(null);
   const [customBg, setCustomBg] = useState<string | undefined>(undefined);
   const [dashboardTitle, setDashboardTitle] = useState(initialTitle);
   const [charts, setCharts] = useState<EmbedChartState[]>(() =>
     initialChartMetas.map((meta) => {
-      // Restore previously selected date range from localStorage (if any).
-      // `rows` are still null — the initial data fetch will use the persisted
-      // range so the chart loads with the user's last filter already applied.
       const persisted = readPersistedRange(tokenId, meta.id);
       return {
         meta,
@@ -346,7 +302,7 @@ export function EmbedApp({
         error: null,
         dateRange: persisted
           ? {
-              min: persisted.start, // bounds unknown until date-range endpoint responds
+              min: persisted.start, 
               max: persisted.end,
               start: persisted.start,
               end: persisted.end,
@@ -369,23 +325,12 @@ export function EmbedApp({
 
   const accessTokenRef = useRef<string | undefined>(initialAccessToken);
   const isRefreshingRef = useRef(false);
-
-  // ── Keep a ref to the latest chart metas to avoid stale closures ──────────
-  // This is the key fix: instead of putting chartMetas in useCallback deps
-  // (which causes cascading recreations), we keep a ref that's always current.
   const chartMetasRef = useRef<EmbedChartMeta[]>(initialChartMetas);
-
-  // Stable ref for handleChartDateChange — keeps the postMessage bridge's
-  // onMessage closure from going stale. The ref is set after handleChartDateChange
-  // is defined below; reads happen only when a message arrives (after mount).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleChartDateChangeRef = useRef<(id: string, s: string, e: string) => void>(
-    () => { /* populated after handleChartDateChange is defined */ },
+    () => {},
   );
 
   useEffect(() => {
-    // Apply whenever either theme or customBg changes.
-    // applyEmbedTheme handles the null-theme "stay transparent" case internally.
     applyEmbedTheme(theme, customBg);
   }, [theme, customBg]);
 
@@ -399,27 +344,20 @@ export function EmbedApp({
   useEffect(() => {
     console.log("[EMBED][STEP 9] Static assets loaded in embed context");
 
-    // ── postMessage bridge ────────────────────────────────────────────────
+    
     const onMessage = (event: MessageEvent) => {
       if (!event.data || typeof event.data !== "object") return;
       const { type, value } = event.data as { type: string; value?: string };
-
-      // Named theme: "light" | "dark" — only updates theme, never clears customBg
       if (type === "set_theme") {
         const next: EmbedTheme = value === "light" ? "light" : "dark";
         setTheme(next);
         console.log("[EMBED] Theme set to:", next);
       }
-
-      // Custom background colour — only updates customBg, never clears theme
       if (type === "set_background" && typeof value === "string" && value.trim()) {
         setCustomBg(value.trim());
         console.log("[EMBED] Custom background applied:", value.trim());
       }
 
-      // Date range filter pushed from the parent page.
-      // Applies to all time-based charts in the embed — does NOT affect the
-      // VizAI dashboard for authenticated users.
       if (type === "set_filters" && value && typeof value === "object") {
         const { start_date, end_date } = value as {
           start_date?: string;
@@ -427,7 +365,6 @@ export function EmbedApp({
         };
         if (start_date && end_date) {
           console.log("[EMBED] Parent date filter received:", start_date, "→", end_date);
-          // We read the current chart list via ref to avoid a stale closure
           const metas = chartMetasRef.current;
           metas
             .filter((m) => m.is_time_based)
@@ -439,17 +376,12 @@ export function EmbedApp({
     };
 
     window.addEventListener("message", onMessage);
-
-    // ── Notify parent ─────────────────────────────────────────────────────
-    // request_theme prompts the parent to reply with set_theme / set_background.
     window.parent.postMessage({ type: "request_theme" }, "*");
     console.log("[EMBED] Requested parent theme via postMessage");
-
-    // ── Standalone fallback (no parent frame) ─────────────────────────────
     const isEmbedded = window.self !== window.top;
     const fallbackTimer = window.setTimeout(() => {
       setTheme((prev) => {
-        if (prev !== null) return prev; // parent already responded
+        if (prev !== null) return prev; 
         if (isEmbedded) {
           console.log("[EMBED] No theme received from parent — staying transparent");
           return null;
@@ -466,9 +398,6 @@ export function EmbedApp({
     };
   }, []);
 
-  // Token helpers
-
-  /** Build Authorization headers using the embed session JWT */
   const getAuthHeaders = useCallback((): Record<string, string> => {
     const token = accessTokenRef.current;
     if (!token) {
@@ -480,9 +409,7 @@ export function EmbedApp({
     };
   }, []);
 
-  /**
-   * Refresh embed JWT (~25m). Verifies current JWT + rechecks share token server-side.
-   */
+ 
   const doRefresh = useCallback(async (): Promise<boolean> => {
     if (isRefreshingRef.current) return false;
     if (!accessTokenRef.current) return false;
@@ -519,7 +446,6 @@ export function EmbedApp({
     }
   }, [apiBase, tokenId]);
 
-  //  Data fetching
   const fetchChartData = useCallback(
     async (
       chartId: string,
@@ -540,7 +466,7 @@ export function EmbedApp({
         chartType?: string;
       }> => {
         try {
-          // Build URL with optional date range params
+       
           const baseUrl = `${apiBase}/api/v1/embed/${tokenId}/data/${chartId}`;
           const params = new URLSearchParams();
           if (startDate) params.set("start_date", startDate);
@@ -613,7 +539,7 @@ export function EmbedApp({
     [apiBase, tokenId, getAuthHeaders, doRefresh],
   );
 
-  // Dynamic chart discovery
+ 
 
   const fetchDashboardMeta = useCallback(async (): Promise<DashboardMetaResponse | null> => {
     const doFetch = async (isRetry: boolean): Promise<DashboardMetaResponse | null> => {
@@ -647,9 +573,7 @@ export function EmbedApp({
     return doFetch(false);
   }, [apiBase, tokenId, getAuthHeaders, doRefresh]);
 
-  // Chart loading
 
-  /** Load data for a specific subset of chart IDs */
   const loadChartsById = useCallback(
     async (chartIds: string[]) => {
       const currentCharts = chartsRef.current;
@@ -690,16 +614,12 @@ export function EmbedApp({
         }),
       );
 
-      // Height change is picked up automatically by useIframeHeightBroadcaster
+   
     },
     [fetchChartData],
   );
 
-  /**
-   * Handle date range change for a single time-based chart card.
-   * Fires a filtered API call and updates only that chart's rows.
-   * Does NOT affect the VizAI dashboard state.
-   */
+
   const handleChartDateChange = useCallback(
     async (chartId: string, start: string, end: string) => {
       // Mark that specific card as refetching
@@ -724,11 +644,6 @@ export function EmbedApp({
       setCharts((prev) =>
         prev.map((c) => {
           if (c.meta.id !== chartId) return c;
-
-          // Persist the new selection so it survives page refresh.
-          // When start/end equal the dataset's full min/max (i.e. the user
-          // clicked "Reset"), we wipe the stored entry instead of saving it
-          // so a future reload goes back to the default (unfiltered) view.
           const fullMin = c.dateRange?.min ?? start;
           const fullMax = c.dateRange?.max ?? end;
           if (start === fullMin && end === fullMax) {
@@ -756,14 +671,8 @@ export function EmbedApp({
     [fetchChartData, tokenId],
   );
 
-  /**
-   * Load all charts.
-   * CRITICAL FIX: reads current metas from ref (not stale closure) so
-   * this callback's identity never needs to change when metas update —
-   * eliminating the useEffect([loadAllCharts]) re-trigger loop.
-   */
+ 
   const loadAllCharts = useCallback(async () => {
-    // Read latest metas from ref to avoid stale-closure dependency
     const currentMetas = chartMetasRef.current;
     const currentCharts = chartsRef.current;
 
@@ -831,40 +740,23 @@ export function EmbedApp({
     console.log(
       `[EMBED][STEP 11] Dashboard fully rendered in embed — ${loadedCount} charts visible`,
     );
-    // Height change is picked up automatically by useIframeHeightBroadcaster
-    // CRITICAL: fetchChartData is the only real dep; chartMetas is read via ref
   }, [fetchChartData]);
 
-  /**
-   * Reconcile newly fetched chart metadata with existing state.
-   * Handles: new charts, removed charts, renamed charts,
-   * chart type changes, axis changes.
-   *
-   * CRITICAL FIX: Does NOT update chartMetasRef or call loadAllCharts directly
-   * to avoid cascade. Instead updates the ref and returns newly added IDs for
-   * the caller to load.
-   */
+  
   const reconcileCharts = useCallback(
     (newMetas: EmbedChartMeta[]) => {
-      // Always keep the ref current
+     
       const prevMetas = chartMetasRef.current;
       chartMetasRef.current = newMetas;
-
       const newIds = new Set(newMetas.map((m) => m.id));
       const existingIds = new Set(prevMetas.map((m) => m.id));
-
-      // Charts to add (newly discovered)
       const added = newMetas.filter((m) => !existingIds.has(m.id));
-      // Charts to remove (no longer in dashboard)
       const removed = new Set(
         prevMetas.filter((m) => !newIds.has(m.id)).map((m) => m.id),
       );
 
       setCharts((prev) => {
-        // Remove charts no longer in dashboard
         let updated = prev.filter((c) => !removed.has(c.meta.id));
-
-        // Update metadata for existing charts
         updated = updated.map((c) => {
           const freshMeta = newMetas.find((m) => m.id === c.meta.id);
           if (!freshMeta) return c;
@@ -886,7 +778,6 @@ export function EmbedApp({
           return c;
         });
 
-        // Append newly discovered charts
         const newEntries: EmbedChartState[] = added.map((meta) => {
           const persisted = readPersistedRange(tokenId, meta.id);
           return {
@@ -924,25 +815,21 @@ export function EmbedApp({
         console.log(
           `[EMBED] Dynamic chart removal — ${removed.size} chart(s) removed`,
         );
-        // Height change is picked up automatically by useIframeHeightBroadcaster
       }
     },
-    // CRITICAL FIX: no chartMetas state dep — reads via ref instead
+
     [loadChartsById],
   );
 
-  // ── Initial data load — fires exactly once on mount ───────────────────────
-  // CRITICAL FIX: use a stable ref-based trigger instead of [loadAllCharts]
-  // to prevent the effect from re-firing every time loadAllCharts is recreated.
+
   const initialLoadDoneRef = useRef(false);
   useEffect(() => {
     if (initialLoadDoneRef.current) return;
     initialLoadDoneRef.current = true;
     void loadAllCharts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally empty — runs once on mount only
+  }, []); 
 
-  // Proactive JWT refresh at 25 minutes
+
   useEffect(() => {
     const tick = () => {
       if (document.visibilityState === "visible") {
@@ -957,21 +844,13 @@ export function EmbedApp({
     };
   }, [doRefresh]);
 
-  // Refresh cycle (data + dynamic discovery)
-  // CRITICAL FIX: use stable refs for loadAllCharts and reconcileCharts
-  // so the effect only re-runs when fetchDashboardMeta changes (apiBase/tokenId).
+  
   const loadAllChartsRef = useRef(loadAllCharts);
   const reconcileChartsRef = useRef(reconcileCharts);
   useEffect(() => { loadAllChartsRef.current = loadAllCharts; }, [loadAllCharts]);
   useEffect(() => { reconcileChartsRef.current = reconcileCharts; }, [reconcileCharts]);
-  // Keep handleChartDateChangeRef (declared near the top of the component) current
   useEffect(() => { handleChartDateChangeRef.current = handleChartDateChange; }, [handleChartDateChange]);
 
-  // ── Persisted date-range restore ──────────────────────────────────────────
-  // After mount, re-fetch with the stored range for any chart that has one.
-  // Placed here — AFTER the handleChartDateChangeRef sync effect — so the
-  // function referenced in the closure is the real, fully-defined one and NOT
-  // the empty placeholder initialised with useRef(()=>{}).
   const persistedInitDoneRef = useRef(false);
   useEffect(() => {
     if (persistedInitDoneRef.current) return;
@@ -986,12 +865,10 @@ export function EmbedApp({
         "→",
         persisted.end,
       );
-      // `handleChartDateChange` is captured directly so we're guaranteed to
-      // call the real function (not the stub held by the ref before it syncs).
       void handleChartDateChange(meta.id, persisted.start, persisted.end);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleChartDateChange]); // re-runs only when the fn identity changes (effectively once)
+    
+  }, [handleChartDateChange]); 
 
   useEffect(() => {
     const startRefreshCycle = () => {
@@ -1004,7 +881,7 @@ export function EmbedApp({
           `[EMBED][STEP 14] Data refresh cycle — tab visible: ${visible}, next refresh in ${REFRESH_INTERVAL_MS / 1000}s`,
         );
         if (visible) {
-          // Step 1: Discover chart changes
+        
           const meta = await fetchDashboardMeta();
           if (meta && isMountedRef.current) {
             if (meta.dashboard_title !== dashboardTitle) {
@@ -1012,7 +889,7 @@ export function EmbedApp({
             }
             reconcileChartsRef.current(meta.charts);
           }
-          // Step 2: Reload data for all current charts
+         
           void loadAllChartsRef.current();
         }
       }, REFRESH_INTERVAL_MS);
@@ -1040,11 +917,10 @@ export function EmbedApp({
       }
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-    // Only re-run when the API connection changes (apiBase/tokenId change via fetchDashboardMeta)
-    // dashboardTitle is read from current state inside the callback so no dep needed
+
   }, [fetchDashboardMeta]);
 
-  // Render
+
 
   return (
     <>
