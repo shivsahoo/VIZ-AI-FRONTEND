@@ -2265,6 +2265,48 @@ export const sendOntologyEnrichmentChat = async (
   }
 };
 
+export interface PbitUploadResponse {
+  status: string;
+  imported_metrics: number;
+  pending_metrics: number;
+  duplicate_metrics: number;
+}
+
+export const uploadPbitFile = async (
+  connectionId: string,
+  file: File
+): Promise<ApiResponse<PbitUploadResponse>> => {
+  try {
+    const token = localStorage.getItem("vizai_access_token");
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/backend/connections/${connectionId}/pbit-upload`,
+      {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "include",
+        body: formData,
+      }
+    );
+    if (!response.ok) {
+      let message = `HTTP error! status: ${response.status}`;
+      try {
+        const err = await response.json();
+        message = err.detail || err.message || message;
+      } catch {}
+      throw new Error(message);
+    }
+    const data: PbitUploadResponse = await response.json();
+    return { success: true, data };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "PBIT_UPLOAD_FAILED", message: error.message || "Failed to upload .pbit file" },
+    };
+  }
+};
+
 // ============================================================================
 // AI / INSIGHTS
 // ============================================================================
