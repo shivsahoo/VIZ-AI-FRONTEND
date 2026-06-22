@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowLeft, Download, Plus, Edit2, X, Pin, Sparkles, Loader2, Calendar as CalendarIcon, Link2, Globe } from "lucide-react";
+import { ArrowLeft, Download, Plus, X, Pin, Sparkles, Loader2, Calendar as CalendarIcon, Globe, Telescope, Link2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -21,9 +21,13 @@ import {
 import { toast } from "sonner";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { getDashboardCharts, getChartData, deleteChart, type ChartData } from "../services/api";
+import { getDashboardCharts, getChartData, deleteChart, addChartToDashboard, getCurrentUser, generateDashboardKpiQueries, executeKpiQuery, type ChartData, type KpiQueryDescriptor } from "../services/api";
 import { ShareLinkModal } from "../components/features/dashboards/ShareLinkModal";
 import { AllowedDomainsSection } from "../components/features/dashboards/AllowedDomainsSection";
+import { ProbeModeDialog } from "../components/features/charts/ProbeModeDialog";
+import { VizAIWebSocket, type ChartSpec } from "../services/websocket";
+import { Skeleton } from "../components/ui/skeleton";
+import { KpiInfographicsRow } from "../components/features/dashboards/KpiInfographicsRow";
 
 // Custom styles for date picker to hide default clear button
 if (typeof document !== 'undefined') {
@@ -47,6 +51,14 @@ if (typeof document !== 'undefined') {
   }
 }
 
+interface AutopilotConfig {
+  dashboardId: string;
+  kpiGoals: string;
+  connectionId: string;
+  dbSchema: string;
+  dbType: string;
+}
+
 interface DashboardDetailViewProps {
   dashboardId: string;
   dashboardName: string;
@@ -56,6 +68,14 @@ interface DashboardDetailViewProps {
   onOpenAIAssistant?: () => void;
   onEditChart?: (chart: { name: string; type: ChartType; description?: string }) => void;
   refreshTrigger?: number;
+  /** Present when this dashboard was just created via Autopilot mode */
+  autopilotConfig?: AutopilotConfig;
+  /** Called once autopilot chart generation has been initiated, so parent can clear the config */
+  onAutopilotConsumed?: () => void;
+  /** Whether this is an Autopilot Dashboard (drives KPI infographic display) */
+  isAutopilot?: boolean;
+  /** Previously saved KPI query descriptors (if already generated) */
+  savedKpiQueries?: KpiQueryDescriptor[] | null;
 }
 
 interface ChartCardData {
@@ -98,7 +118,11 @@ export function DashboardDetailView({
   onDelete: _onDelete,
   onOpenAIAssistant,
   onEditChart,
-  refreshTrigger
+  refreshTrigger,
+  autopilotConfig,
+  onAutopilotConsumed,
+  isAutopilot = false,
+  savedKpiQueries,
 }: DashboardDetailViewProps) {
   const { isPinned, togglePin } = usePinnedCharts();
   const [chartToRemove, setChartToRemove] = useState<ChartCardData | null>(null);
@@ -112,6 +136,25 @@ export function DashboardDetailView({
   const [shareLinkModalOpen, setShareLinkModalOpen] = useState(false);
   const [allowedDomainsCount, setAllowedDomainsCount] = useState(0);
   const lastRefreshTriggerRef = useRef<number>(0);
+
+  // Autopilot Dashboard generation state
+  const [isGeneratingAutopilot, setIsGeneratingAutopilot] = useState(false);
+  const [autopilotError, setAutopilotError] = useState<string | null>(null);
+  const [autopilotSkeletonCount, setAutopilotSkeletonCount] = useState(0);
+  const [autopilotConnectionInfo, setAutopilotConnectionInfo] = useState<AutopilotConfig | null>(null);
+  const autopilotWsRef = useRef<VizAIWebSocket | null>(null);
+  const autopilotConsumedRef = useRef(false);
+  const isGeneratingAutopilotRef = useRef(false);
+
+  // KPI Infographics state (Autopilot Dashboards only)
+  const [kpiDescriptors, setKpiDescriptors] = useState<KpiQueryDescriptor[]>(savedKpiQueries ?? []);
+  const [kpiValues, setKpiValues] = useState<Record<string, number | null>>({});
+  const [kpiErrors, setKpiErrors] = useState<Record<string, boolean>>({});
+  const [kpiLoading, setKpiLoading] = useState(false);
+  const [kpiGenerationError, setKpiGenerationError] = useState<string | null>(null);
+
+  // Probe Mode state
+  const [probeChart, setProbeChart] = useState<ChartCardData | null>(null);
 
   // Helper to format date as YYYY-MM-DD for API calls
   const formatDateForAPI = (date: Date): string => {
@@ -271,6 +314,245 @@ export function DashboardDetailView({
       return () => clearTimeout(timeoutId);
     }
   }, [refreshTrigger, fetchDashboardCharts]);
+
+  // Execute stored KPI queries and populate kpiValues
+  const runKpiQueries = useCallback(async (descriptors: KpiQueryDescriptor[]) => {
+    if (!descriptors || descriptors.length === 0) return;
+    // Reset values so cards show loading skeletons
+    setKpiValues({});
+    setKpiErrors({});
+    // Execute all queries in parallel
+    await Promise.allSettled(
+      descriptors.map(async (kpi) => {
+        if (!kpi.connection_id) {
+          setKpiErrors((prev) => ({ ...prev, [kpi.label]: true }));
+          return;
+        }
+        try {
+          const value = await executeKpiQuery(kpi.connection_id, kpi.query);
+          setKpiValues((prev) => ({ ...prev, [kpi.label]: value }));
+        } catch {
+          setKpiErrors((prev) => ({ ...prev, [kpi.label]: true }));
+        }
+      })
+    );
+  }, []);
+
+  // KPI Infographics — load for Autopilot Dashboards
+  useEffect(() => {
+    if (!isAutopilot) return;
+
+    // If descriptors are already in state (from savedKpiQueries prop), just run them
+    if (kpiDescriptors.length > 0) {
+      runKpiQueries(kpiDescriptors);
+      return;
+    }
+
+    // We need the autopilotConfig to know the connection / schema — it's only available
+    // immediately after dashboard creation. Without it we cannot generate KPIs on a
+    // cold reload; we wait for the autopilotConfig to arrive.
+    if (!autopilotConfig) return;
+
+    const generateAndRun = async () => {
+      setKpiLoading(true);
+      setKpiGenerationError(null);
+      try {
+        const resp = await generateDashboardKpiQueries(dashboardId, {
+          connection_id: autopilotConfig.connectionId,
+          db_schema: autopilotConfig.dbSchema,
+          db_type: autopilotConfig.dbType,
+          num_kpis: 5,
+        });
+        if (resp.success && resp.data) {
+          const descriptors = resp.data.kpi_queries;
+          setKpiDescriptors(descriptors);
+          await runKpiQueries(descriptors);
+        } else {
+          setKpiGenerationError(resp.error?.message ?? "Failed to generate KPI metrics");
+        }
+      } catch (err: any) {
+        setKpiGenerationError(err.message ?? "Failed to generate KPI metrics");
+      } finally {
+        setKpiLoading(false);
+      }
+    };
+
+    generateAndRun();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAutopilot, dashboardId]);
+
+  // Autopilot Dashboard — trigger chart generation via WebSocket on mount
+  useEffect(() => {
+    if (!autopilotConfig || autopilotConsumedRef.current) return;
+    if (autopilotConfig.dashboardId !== dashboardId) return;
+
+    autopilotConsumedRef.current = true;
+    onAutopilotConsumed?.();
+
+    const NUM_CHARTS = 6;
+    setIsGeneratingAutopilot(true);
+    isGeneratingAutopilotRef.current = true;
+    setAutopilotSkeletonCount(NUM_CHARTS);
+    setAutopilotConnectionInfo(autopilotConfig);
+
+    const startGeneration = async () => {
+      try {
+        // Get current user for WebSocket auth
+        const userResp = await getCurrentUser();
+        const userId = userResp.success && userResp.data?.id ? String(userResp.data.id) : "guest";
+
+        const ws = new VizAIWebSocket(userId);
+        autopilotWsRef.current = ws;
+
+        await ws.connect();
+
+        let completedChartCount = 0;
+
+        ws.on("chart_creation", async (response) => {
+          if (response.status === "error") {
+            setAutopilotError(response.error || "Failed to generate charts. Please try again.");
+            isGeneratingAutopilotRef.current = false;
+            setIsGeneratingAutopilot(false);
+            setAutopilotSkeletonCount(0);
+            ws.disconnect();
+            return;
+          }
+
+          // The LLM auto-starter path returns status="collecting" (not "completed") with
+          // chart_specs embedded in state. Accept both statuses — only act when specs exist.
+          const hasChartSpecs =
+            Array.isArray(response.state?.chart_specs) &&
+            (response.state!.chart_specs as ChartSpec[]).length > 0;
+
+          if (
+            (response.status === "completed" || response.status === "collecting") &&
+            hasChartSpecs
+          ) {
+            const chartSpecs: ChartSpec[] = response.state!.chart_specs as ChartSpec[];
+
+            for (const spec of chartSpecs) {
+              if (!spec.title || !spec.query) continue;
+
+              try {
+                // Save chart to dashboard
+                const saveResp = await addChartToDashboard({
+                  title: spec.title,
+                  query: spec.query,
+                  chart_type: spec.chart_type as any,
+                  type: spec.chart_type as any,
+                  dashboard_id: dashboardId,
+                  data_connection_id: autopilotConfig.connectionId,
+                  report: spec.report || "",
+                  relevance: String(spec.relevance ?? 0.8),
+                  is_time_based: spec.is_time_based ?? false,
+                  x_axis: spec.x_axis ?? null,
+                  y_axis: spec.y_axis ?? null,
+                });
+
+                if (!saveResp.success || !saveResp.data?.chart_id) continue;
+
+                const chartId = saveResp.data.chart_id;
+                completedChartCount++;
+
+                // Build a placeholder card — data loads asynchronously below
+                const newCard: ChartCardData = {
+                  id: chartId,
+                  title: spec.title,
+                  description: spec.report || "",
+                  type: spec.chart_type as ChartType,
+                  query: spec.query,
+                  databaseConnectionId: autopilotConfig.connectionId,
+                  created_at: new Date().toISOString(),
+                  isLoadingData: true,
+                  xAxis: spec.x_axis ?? null,
+                  yAxis: spec.y_axis ?? null,
+                  is_time_based: spec.is_time_based ?? false,
+                };
+
+                // Replace one skeleton with the real card
+                setCharts((prev) => [...prev, newCard]);
+                setAutopilotSkeletonCount((n) => Math.max(0, n - 1));
+
+                // Async load chart data
+                getChartData(
+                  chartId,
+                  autopilotConfig.connectionId,
+                  spec.query,
+                  undefined,
+                  undefined,
+                  false,
+                  { xAxis: spec.x_axis ?? null, yAxis: spec.y_axis ?? null }
+                ).then((dataResp) => {
+                  if (dataResp.success && dataResp.data) {
+                    setCharts((prev) =>
+                      prev.map((c) =>
+                        c.id === chartId ? { ...c, chartData: dataResp.data, isLoadingData: false } : c
+                      )
+                    );
+                  } else {
+                    setCharts((prev) =>
+                      prev.map((c) => (c.id === chartId ? { ...c, isLoadingData: false } : c))
+                    );
+                  }
+                }).catch(() => {
+                  setCharts((prev) =>
+                    prev.map((c) => (c.id === chartId ? { ...c, isLoadingData: false } : c))
+                  );
+                });
+              } catch {
+                // individual chart save failed — skip it, others continue
+              }
+            }
+
+            // Done processing this batch of specs
+            isGeneratingAutopilotRef.current = false;
+            setIsGeneratingAutopilot(false);
+            setAutopilotSkeletonCount(0);
+            if (completedChartCount > 0) {
+              toast.success(`Generated ${completedChartCount} chart${completedChartCount !== 1 ? "s" : ""} for your dashboard!`);
+            } else {
+              setAutopilotError("Charts were generated but could not be saved. Please try again.");
+            }
+            ws.disconnect();
+          }
+        });
+
+        ws.chartCreation({
+          nlq_query: "",
+          data_connection_id: autopilotConfig.connectionId,
+          db_schema: autopilotConfig.dbSchema,
+          db_type: autopilotConfig.dbType as any,
+          role: "Analyst",
+          kpi_goals: autopilotConfig.kpiGoals,
+          num_charts: NUM_CHARTS,
+        });
+
+        // Safety timeout — if no response in 3 minutes, abort
+        setTimeout(() => {
+          if (isGeneratingAutopilotRef.current) {
+            isGeneratingAutopilotRef.current = false;
+            setIsGeneratingAutopilot(false);
+            setAutopilotSkeletonCount(0);
+            ws.disconnect();
+          }
+        }, 180_000);
+      } catch (err: any) {
+        setAutopilotError(err.message || "Failed to connect for chart generation.");
+        isGeneratingAutopilotRef.current = false;
+        setIsGeneratingAutopilot(false);
+        setAutopilotSkeletonCount(0);
+      }
+    };
+
+    startGeneration();
+
+    return () => {
+      if (autopilotWsRef.current) {
+        autopilotWsRef.current.disconnect();
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autopilotConfig?.dashboardId]);
 
   const handleEditChart = (chart: ChartCardData) => {
     // Pass chart info to parent
@@ -555,67 +837,96 @@ export function DashboardDetailView({
           </div>
         </div>
 
-        {/* Quick Stats - Show chart count */}
-        {(() => {
-          // Chart type configuration
-          const chartTypeConfig: Record<string, { label: string; description: string }> = {
-            line: { label: 'Line Charts', description: 'time-series data' },
-            bar: { label: 'Bar Charts', description: 'comparison data' },
-            pie: { label: 'Pie Charts', description: 'proportion data' },
-            area: { label: 'Area Charts', description: 'cumulative data' },
-            donut: { label: 'Donut Charts', description: 'proportion data' },
-            scatter: { label: 'Scatter Charts', description: 'correlation data' },
-            heatmap: { label: 'Heatmaps', description: 'density data' },
-            funnel: { label: 'Funnel Charts', description: 'conversion data' },
-            map: { label: 'Map Charts', description: 'geospatial data' },
-            stackedlinechart: { label: 'Stacked Line Charts', description: 'cumulative time-series data' },
-            stackedhorizontalbar: { label: 'Stacked Horizontal Bars', description: 'comparison data' },
-            clustering: { label: 'Clustering Charts', description: 'grouped data' },
-            multiyaxischart: { label: 'Multi-Axis Charts', description: 'multi-metric data' },
-          };
+        {/* Autopilot generation banner */}
+        {isGeneratingAutopilot && (
+          <div className="mb-6 flex items-center gap-3 px-4 py-3 rounded-xl border border-primary/30 bg-primary/5">
+            <Loader2 className="w-4 h-4 animate-spin text-primary flex-shrink-0" />
+            <p className="text-sm text-primary font-medium">
+              Autopilot is generating your charts based on your KPI goals...
+            </p>
+          </div>
+        )}
+        {autopilotError && (
+          <div className="mb-6 flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-destructive/30 bg-destructive/5">
+            <p className="text-sm text-destructive">{autopilotError}</p>
+            <button
+              className="text-xs font-medium text-destructive underline underline-offset-2 hover:no-underline"
+              onClick={() => {
+                setAutopilotError(null);
+                autopilotConsumedRef.current = false;
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
-          // Count charts by type
-          const chartCounts = charts.reduce((acc, chart) => {
-            acc[chart.type] = (acc[chart.type] || 0) + 1;
-            return acc;
-          }, {} as Record<string, number>);
+        {/* KPI Infographics (Autopilot Dashboards) or Chart Type Count Cards (Manual Dashboards) */}
+        {isAutopilot ? (
+          <KpiInfographicsRow
+            descriptors={kpiDescriptors}
+            values={kpiValues}
+            errors={kpiErrors}
+            isLoading={kpiLoading}
+            generationError={kpiGenerationError}
+            onRefresh={() => runKpiQueries(kpiDescriptors)}
+          />
+        ) : (
+          (() => {
+            const chartTypeConfig: Record<string, { label: string; description: string }> = {
+              line: { label: 'Line Charts', description: 'time-series data' },
+              bar: { label: 'Bar Charts', description: 'comparison data' },
+              pie: { label: 'Pie Charts', description: 'proportion data' },
+              area: { label: 'Area Charts', description: 'cumulative data' },
+              donut: { label: 'Donut Charts', description: 'proportion data' },
+              scatter: { label: 'Scatter Charts', description: 'correlation data' },
+              heatmap: { label: 'Heatmaps', description: 'density data' },
+              funnel: { label: 'Funnel Charts', description: 'conversion data' },
+              map: { label: 'Map Charts', description: 'geospatial data' },
+              stackedlinechart: { label: 'Stacked Line Charts', description: 'cumulative time-series data' },
+              stackedhorizontalbar: { label: 'Stacked Horizontal Bars', description: 'comparison data' },
+              clustering: { label: 'Clustering Charts', description: 'grouped data' },
+              multiyaxischart: { label: 'Multi-Axis Charts', description: 'multi-metric data' },
+            };
 
-          // Get chart types that have at least one chart
-          const availableChartTypes = Object.keys(chartCounts)
-            .filter(type => chartCounts[type] > 0)
-            .sort(); // Sort for consistent ordering
+            const chartCounts = charts.reduce((acc, chart) => {
+              acc[chart.type] = (acc[chart.type] || 0) + 1;
+              return acc;
+            }, {} as Record<string, number>);
 
-          return (
-            <div className="flex flex-wrap gap-6 mb-8">
-              {/* Total Charts Card - Always shown */}
-              <Card className="p-6 border border-border flex-1 min-w-[200px]">
-                <p className="text-sm text-muted-foreground mb-2">Total Charts</p>
-                <p className="text-3xl text-foreground mb-1">{charts.length}</p>
-                <div className="flex items-center gap-1 text-xs">
-                  <span className="text-muted-foreground">in this dashboard</span>
-                </div>
-              </Card>
+            const availableChartTypes = Object.keys(chartCounts)
+              .filter(type => chartCounts[type] > 0)
+              .sort();
 
-              {/* Dynamic Chart Type Cards - Only show types that have charts */}
-              {availableChartTypes.map((chartType) => {
-                const config = chartTypeConfig[chartType] || {
-                  label: `${chartType.charAt(0).toUpperCase() + chartType.slice(1)} Charts`,
-                  description: 'visualization data'
-                };
-                const count = chartCounts[chartType];
-                return (
-                  <Card key={chartType} className="p-6 border border-border flex-1 min-w-[200px]">
-                    <p className="text-sm text-muted-foreground mb-2">{config.label}</p>
-                    <p className="text-3xl text-foreground mb-1">{count}</p>
-                    <div className="flex items-center gap-1 text-xs">
-                      <span className="text-muted-foreground">{config.description}</span>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          );
-        })()}
+            return (
+              <div className="flex flex-wrap gap-6 mb-8">
+                <Card className="p-6 border border-border flex-1 min-w-[200px]">
+                  <p className="text-sm text-muted-foreground mb-2">Total Charts</p>
+                  <p className="text-3xl text-foreground mb-1">{charts.length}</p>
+                  <div className="flex items-center gap-1 text-xs">
+                    <span className="text-muted-foreground">in this dashboard</span>
+                  </div>
+                </Card>
+                {availableChartTypes.map((chartType) => {
+                  const config = chartTypeConfig[chartType] || {
+                    label: `${chartType.charAt(0).toUpperCase() + chartType.slice(1)} Charts`,
+                    description: 'visualization data'
+                  };
+                  const count = chartCounts[chartType];
+                  return (
+                    <Card key={chartType} className="p-6 border border-border flex-1 min-w-[200px]">
+                      <p className="text-sm text-muted-foreground mb-2">{config.label}</p>
+                      <p className="text-3xl text-foreground mb-1">{count}</p>
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="text-muted-foreground">{config.description}</span>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            );
+          })()
+        )}
 
         {/* Charts Grid */}
         {isLoadingCharts ? (
@@ -623,7 +934,7 @@ export function DashboardDetailView({
             <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
             <span className="ml-3 text-muted-foreground">Loading dashboard charts...</span>
           </div>
-        ) : charts.length === 0 ? (
+        ) : charts.length === 0 && autopilotSkeletonCount === 0 ? (
           <Card className="p-12 border-2 border-dashed border-border">
             <div className="flex flex-col items-center justify-center text-center">
               <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center mb-5">
@@ -649,15 +960,32 @@ export function DashboardDetailView({
           </Card>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Real chart cards */}
             {charts.map((chart) => {
               const chartConfig = getChartDisplayConfig(chart);
               const numericId = parseInt(chart.id.replace(/-/g, '').substring(0, 8), 16) || 0;
               const isChartPinned = isPinned(numericId);
+              const hasProbeSupport = !!(
+                autopilotConnectionInfo?.dbSchema ||
+                autopilotConnectionInfo?.dbType
+              );
 
               return (
                 <Card key={chart.id} className="p-6 border border-border relative group">
                   {/* Chart Actions */}
                   <div className="absolute top-4 right-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                    {/* Probe Mode */}
+                    {hasProbeSupport && (
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8 border-border hover:bg-primary/10 hover:text-primary hover:border-primary/40"
+                        onClick={() => setProbeChart(chart)}
+                        title="Probe Mode — Refine this chart with AI"
+                      >
+                        <Telescope className="w-4 h-4" />
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="icon"
@@ -684,15 +1012,6 @@ export function DashboardDetailView({
                         <Download className="w-4 h-4" />
                       )}
                     </Button>
-                    {/* <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8 border-border hover:bg-muted"
-                      onClick={() => handleEditChart(chart)}
-                      title="Edit Chart"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </Button> */}
                     <Button
                       variant="outline"
                       size="icon"
@@ -746,8 +1065,69 @@ export function DashboardDetailView({
                 </Card>
               );
             })}
+
+            {/* Skeleton placeholders while Autopilot is generating */}
+            {Array.from({ length: autopilotSkeletonCount }).map((_, i) => (
+              <Card key={`skeleton-${i}`} className="p-6 border border-border">
+                <div className="flex items-center gap-2 mb-4">
+                  <Skeleton className="h-5 w-5 rounded" />
+                  <Skeleton className="h-5 w-48" />
+                </div>
+                <Skeleton className="h-3 w-64 mb-6" />
+                <Skeleton className="h-[280px] w-full rounded-lg" />
+              </Card>
+            ))}
           </div>
         )}
+
+        {/* Probe Mode Dialog */}
+        <ProbeModeDialog
+          isOpen={!!probeChart}
+          onClose={() => setProbeChart(null)}
+          chart={
+            probeChart
+              ? {
+                  name: probeChart.title,
+                  type: probeChart.type,
+                  query: probeChart.query,
+                  dataConnectionId: probeChart.databaseConnectionId,
+                  databaseId: probeChart.databaseConnectionId,
+                  db_schema: autopilotConnectionInfo?.dbSchema || "",
+                  db_type: autopilotConnectionInfo?.dbType || "postgres",
+                }
+              : null
+          }
+          dashboards={[{ id: dashboardId, name: dashboardName }]}
+          projectId={_projectId}
+          onApplyChanges={(modifiedSql, modifiedSpec) => {
+            if (!probeChart) return;
+            // Replace the chart in the dashboard view with the refined version
+            setCharts((prev) =>
+              prev.map((c) => {
+                if (c.id !== probeChart.id) return c;
+                return {
+                  ...c,
+                  query: modifiedSql,
+                  type: (modifiedSpec?.chart_type as ChartType) || c.type,
+                  xAxis: modifiedSpec?.x_axis ?? c.xAxis,
+                  yAxis: modifiedSpec?.y_axis ?? c.yAxis,
+                  isLoadingData: true,
+                };
+              })
+            );
+            // Reload chart data for the updated query
+            const updatedChart = {
+              ...probeChart,
+              query: modifiedSql,
+              type: (modifiedSpec?.chart_type as ChartType) || probeChart.type,
+              xAxis: modifiedSpec?.x_axis ?? probeChart.xAxis,
+              yAxis: modifiedSpec?.y_axis ?? probeChart.yAxis,
+            };
+            fetchChartData(updatedChart);
+            setProbeChart(null);
+            toast.success("Chart updated with Probe Mode changes");
+          }}
+        />
 
         {/* Remove Chart Confirmation Dialog */}
         <AlertDialog open={!!chartToRemove} onOpenChange={() => setChartToRemove(null)}>

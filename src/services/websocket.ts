@@ -422,6 +422,10 @@ export class VizAIWebSocket {
     user_response?: string;
     existing_state?: Record<string, any>;
     continue_workflow?: boolean;
+    /** Autopilot Dashboard — free-text KPI/metric goals to guide chart generation */
+    kpi_goals?: string;
+    /** Autopilot Dashboard — number of charts to generate (default 3; autopilot uses 6) */
+    num_charts?: number;
   }): void {
     // Convert min_max_dates array to format expected by backend
     const formattedPayload: any = { ...payload };

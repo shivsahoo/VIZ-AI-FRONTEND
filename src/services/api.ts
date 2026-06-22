@@ -766,6 +766,8 @@ export interface Dashboard {
   chartCount: number;
   layout: 'grid' | 'list';
   isPublic: boolean;
+  isAutopilot?: boolean;
+  kpiQueries?: KpiQueryDescriptor[] | null;
 }
 
 /**
@@ -815,6 +817,8 @@ export const getDashboards = async (projectId: string): Promise<ApiResponse<Dash
       project_id: string;
       created_by: string;
       is_favorite?: boolean;
+      is_autopilot?: boolean;
+      kpi_queries?: KpiQueryDescriptor[] | null;
     }> | {
       message: string;
       dashboards: Array<{
@@ -824,6 +828,8 @@ export const getDashboards = async (projectId: string): Promise<ApiResponse<Dash
         project_id: string;
         created_by: string;
         is_favorite?: boolean;
+        is_autopilot?: boolean;
+        kpi_queries?: KpiQueryDescriptor[] | null;
       }>;
     }>(`/api/v1/backend/projects/${projectId}/users/dashboard`);
 
@@ -835,6 +841,8 @@ export const getDashboards = async (projectId: string): Promise<ApiResponse<Dash
       project_id: string;
       created_by: string;
       is_favorite?: boolean;
+      is_autopilot?: boolean;
+      kpi_queries?: KpiQueryDescriptor[] | null;
     }> = Array.isArray(response)
         ? response
         : (response as any).dashboards || [];
@@ -851,6 +859,8 @@ export const getDashboards = async (projectId: string): Promise<ApiResponse<Dash
         chartCount: 0, // Will need to fetch separately
         layout: 'grid' as const,
         isPublic: false,
+        isAutopilot: d.is_autopilot ?? false,
+        kpiQueries: d.kpi_queries ?? null,
       })),
     };
   } catch (error: any) {
@@ -911,10 +921,102 @@ export const getDashboardCharts = async (dashboardId: string): Promise<ApiRespon
   }
 };
 
+export interface KpiQueryDescriptor {
+  label: string;
+  query: string;
+  format: 'currency' | 'percentage' | 'number' | 'decimal';
+  subtitle: string;
+  icon: string;
+  connection_id: string | null;
+}
+
+/**
+ * Execute a raw SQL query against a connection and return the first cell value.
+ * Used for KPI infographic scalar queries that return one row and one column.
+ */
+export const executeKpiQuery = async (
+  connectionId: string,
+  query: string
+): Promise<number | null> => {
+  try {
+    const response = await apiRequest<{
+      data?: any[];
+      result?: any[];
+      row_count?: number;
+    }>(`/api/v1/backend/excecute-query/${connectionId}/`, {
+      method: 'POST',
+      body: JSON.stringify({ query, response_format: 'tabular' }),
+    });
+
+    const rows = Array.isArray(response.result)
+      ? response.result
+      : Array.isArray(response.data)
+        ? response.data
+        : [];
+
+    if (rows.length === 0) return null;
+    const firstRow = rows[0];
+    // The KPI query must return a column named 'value'; fall back to first column
+    const val = firstRow['value'] ?? Object.values(firstRow)[0];
+    return val !== null && val !== undefined ? Number(val) : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Generate (or return cached) KPI infographic queries for an Autopilot Dashboard.
+ * On first call the LLM service analyses the schema to produce aggregation SQL.
+ * Subsequent calls return the stored list without hitting the LLM unless force=true.
+ */
+export const generateDashboardKpiQueries = async (
+  dashboardId: string,
+  data: {
+    connection_id: string;
+    db_schema: any;
+    db_type: string;
+    num_kpis?: number;
+    force?: boolean;
+  }
+): Promise<ApiResponse<{ kpi_queries: KpiQueryDescriptor[]; generated: boolean }>> => {
+  try {
+    const response = await apiRequest<{ kpi_queries: KpiQueryDescriptor[]; generated: boolean }>(
+      `/api/v1/backend/dashboards/${dashboardId}/generate-kpi-queries`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          connection_id: data.connection_id,
+          db_schema: data.db_schema,
+          db_type: data.db_type,
+          num_kpis: data.num_kpis ?? 5,
+          force: data.force ?? false,
+        }),
+      }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'GENERATE_KPI_QUERIES_FAILED',
+        message: error.message || 'Failed to generate KPI queries',
+      },
+    };
+  }
+};
+
 /**
  * Create new dashboard
  */
-export const createDashboard = async (projectId: string, data: { name: string; description: string }): Promise<ApiResponse<Dashboard>> => {
+export const createDashboard = async (
+  projectId: string,
+  data: {
+    name: string;
+    description: string;
+    is_autopilot?: boolean;
+    kpi_goals?: string;
+  }
+): Promise<ApiResponse<Dashboard>> => {
   try {
     const response = await apiRequest<{
       message: string;
@@ -924,12 +1026,16 @@ export const createDashboard = async (projectId: string, data: { name: string; d
         description: string | null;
         project_id: string;
         created_by: string;
+        is_autopilot?: boolean;
+        kpi_goals?: string | null;
       };
     }>(`/api/v1/backend/projects/${projectId}/dashboard`, {
       method: 'POST',
       body: JSON.stringify({
         dashboard_name: data.name,
         description: data.description,
+        is_autopilot: data.is_autopilot ?? false,
+        kpi_goals: data.kpi_goals ?? null,
       }),
     });
 
@@ -3129,6 +3235,8 @@ const api = {
   createDashboard,
   deleteDashboard,
   getDashboardCharts,
+  generateDashboardKpiQueries,
+  executeKpiQuery,
   getFavorites,
 
   // Charts

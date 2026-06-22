@@ -8,11 +8,11 @@ import { InsightsView } from "./InsightsView";
 import { UsersView } from "./UsersView";
 import { ObservabilityView } from "./ObservabilityView";
 import { DashboardDetailView } from "./DashboardDetailView";
-import { DashboardCreationForm } from "../components/features/dashboards/DashboardCreationForm";
+import { DashboardTypeSelectionModal } from "../components/features/dashboards/DashboardTypeSelectionModal";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "../components/ui/dialog";
 import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import { toast } from "sonner";
-import { getDashboards, deleteDashboard, type Dashboard as ApiDashboard } from "../services/api";
+import { getDashboards, deleteDashboard, type Dashboard as ApiDashboard, type KpiQueryDescriptor } from "../services/api";
 
 const getErrorMessage = (error: any): string => {
   if (!error) return "Something went wrong";
@@ -39,6 +39,8 @@ interface Dashboard {
   projectId?: number | string;
   status?: 'active' | 'archived';
   collaborators?: number;
+  isAutopilot?: boolean;
+  kpiQueries?: KpiQueryDescriptor[] | null;
 }
 
 // Helper function to format time ago
@@ -87,7 +89,7 @@ interface WorkspaceViewProps {
 
 export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabChange, currentUser, projectId, chartCreatedTrigger, dashboardRefreshTrigger, pendingChartFromAI, onChartFromAIProcessed, onOpenAIAssistant, onEditChart, onInsightsGeneratingChange }: WorkspaceViewProps) {
   // Restore selected dashboard from localStorage
-  const [selectedDashboard, setSelectedDashboard] = useState<{ id: string; name: string } | null>(() => {
+  const [selectedDashboard, setSelectedDashboard] = useState<{ id: string; name: string; isAutopilot?: boolean; kpiQueries?: KpiQueryDescriptor[] | null } | null>(() => {
     if (typeof window !== 'undefined' && projectId) {
       const savedDashboardId = localStorage.getItem(`vizai_selected_dashboard_${projectId}`);
       const savedDashboardName = localStorage.getItem(`vizai_selected_dashboard_name_${projectId}`);
@@ -101,6 +103,15 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
   const [isLoadingDashboards, setIsLoadingDashboards] = useState(false);
   const isRestoringDashboardRef = useRef(false);
+
+  // Autopilot Dashboard state: stored until consumed by DashboardDetailView
+  const [autopilotConfig, setAutopilotConfig] = useState<{
+    dashboardId: string;
+    kpiGoals: string;
+    connectionId: string;
+    dbSchema: string;
+    dbType: string;
+  } | null>(null);
 
   // Fetch dashboards when projectId is available
   useEffect(() => {
@@ -127,6 +138,8 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
           createdById: currentUser?.id,
           projectId: dashboard.projectId || projectId,
           status: 'active' as const,
+          isAutopilot: dashboard.isAutopilot ?? false,
+          kpiQueries: dashboard.kpiQueries ?? null,
         }));
         setDashboards(uiDashboards);
         
@@ -142,7 +155,12 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
             if (dashboardExists) {
               // Restore dashboard and switch to dashboards tab
               isRestoringDashboardRef.current = true;
-              setSelectedDashboard({ id: String(dashboardExists.id), name: dashboardExists.name });
+              setSelectedDashboard({
+                id: String(dashboardExists.id),
+                name: dashboardExists.name,
+                isAutopilot: (dashboardExists as any).isAutopilot ?? false,
+                kpiQueries: (dashboardExists as any).kpiQueries ?? null,
+              });
               // Switch to dashboards tab to show the restored dashboard
               if (activeTab !== 'dashboards') {
                 onTabChange('dashboards');
@@ -206,7 +224,12 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
       d.name === dashboardName || (dashboardId && d.id === dashboardId)
     );
     if (dashboard) {
-      setSelectedDashboard({ id: String(dashboard.id), name: dashboard.name });
+      setSelectedDashboard({
+        id: String(dashboard.id),
+        name: dashboard.name,
+        isAutopilot: dashboard.isAutopilot ?? false,
+        kpiQueries: dashboard.kpiQueries ?? null,
+      });
     } else {
       // Fallback to just name if dashboard not found in list
       setSelectedDashboard({ id: dashboardId ? String(dashboardId) : '', name: dashboardName });
@@ -224,6 +247,11 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
   const handleCreateDashboard = async (dashboard: {
     name: string;
     dashboardId?: string;
+    isAutopilot?: boolean;
+    kpiGoals?: string;
+    connectionId?: string;
+    dbSchema?: string;
+    dbType?: string;
   }) => {
     if (!projectId) {
       toast.error("Project ID is required to create a dashboard");
@@ -243,6 +271,18 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
           d.name === dashboard.name
         );
         if (newDashboard) {
+          // For autopilot dashboards, store the generation config so DashboardDetailView
+          // can pick it up and trigger chart generation via WebSocket.
+          if (dashboard.isAutopilot && dashboard.kpiGoals && dashboard.connectionId) {
+            setAutopilotConfig({
+              dashboardId: String(newDashboard.id),
+              kpiGoals: dashboard.kpiGoals,
+              connectionId: dashboard.connectionId,
+              dbSchema: dashboard.dbSchema || "",
+              dbType: dashboard.dbType || "postgres",
+            });
+          }
+
           // Navigate to the newly created dashboard
           handleViewDashboard(newDashboard.name, newDashboard.id);
           // Ensure we're on the dashboards tab
@@ -286,6 +326,12 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
   const renderContent = () => {
     // If a dashboard is selected, show the detail view
     if (selectedDashboard) {
+      // Determine if the current dashboard has a pending autopilot config
+      const currentAutopilotConfig =
+        autopilotConfig && autopilotConfig.dashboardId === selectedDashboard.id
+          ? autopilotConfig
+          : null;
+
       return (
         <DashboardDetailView 
           dashboardId={selectedDashboard.id}
@@ -299,6 +345,10 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
           onOpenAIAssistant={onOpenAIAssistant}
           onEditChart={onEditChart}
           refreshTrigger={dashboardRefreshTrigger}
+          autopilotConfig={currentAutopilotConfig || undefined}
+          onAutopilotConsumed={() => setAutopilotConfig(null)}
+          isAutopilot={selectedDashboard.isAutopilot ?? false}
+          savedKpiQueries={selectedDashboard.kpiQueries ?? null}
         />
       );
     }
@@ -363,13 +413,19 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
           </div>
           {projectId ? (
             <div className="p-6">
-              <DashboardCreationForm
+              <DashboardTypeSelectionModal
                 projectId={String(projectId)}
                 onCancel={() => setIsCreateDialogOpen(false)}
                 onComplete={(data) => {
                   handleCreateDashboard({
                     name: data.name,
+                    description: data.description,
                     dashboardId: data.dashboardId,
+                    isAutopilot: data.isAutopilot,
+                    kpiGoals: data.kpiGoals,
+                    connectionId: data.connectionId,
+                    dbSchema: (data as any).dbSchema,
+                    dbType: (data as any).dbType,
                   });
                 }}
               />
