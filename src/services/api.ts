@@ -973,8 +973,8 @@ export const generateDashboardKpiQueries = async (
   dashboardId: string,
   data: {
     connection_id: string;
-    db_schema: any;
-    db_type: string;
+    db_schema?: any;  // optional — backend fetches from connection if omitted
+    db_type?: string;  // optional — backend fetches from connection if omitted
     num_kpis?: number;
     force?: boolean;
   }
@@ -986,8 +986,8 @@ export const generateDashboardKpiQueries = async (
         method: 'POST',
         body: JSON.stringify({
           connection_id: data.connection_id,
-          db_schema: data.db_schema,
-          db_type: data.db_type,
+          db_schema: data.db_schema ?? null,
+          db_type: data.db_type ?? null,
           num_kpis: data.num_kpis ?? 5,
           force: data.force ?? false,
         }),

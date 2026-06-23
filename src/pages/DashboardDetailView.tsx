@@ -146,12 +146,13 @@ export function DashboardDetailView({
   const autopilotConsumedRef = useRef(false);
   const isGeneratingAutopilotRef = useRef(false);
 
-  // KPI Infographics state (Autopilot Dashboards only)
+  // KPI Infographics state (all dashboards)
   const [kpiDescriptors, setKpiDescriptors] = useState<KpiQueryDescriptor[]>(savedKpiQueries ?? []);
   const [kpiValues, setKpiValues] = useState<Record<string, number | null>>({});
   const [kpiErrors, setKpiErrors] = useState<Record<string, boolean>>({});
   const [kpiLoading, setKpiLoading] = useState(false);
   const [kpiGenerationError, setKpiGenerationError] = useState<string | null>(null);
+  const kpiGeneratedRef = useRef(false);  // prevent duplicate generation
 
   // Probe Mode state
   const [probeChart, setProbeChart] = useState<ChartCardData | null>(null);
@@ -338,29 +339,67 @@ export function DashboardDetailView({
     );
   }, []);
 
-  // KPI Infographics — load for Autopilot Dashboards
+  // KPI Infographics — load for all dashboards (Autopilot uses config; manual uses chart's connection)
   useEffect(() => {
-    if (!isAutopilot) return;
-
     // If descriptors are already in state (from savedKpiQueries prop), just run them
     if (kpiDescriptors.length > 0) {
       runKpiQueries(kpiDescriptors);
       return;
     }
 
-    // We need the autopilotConfig to know the connection / schema — it's only available
-    // immediately after dashboard creation. Without it we cannot generate KPIs on a
-    // cold reload; we wait for the autopilotConfig to arrive.
-    if (!autopilotConfig) return;
+    if (isAutopilot) {
+      // Autopilot path — needs autopilotConfig for connection/schema
+      if (!autopilotConfig) return;
+
+      const generateAndRun = async () => {
+        setKpiLoading(true);
+        setKpiGenerationError(null);
+        try {
+          const resp = await generateDashboardKpiQueries(dashboardId, {
+            connection_id: autopilotConfig.connectionId,
+            db_schema: autopilotConfig.dbSchema,
+            db_type: autopilotConfig.dbType,
+            num_kpis: 5,
+          });
+          if (resp.success && resp.data) {
+            const descriptors = resp.data.kpi_queries;
+            setKpiDescriptors(descriptors);
+            await runKpiQueries(descriptors);
+          } else {
+            setKpiGenerationError(resp.error?.message ?? "Failed to generate KPI metrics");
+          }
+        } catch (err: any) {
+          setKpiGenerationError(err.message ?? "Failed to generate KPI metrics");
+        } finally {
+          setKpiLoading(false);
+        }
+      };
+
+      generateAndRun();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAutopilot, dashboardId]);
+
+  // For non-autopilot dashboards: trigger KPI generation after charts are loaded
+  useEffect(() => {
+    if (isAutopilot) return;                   // autopilot handled above
+    if (isLoadingCharts) return;               // wait for charts to finish loading
+    if (kpiGeneratedRef.current) return;       // already generated
+    if (kpiDescriptors.length > 0) return;     // already have descriptors
+
+    // Find first chart with a valid connection_id
+    const firstConnectedChart = charts.find(c => !!c.databaseConnectionId);
+    if (!firstConnectedChart) return;          // no connection available
+
+    kpiGeneratedRef.current = true;            // lock to prevent re-run
 
     const generateAndRun = async () => {
       setKpiLoading(true);
       setKpiGenerationError(null);
       try {
         const resp = await generateDashboardKpiQueries(dashboardId, {
-          connection_id: autopilotConfig.connectionId,
-          db_schema: autopilotConfig.dbSchema,
-          db_type: autopilotConfig.dbType,
+          connection_id: firstConnectedChart.databaseConnectionId,
+          // db_schema & db_type omitted — backend fetches them from the connection record
           num_kpis: 5,
         });
         if (resp.success && resp.data) {
@@ -369,9 +408,11 @@ export function DashboardDetailView({
           await runKpiQueries(descriptors);
         } else {
           setKpiGenerationError(resp.error?.message ?? "Failed to generate KPI metrics");
+          kpiGeneratedRef.current = false;     // allow retry
         }
       } catch (err: any) {
         setKpiGenerationError(err.message ?? "Failed to generate KPI metrics");
+        kpiGeneratedRef.current = false;       // allow retry
       } finally {
         setKpiLoading(false);
       }
@@ -379,7 +420,7 @@ export function DashboardDetailView({
 
     generateAndRun();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAutopilot, dashboardId]);
+  }, [isAutopilot, isLoadingCharts, charts.length, dashboardId]);
 
   // Autopilot Dashboard — trigger chart generation via WebSocket on mount
   useEffect(() => {
@@ -861,72 +902,18 @@ export function DashboardDetailView({
           </div>
         )}
 
-        {/* KPI Infographics (Autopilot Dashboards) or Chart Type Count Cards (Manual Dashboards) */}
-        {isAutopilot ? (
-          <KpiInfographicsRow
-            descriptors={kpiDescriptors}
-            values={kpiValues}
-            errors={kpiErrors}
-            isLoading={kpiLoading}
-            generationError={kpiGenerationError}
-            onRefresh={() => runKpiQueries(kpiDescriptors)}
-          />
-        ) : (
-          (() => {
-            const chartTypeConfig: Record<string, { label: string; description: string }> = {
-              line: { label: 'Line Charts', description: 'time-series data' },
-              bar: { label: 'Bar Charts', description: 'comparison data' },
-              pie: { label: 'Pie Charts', description: 'proportion data' },
-              area: { label: 'Area Charts', description: 'cumulative data' },
-              donut: { label: 'Donut Charts', description: 'proportion data' },
-              scatter: { label: 'Scatter Charts', description: 'correlation data' },
-              heatmap: { label: 'Heatmaps', description: 'density data' },
-              funnel: { label: 'Funnel Charts', description: 'conversion data' },
-              map: { label: 'Map Charts', description: 'geospatial data' },
-              stackedlinechart: { label: 'Stacked Line Charts', description: 'cumulative time-series data' },
-              stackedhorizontalbar: { label: 'Stacked Horizontal Bars', description: 'comparison data' },
-              clustering: { label: 'Clustering Charts', description: 'grouped data' },
-              multiyaxischart: { label: 'Multi-Axis Charts', description: 'multi-metric data' },
-            };
-
-            const chartCounts = charts.reduce((acc, chart) => {
-              acc[chart.type] = (acc[chart.type] || 0) + 1;
-              return acc;
-            }, {} as Record<string, number>);
-
-            const availableChartTypes = Object.keys(chartCounts)
-              .filter(type => chartCounts[type] > 0)
-              .sort();
-
-            return (
-              <div className="flex flex-wrap gap-6 mb-8">
-                <Card className="p-6 border border-border flex-1 min-w-[200px]">
-                  <p className="text-sm text-muted-foreground mb-2">Total Charts</p>
-                  <p className="text-3xl text-foreground mb-1">{charts.length}</p>
-                  <div className="flex items-center gap-1 text-xs">
-                    <span className="text-muted-foreground">in this dashboard</span>
-                  </div>
-                </Card>
-                {availableChartTypes.map((chartType) => {
-                  const config = chartTypeConfig[chartType] || {
-                    label: `${chartType.charAt(0).toUpperCase() + chartType.slice(1)} Charts`,
-                    description: 'visualization data'
-                  };
-                  const count = chartCounts[chartType];
-                  return (
-                    <Card key={chartType} className="p-6 border border-border flex-1 min-w-[200px]">
-                      <p className="text-sm text-muted-foreground mb-2">{config.label}</p>
-                      <p className="text-3xl text-foreground mb-1">{count}</p>
-                      <div className="flex items-center gap-1 text-xs">
-                        <span className="text-muted-foreground">{config.description}</span>
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-            );
-          })()
-        )}
+        {/* KPI Infographics Row — shown for ALL dashboards */}
+        <KpiInfographicsRow
+          descriptors={kpiDescriptors}
+          values={kpiValues}
+          errors={kpiErrors}
+          isLoading={kpiLoading}
+          generationError={kpiGenerationError}
+          onRefresh={() => {
+            kpiGeneratedRef.current = false;
+            runKpiQueries(kpiDescriptors);
+          }}
+        />
 
         {/* Charts Grid */}
         {isLoadingCharts ? (
