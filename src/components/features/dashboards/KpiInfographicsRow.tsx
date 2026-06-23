@@ -71,7 +71,8 @@ export function KpiInfographicsRow({
         </div>
         <div className="flex flex-wrap gap-4">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Card key={i} className="p-6 flex-1 min-w-[180px] border border-border">
+            <Card key={i} className="p-6 flex-1 min-w-[180px] border border-border flex flex-col items-center">
+              <Skeleton className="h-8 w-8 rounded-full mb-3" />
               <Skeleton className="h-3 w-24 mb-3" />
               <Skeleton className="h-8 w-20 mb-2" />
               <Skeleton className="h-3 w-32" />
@@ -121,17 +122,19 @@ export function KpiInfographicsRow({
           return (
             <Card
               key={kpi.label}
-              className="p-5 border border-border flex-1 min-w-[180px] flex flex-col gap-2"
+              className="p-5 border border-border flex-1 min-w-[180px] flex flex-col items-center gap-2 text-center"
             >
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground font-medium truncate pr-2">
-                  {kpi.label}
-                </p>
-                <div className="shrink-0 rounded-full bg-primary/10 p-1.5">
-                  <IconComponent className="h-3.5 w-3.5 text-primary" />
-                </div>
+              {/* Icon — centered at top */}
+              <div className="shrink-0 rounded-full bg-primary/10 p-2 mb-1">
+                <IconComponent className="h-4 w-4 text-primary" />
               </div>
 
+              {/* Label */}
+              <p className="text-sm text-muted-foreground font-medium leading-tight">
+                {kpi.label}
+              </p>
+
+              {/* Value */}
               {isLoadingValue ? (
                 <Skeleton className="h-8 w-24 my-0.5" />
               ) : (
@@ -142,7 +145,8 @@ export function KpiInfographicsRow({
                 </p>
               )}
 
-              <p className="text-xs text-muted-foreground truncate">{kpi.subtitle}</p>
+              {/* Subtitle */}
+              <p className="text-xs text-muted-foreground">{kpi.subtitle}</p>
             </Card>
           );
         })}
