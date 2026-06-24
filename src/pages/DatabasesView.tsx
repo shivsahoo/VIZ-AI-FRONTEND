@@ -356,7 +356,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
       }
       const { imported_metrics, pending_metrics, duplicate_metrics } = response.data;
       toast.success(
-        `Business metrics imported successfully. Imported: ${imported_metrics}, Pending: ${pending_metrics}, Duplicates skipped: ${duplicate_metrics}.`
+        `Business metrics imported successfully. `
       );
       const refreshed = await getLatestOntology(selectedDatabase.id);
       if (refreshed.success && refreshed.data) {
