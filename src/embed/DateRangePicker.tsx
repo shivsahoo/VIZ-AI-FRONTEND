@@ -1,36 +1,21 @@
-/**
+/*
  * DateRangePicker
  *
  * A fully theme-aware date range picker for the VizAI embed layer.
- * Uses native <input type="date"> elements — no external libraries needed.
- *
- * Design goals:
- *  - All colours reference --embed-* CSS variables so it inherits light / dark
- *    / custom themes automatically.
- *  - Validates that start ≤ end before propagating changes.
- *  - Shows a subtle loading overlay while a filtered re-fetch is in progress.
- *  - Keyboard and screen-reader accessible (labels are associated via htmlFor).
+ * Uses native <input type="date"> elements
+ 
  */
 
 import { useCallback, useEffect, useState } from "react";
 
 export interface DateRangePickerProps {
-  /** Absolute earliest date allowed (ISO YYYY-MM-DD) */
+ 
   minDate: string;
-  /** Absolute latest date allowed (ISO YYYY-MM-DD) */
   maxDate: string;
-  /** Currently selected start (ISO YYYY-MM-DD) */
   startDate: string;
-  /** Currently selected end (ISO YYYY-MM-DD) */
   endDate: string;
-  /**
-   * Called when BOTH dates form a valid range (start ≤ end).
-   * Fires on blur of either input so we don't spam the API on every keystroke.
-   */
   onChange: (start: string, end: string) => void;
-  /** When true shows a loading overlay over the picker row */
   isLoading?: boolean;
-  /** Unique id prefix — used to build label-for associations */
   id: string;
 }
 
@@ -43,12 +28,12 @@ export function DateRangePicker({
   isLoading = false,
   id,
 }: DateRangePickerProps) {
-  // Local draft state so the inputs feel responsive while typing
+
   const [localStart, setLocalStart] = useState(startDate);
   const [localEnd, setLocalEnd]   = useState(endDate);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Keep local state in sync if the parent resets dates externally
+
   useEffect(() => { setLocalStart(startDate); }, [startDate]);
   useEffect(() => { setLocalEnd(endDate); },   [endDate]);
 

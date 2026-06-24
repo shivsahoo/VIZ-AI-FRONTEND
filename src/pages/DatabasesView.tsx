@@ -48,6 +48,7 @@ import {
   startOntologyEnrichment,
   sendOntologyEnrichmentChat,
   applyOntologyEnrichment,
+  uploadPbitFile,
   type DSGraphPayload,
   type OntologyVersionPayload,
 } from "../services/api";
@@ -94,6 +95,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   const [isEnrichmentReplyPending, setIsEnrichmentReplyPending] = useState(false);
   const [enrichmentUpdates, setEnrichmentUpdates] = useState<Record<string, any>>({});
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isPbitUploading, setIsPbitUploading] = useState(false);
 
   // Edit form state (for editing existing connections)
   const [connectionName, setConnectionName] = useState("");
@@ -327,6 +330,42 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
       toast.error(error.message || "Unable to start enrichment");
     } finally {
       setIsEnriching(false);
+    }
+  };
+
+  const handlePbitUploadClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  };
+
+  const handlePbitFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedDatabase) return;
+    if (!file.name.toLowerCase().endsWith(".pbit")) {
+      toast.error("Only .pbit files are supported.");
+      return;
+    }
+    setIsPbitUploading(true);
+    try {
+      const response = await uploadPbitFile(selectedDatabase.id, file);
+      if (!response.success || !response.data) {
+        toast.error(response.error?.message || "Failed to import .pbit file");
+        return;
+      }
+      const { imported_metrics, pending_metrics, duplicate_metrics } = response.data;
+      toast.success(
+        `Business metrics imported successfully. `
+      );
+      const refreshed = await getLatestOntology(selectedDatabase.id);
+      if (refreshed.success && refreshed.data) {
+        setCurrentOntology(refreshed.data);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to import .pbit file");
+    } finally {
+      setIsPbitUploading(false);
     }
   };
 
@@ -919,6 +958,20 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                 </DialogDescription>
               </DialogHeader>
               <div className="flex items-center gap-2">
+                <input
+                  type="file"
+                  accept=".pbit"
+                  hidden
+                  ref={fileInputRef}
+                  onChange={handlePbitFileChange}
+                />
+                <Button
+                  variant="outline"
+                  onClick={handlePbitUploadClick}
+                  disabled={isPbitUploading || isOntologyLoading || !currentOntology}
+                >
+                  {isPbitUploading ? "Importing..." : "Upload .PBIT File"}
+                </Button>
                 <Button variant="outline" onClick={() => setOntologyDialogOpen(false)}>
                   Close
                 </Button>
