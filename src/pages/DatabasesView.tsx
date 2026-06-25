@@ -943,10 +943,20 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
         </Dialog>
 
         {/* ── Ontology Explorer Dialog ── */}
-        <Dialog open={ontologyDialogOpen} onOpenChange={setOntologyDialogOpen}>
+        <Dialog
+          open={ontologyDialogOpen}
+          onOpenChange={(open) => {
+            // Block closing the dialog while a .pbit upload is running
+            if (isPbitUploading) return;
+            setOntologyDialogOpen(open);
+          }}
+        >
           <DialogContent
             className="!w-[92vw] !max-w-[92vw] sm:!max-w-[92vw] h-[88vh] max-h-[88vh] p-4 flex flex-col overflow-hidden"
             style={{ width: "92vw", maxWidth: "92vw", height: "88vh", maxHeight: "88vh" }}
+            onInteractOutside={(e) => { if (isPbitUploading) e.preventDefault(); }}
+            onPointerDownOutside={(e) => { if (isPbitUploading) e.preventDefault(); }}
+            onEscapeKeyDown={(e) => { if (isPbitUploading) e.preventDefault(); }}
           >
             <div className="flex items-start justify-between pr-8 shrink-0">
               <DialogHeader>
@@ -965,20 +975,66 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                   ref={fileInputRef}
                   onChange={handlePbitFileChange}
                 />
+
+                {/* ── Importing button with glowing ring effect ── */}
+                <div
+                  className={isPbitUploading ? "pbit-glow-btn" : undefined}
+                  style={isPbitUploading ? { display: "inline-flex", isolation: "isolate" } : undefined}
+                >
+                  <Button
+                    variant="outline"
+                    onClick={handlePbitUploadClick}
+                    disabled={isPbitUploading || isOntologyLoading || !currentOntology}
+                    style={isPbitUploading ? {
+                      background: "linear-gradient(135deg, rgba(129,140,248,0.15) 0%, rgba(34,211,238,0.10) 100%)",
+                      borderColor: "rgba(129,140,248,0.6)",
+                      color: "#a5b4fc",
+                      pointerEvents: "none",
+                    } : undefined}
+                  >
+                    {isPbitUploading ? (
+                      <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span>Importing</span>
+                        <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
+                          {[0, 1, 2].map((i) => (
+                            <span
+                              key={i}
+                              style={{
+                                width: 4,
+                                height: 4,
+                                borderRadius: "50%",
+                                background: "currentColor",
+                                display: "inline-block",
+                                animation: `pbit-bounce 1s ease-in-out ${i * 0.18}s infinite`,
+                              }}
+                            />
+                          ))}
+                        </span>
+                      </span>
+                    ) : (
+                      "Upload .PBIT File"
+                    )}
+                  </Button>
+                </div>
+
                 <Button
                   variant="outline"
-                  onClick={handlePbitUploadClick}
-                  disabled={isPbitUploading || isOntologyLoading || !currentOntology}
+                  onClick={() => setOntologyDialogOpen(false)}
+                  disabled={isPbitUploading}
                 >
-                  {isPbitUploading ? "Importing..." : "Upload .PBIT File"}
-                </Button>
-                <Button variant="outline" onClick={() => setOntologyDialogOpen(false)}>
                   Close
                 </Button>
-                <Button variant="outline" onClick={handleDownloadOntologyTTL} disabled={isOntologyLoading || !currentOntology}>
+                <Button
+                  variant="outline"
+                  onClick={handleDownloadOntologyTTL}
+                  disabled={isPbitUploading || isOntologyLoading || !currentOntology}
+                >
                   Download RDF/OWL
                 </Button>
-                <GradientButton onClick={handleStartEnriching} disabled={isEnriching || isOntologyLoading || !currentOntology}>
+                <GradientButton
+                  onClick={handleStartEnriching}
+                  disabled={isPbitUploading || isEnriching || isOntologyLoading || !currentOntology}
+                >
                   {isEnriching ? "Preparing..." : "Start Enriching"}
                 </GradientButton>
               </div>
@@ -1023,11 +1079,10 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                   {enrichmentChat.map((msg, index) => (
                     <div
                       key={`${msg.role}-${index}`}
-                      className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
-                        msg.role === "assistant"
+                      className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${msg.role === "assistant"
                           ? "bg-muted/40 border border-border mr-10"
                           : "bg-primary/10 border border-primary/20 ml-10"
-                      }`}
+                        }`}
                     >
                       {msg.text}
                     </div>
