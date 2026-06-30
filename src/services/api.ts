@@ -1065,6 +1065,39 @@ export const createDashboard = async (
 };
 
 /**
+ * Update a dashboard title / description
+ */
+export const updateDashboard = async (
+  projectId: string,
+  dashboardId: string,
+  data: { title?: string; description?: string }
+): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{
+      message?: string;
+    }>(`/api/v1/backend/projects/${projectId}/dashboard/${dashboardId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+
+    return {
+      success: true,
+      data: {
+        message: response.message || 'Dashboard updated successfully',
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'UPDATE_DASHBOARD_FAILED',
+        message: error.message || 'Failed to update dashboard',
+      },
+    };
+  }
+};
+
+/**
  * Delete a dashboard
  */
 export const deleteDashboard = async (projectId: string, dashboardId: string): Promise<ApiResponse<{ message: string }>> => {
@@ -3275,6 +3308,7 @@ const api = {
   // Dashboards
   getDashboards,
   createDashboard,
+  updateDashboard,
   deleteDashboard,
   getDashboardCharts,
   generateDashboardKpiQueries,

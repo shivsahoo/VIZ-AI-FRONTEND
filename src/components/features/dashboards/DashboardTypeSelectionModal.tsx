@@ -1,12 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { Bot, LayoutDashboard, Sparkles, ArrowRight } from "lucide-react";
+import { LayoutDashboard, Sparkles, ArrowRight, FileUp, Upload, Briefcase, Sliders, Plus, MessageSquare, BarChart3, Search, Clock, Loader2, Database, CheckCircle2 } from "lucide-react";
 import { Button } from "../../ui/button";
 import { cn } from "../../ui/utils";
+import { toast } from "sonner";
 import { DashboardCreationForm } from "./DashboardCreationForm";
 import { AutopilotDashboardForm } from "./AutopilotDashboardForm";
+import { getDatabases, uploadPbitFile, getLatestOntology, createDashboard } from "../../../services/api";
+
+interface DatabaseConnection {
+  id: string;
+  name: string;
+  db_type: string;
+  schema?: string | null;
+}
 
 type DashboardMode = "select" | "manual" | "autopilot";
+type PbitFlowPhase = "idle" | "extracting" | "creating" | "done";
 
 interface DashboardTypeSelectionModalProps {
   projectId: string;
@@ -17,8 +27,32 @@ interface DashboardTypeSelectionModalProps {
     isAutopilot?: boolean;
     kpiGoals?: string;
     connectionId?: string;
+    dbSchema?: string;
+    dbType?: string;
+    isPbitGenerated?: boolean;
   }) => void;
   onCancel?: () => void;
+}
+
+/** Build the enriched kpi_goals string from ontology metrics (capped at 10). */
+function buildKpiGoalsFromMetrics(metrics: Array<{ name?: string; formula?: string }>): string {
+  const capped = metrics.slice(0, 10);
+  const lines = capped
+    .filter((m) => m.name)
+    .map((m, i) => {
+      const formula = m.formula ? `\n   Formula: ${m.formula}` : "";
+      return `${i + 1}. ${m.name}${formula}`;
+    })
+    .join("\n\n");
+
+  return [
+    "PBIT METRICS — Generate charts that directly visualize these business metrics.",
+    "Use the SQL formulas as the primary basis for each chart query.",
+    "",
+    lines,
+    "",
+    "If a formula cannot be executed against the DB schema, derive the closest equivalent chart from the ontology context and schema.",
+  ].join("\n");
 }
 
 export function DashboardTypeSelectionModal({
@@ -27,6 +61,128 @@ export function DashboardTypeSelectionModal({
   onCancel,
 }: DashboardTypeSelectionModalProps) {
   const [mode, setMode] = useState<DashboardMode>("select");
+  const [connections, setConnections] = useState<DatabaseConnection[]>([]);
+  const [isLoadingConnections, setIsLoadingConnections] = useState(true);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string>("");
+  const [pbitFlowPhase, setPbitFlowPhase] = useState<PbitFlowPhase>("idle");
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isLocked = pbitFlowPhase !== "idle";
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchConnections = async () => {
+      setIsLoadingConnections(true);
+      try {
+        const response = await getDatabases(projectId);
+        if (isMounted && response.success && response.data) {
+          const mapped: DatabaseConnection[] = response.data.map((c: any) => ({
+            id: c.id,
+            name: c.name || c.connection_name || "Unnamed Connection",
+            db_type: c.db_type || c.type || "postgres",
+            schema: c.schema ?? null,
+          }));
+          setConnections(mapped);
+          if (mapped.length > 0) {
+            setSelectedConnectionId(mapped[0].id);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load connections:", err);
+      } finally {
+        if (isMounted) setIsLoadingConnections(false);
+      }
+    };
+    fetchConnections();
+    return () => {
+      isMounted = false;
+    };
+  }, [projectId]);
+
+  const handlePbitUploadClick = () => {
+    if (!selectedConnectionId) {
+      toast.error("Please select a data source first.");
+      return;
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  };
+
+  const handlePbitFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!selectedConnectionId) {
+      toast.error("Please select a data source first.");
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".pbit")) {
+      toast.error("Only .pbit files are supported.");
+      return;
+    }
+
+    const selectedConnection = connections.find((c) => c.id === selectedConnectionId);
+
+    // ── Phase 1: Extract metrics from .pbit ─────────────────────────────────
+    setPbitFlowPhase("extracting");
+    try {
+      const uploadResp = await uploadPbitFile(selectedConnectionId, file);
+      if (!uploadResp.success || !uploadResp.data) {
+        toast.error(uploadResp.error?.message || "Failed to import .pbit file");
+        setPbitFlowPhase("idle");
+        return;
+      }
+      setUploadedFileName(file.name);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to import .pbit file");
+      setPbitFlowPhase("idle");
+      return;
+    }
+
+    // ── Phase 2: Fetch ontology, build kpiGoals, create dashboard ───────────
+    setPbitFlowPhase("creating");
+    try {
+      const ontologyResp = await getLatestOntology(selectedConnectionId);
+      const metrics: Array<{ name?: string; formula?: string }> =
+        (ontologyResp.success && ontologyResp.data?.ontology?.metrics) || [];
+
+      const kpiGoals = buildKpiGoalsFromMetrics(metrics);
+      const dbSchema = selectedConnection?.schema ?? "";
+      const dbType = selectedConnection?.db_type ?? "postgres";
+      const placeholderName = `${selectedConnection?.name ?? "Untitled"} Dashboard`;
+
+      const createResp = await createDashboard(projectId, {
+        name: placeholderName,
+        description: "Generated from .pbit",
+        is_autopilot: true,
+        kpi_goals: kpiGoals,
+      });
+
+      if (!createResp.success || !createResp.data) {
+        toast.error(createResp.error?.message || "Failed to create dashboard");
+        setPbitFlowPhase("idle");
+        return;
+      }
+
+      setPbitFlowPhase("done");
+      onComplete({
+        name: placeholderName,
+        description: "Generated from .pbit",
+        dashboardId: createResp.data.id,
+        isAutopilot: true,
+        kpiGoals,
+        connectionId: selectedConnectionId,
+        dbSchema,
+        dbType,
+        isPbitGenerated: true,
+      });
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate dashboard");
+      setPbitFlowPhase("idle");
+    }
+  };
 
   if (mode === "manual") {
     return (
@@ -50,6 +206,15 @@ export function DashboardTypeSelectionModal({
 
   return (
     <div className="flex flex-col w-full">
+      {/* Hidden file input for .pbit upload */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept=".pbit"
+        onChange={handlePbitFileChange}
+        className="hidden"
+      />
+
       {/* Header */}
       <div className="px-6 py-4 border-b border-border bg-gradient-to-r from-primary/5 to-accent/5">
         <div className="flex items-center gap-3 w-full">
@@ -57,7 +222,7 @@ export function DashboardTypeSelectionModal({
             <LayoutDashboard className="w-6 h-6 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-foreground font-semibold">Create New Dashboard</h3>
+            <h3 className="text-foreground font-semibold">Create new dashboard</h3>
             <p className="text-xs text-muted-foreground">
               Choose how you'd like to build your dashboard
             </p>
@@ -67,6 +232,7 @@ export function DashboardTypeSelectionModal({
               variant="ghost"
               size="sm"
               onClick={onCancel}
+              disabled={isLocked}
               className="text-muted-foreground hover:text-foreground"
             >
               Cancel
@@ -76,18 +242,17 @@ export function DashboardTypeSelectionModal({
       </div>
 
       {/* Mode Selection Cards */}
-      <div className="px-6 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className={cn("px-6 py-8 transition-opacity duration-200", isLocked && "opacity-75 pointer-events-none")}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
           {/* Autopilot Dashboard */}
-          <motion.button
+          <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, delay: 0.05 }}
-            onClick={() => setMode("autopilot")}
             className={cn(
-              "group relative flex flex-col items-start text-left rounded-xl border-2 p-6 transition-all duration-200",
-              "border-primary/30 hover:border-primary/70 bg-gradient-to-br from-primary/5 via-accent/5 to-transparent",
-              "hover:shadow-lg hover:shadow-primary/10 cursor-pointer"
+              "relative flex flex-col items-start text-left rounded-xl border p-6 transition-all duration-200 h-full",
+              "border-primary/60 bg-gradient-to-br from-primary/5 via-accent/5 to-transparent",
+              "shadow-sm"
             )}
           >
             {/* Badge */}
@@ -95,77 +260,183 @@ export function DashboardTypeSelectionModal({
               Recommended
             </span>
 
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-md mb-4 group-hover:scale-105 transition-transform duration-200">
-              <Sparkles className="w-6 h-6 text-white" />
+            <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center shadow-sm mb-4">
+              <Sparkles className="w-5 h-5 text-primary" />
             </div>
 
-            <h4 className="text-foreground font-semibold text-base mb-1.5">Autopilot Dashboard</h4>
+            <h4 className="text-foreground font-semibold text-base mb-1.5">Autopilot dashboard</h4>
             <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-              Describe the KPIs you want to monitor. AI instantly builds a full dashboard with 5–6 relevant charts.
+              Describe the KPIs you want to monitor. AI builds a full dashboard with 5-6 charts.
             </p>
 
-            <ul className="space-y-1.5 text-xs text-muted-foreground mb-5">
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
-                5–6 AI-generated charts
+            <ul className="space-y-2.5 text-xs text-muted-foreground mb-6">
+              <li className="flex items-center gap-2.5">
+                <BarChart3 className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <span>5-6 AI-generated charts</span>
               </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
-                Probe Mode on every chart
+              <li className="flex items-center gap-2.5">
+                <Search className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <span>Probe mode on every chart</span>
               </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
-                Ready in seconds
+              <li className="flex items-center gap-2.5">
+                <Clock className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <span>Ready in seconds</span>
               </li>
             </ul>
 
-            <div className="flex items-center gap-1.5 text-primary text-sm font-medium group-hover:gap-2.5 transition-all">
+            <button
+              type="button"
+              onClick={() => setMode("autopilot")}
+              disabled={isLocked}
+              className="w-full py-2.5 px-4 rounded-lg bg-primary text-primary-foreground font-medium text-sm flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-sm cursor-pointer mt-auto"
+            >
               Get started
               <ArrowRight className="w-4 h-4" />
-            </div>
-          </motion.button>
+            </button>
+          </motion.div>
 
-          {/* Manual Dashboard */}
-          <motion.button
+          {/* Generate from .pbit */}
+          <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, delay: 0.1 }}
-            onClick={() => setMode("manual")}
             className={cn(
-              "group flex flex-col items-start text-left rounded-xl border-2 p-6 transition-all duration-200",
-              "border-border hover:border-muted-foreground/40 bg-card",
-              "hover:shadow-md cursor-pointer"
+              "flex flex-col items-start text-left rounded-xl border p-6 transition-all duration-200 h-full",
+              "border-border/60 bg-card",
+              "shadow-sm"
             )}
           >
-            <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center shadow-sm mb-4 group-hover:scale-105 transition-transform duration-200">
-              <Bot className="w-6 h-6 text-muted-foreground" />
+            <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shadow-sm mb-4">
+              <FileUp className="w-5 h-5 text-muted-foreground" />
             </div>
 
-            <h4 className="text-foreground font-semibold text-base mb-1.5">Manual Dashboard</h4>
+            <h4 className="text-foreground font-semibold text-base mb-1.5">Generate from .pbit</h4>
+            <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+              Upload a Power BI template and pick a data source — AI rebuilds it as a dashboard.
+            </p>
+
+            <div className="w-full space-y-3.5 my-2 mb-6">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground block">Data source</label>
+                {isLoadingConnections ? (
+                  <div className="w-full py-2.5 px-3 rounded-lg border border-border/60 bg-muted/30 flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Loading connections...</span>
+                  </div>
+                ) : connections.length === 0 ? (
+                  <div className="w-full py-2.5 px-3 rounded-lg border border-border/60 bg-muted/10 flex items-center gap-2 text-sm text-muted-foreground">
+                    <Database className="w-4 h-4" />
+                    <span>No connections available</span>
+                  </div>
+                ) : (
+                  <select
+                    value={selectedConnectionId}
+                    onChange={(e) => setSelectedConnectionId(e.target.value)}
+                    disabled={isLocked}
+                    className="w-full py-2.5 px-3 rounded-lg border border-border/60 bg-background hover:bg-accent/20 focus:border-primary focus:outline-none text-sm text-foreground transition-colors cursor-pointer"
+                  >
+                    <option value="" disabled>Select a connection</option>
+                    {connections.map((conn) => (
+                      <option key={conn.id} value={conn.id}>
+                        {conn.name} ({conn.db_type})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground block">.pbit file</label>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={handlePbitUploadClick}
+                  onKeyDown={(e) => e.key === "Enter" && handlePbitUploadClick()}
+                  className={cn(
+                    "w-full py-3 px-3 rounded-lg border border-dashed transition-all flex items-center justify-center gap-2 text-sm",
+                    isLocked
+                      ? "border-primary/60 bg-primary/5 text-primary cursor-default"
+                      : uploadedFileName
+                      ? "border-emerald-500/60 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 cursor-pointer"
+                      : "border-border/60 hover:border-primary/50 bg-transparent hover:bg-accent/40 text-muted-foreground cursor-pointer"
+                  )}
+                >
+                  {pbitFlowPhase === "extracting" ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                      <span>Extracting metrics...</span>
+                    </>
+                  ) : pbitFlowPhase === "creating" ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                      <span>Generating dashboard...</span>
+                    </>
+                  ) : uploadedFileName ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <span className="truncate max-w-[180px] font-medium">{uploadedFileName}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4 flex-shrink-0" />
+                      <span>Click to upload</span>
+                    </>
+                  )}
+                </div>
+                {!isLocked && !uploadedFileName && (
+                  <p className="text-[11px] text-muted-foreground/70 text-center">
+                    Dashboard is created automatically after upload
+                  </p>
+                )}
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Manual Dashboard */}
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, delay: 0.15 }}
+            className={cn(
+              "flex flex-col items-start text-left rounded-xl border p-6 transition-all duration-200 h-full",
+              "border-border/60 bg-card",
+              "shadow-sm"
+            )}
+          >
+            <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shadow-sm mb-4">
+              <Briefcase className="w-5 h-5 text-muted-foreground" />
+            </div>
+
+            <h4 className="text-foreground font-semibold text-base mb-1.5">Manual dashboard</h4>
             <p className="text-sm text-muted-foreground leading-relaxed mb-4">
               Start with a blank dashboard and build it your way using the AI Assistant or Charts view.
             </p>
 
-            <ul className="space-y-1.5 text-xs text-muted-foreground mb-5">
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground flex-shrink-0" />
-                Full creative control
+            <ul className="space-y-2.5 text-xs text-muted-foreground mb-6">
+              <li className="flex items-center gap-2.5">
+                <Sliders className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                <span>Full creative control</span>
               </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground flex-shrink-0" />
-                Add charts one by one
+              <li className="flex items-center gap-2.5">
+                <Plus className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                <span>Add charts one by one</span>
               </li>
-              <li className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground flex-shrink-0" />
-                Use AI Assistant anytime
+              <li className="flex items-center gap-2.5">
+                <MessageSquare className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                <span>Use AI Assistant anytime</span>
               </li>
             </ul>
 
-            <div className="flex items-center gap-1.5 text-muted-foreground text-sm font-medium group-hover:gap-2.5 transition-all">
+            <button
+              type="button"
+              onClick={() => setMode("manual")}
+              disabled={isLocked}
+              className="w-full py-2.5 px-4 rounded-lg border border-border/60 bg-transparent hover:bg-accent text-muted-foreground hover:text-foreground font-medium text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer mt-auto"
+            >
               Create blank
               <ArrowRight className="w-4 h-4" />
-            </div>
-          </motion.button>
+            </button>
+          </motion.div>
         </div>
       </div>
     </div>

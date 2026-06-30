@@ -111,6 +111,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
     connectionId: string;
     dbSchema: string;
     dbType: string;
+    isPbitGenerated?: boolean;
   } | null>(null);
 
   // Fetch dashboards when projectId is available
@@ -252,6 +253,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
     connectionId?: string;
     dbSchema?: string;
     dbType?: string;
+    isPbitGenerated?: boolean;
   }) => {
     if (!projectId) {
       toast.error("Project ID is required to create a dashboard");
@@ -280,6 +282,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
               connectionId: dashboard.connectionId,
               dbSchema: dashboard.dbSchema || "",
               dbType: dashboard.dbType || "postgres",
+              isPbitGenerated: dashboard.isPbitGenerated,
             });
           }
 
@@ -424,8 +427,9 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
                     isAutopilot: data.isAutopilot,
                     kpiGoals: data.kpiGoals,
                     connectionId: data.connectionId,
-                    dbSchema: (data as any).dbSchema,
-                    dbType: (data as any).dbType,
+                    dbSchema: data.dbSchema,
+                    dbType: data.dbType,
+                    isPbitGenerated: data.isPbitGenerated,
                   });
                 }}
               />

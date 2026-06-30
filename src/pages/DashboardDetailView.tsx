@@ -21,7 +21,7 @@ import {
 import { toast } from "sonner";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { getDashboardCharts, getChartData, deleteChart, addChartToDashboard, getCurrentUser, generateDashboardKpiQueries, executeKpiQuery, type ChartData, type KpiQueryDescriptor } from "../services/api";
+import { getDashboardCharts, getChartData, deleteChart, addChartToDashboard, getCurrentUser, generateDashboardKpiQueries, executeKpiQuery, updateDashboard, type ChartData, type KpiQueryDescriptor } from "../services/api";
 import { ShareLinkModal } from "../components/features/dashboards/ShareLinkModal";
 import { AllowedDomainsSection } from "../components/features/dashboards/AllowedDomainsSection";
 import { ProbeModeDialog } from "../components/features/charts/ProbeModeDialog";
@@ -57,6 +57,40 @@ interface AutopilotConfig {
   connectionId: string;
   dbSchema: string;
   dbType: string;
+  isPbitGenerated?: boolean;
+}
+
+/** Strip noise words and extract top thematic nouns from chart titles. */
+function deriveNameFromChartTitles(titles: string[]): string {
+  const noiseWords = new Set([
+    "total", "by", "and", "or", "the", "of", "in", "for", "to", "a", "an",
+    "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might",
+    "chart", "graph", "report", "analysis", "overview", "summary", "vs", "per",
+    "top", "bottom", "count", "number", "amount", "value", "rate", "ratio",
+    "monthly", "weekly", "daily", "yearly", "annual", "trend", "trends",
+    "with", "from", "over", "time", "based", "all", "each", "this", "that",
+  ]);
+
+  const wordCounts: Record<string, number> = {};
+  titles.forEach((title) => {
+    title
+      .split(/[\s\-_,()]+/)
+      .map((w) => w.toLowerCase().replace(/[^a-z]/g, ""))
+      .filter((w) => w.length > 2 && !noiseWords.has(w))
+      .forEach((word) => {
+        wordCounts[word] = (wordCounts[word] || 0) + 1;
+      });
+  });
+
+  const topWords = Object.entries(wordCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 2)
+    .map(([word]) => word.charAt(0).toUpperCase() + word.slice(1));
+
+  if (topWords.length === 0) return "Business Dashboard";
+  if (topWords.length === 1) return `${topWords[0]} Dashboard`;
+  return `${topWords[0]} & ${topWords[1]} Dashboard`;
 }
 
 interface DashboardDetailViewProps {
@@ -125,6 +159,7 @@ export function DashboardDetailView({
   savedKpiQueries,
 }: DashboardDetailViewProps) {
   const { isPinned, togglePin } = usePinnedCharts();
+  const [localDashboardName, setLocalDashboardName] = useState(dashboardName);
   const [chartToRemove, setChartToRemove] = useState<ChartCardData | null>(null);
   const [charts, setCharts] = useState<ChartCardData[]>([]);
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
@@ -551,6 +586,23 @@ export function DashboardDetailView({
             setAutopilotSkeletonCount(0);
             if (completedChartCount > 0) {
               toast.success(`Generated ${completedChartCount} chart${completedChartCount !== 1 ? "s" : ""} for your dashboard!`);
+
+              // .pbit flow: derive a meaningful dashboard name from chart titles
+              if (autopilotConfig.isPbitGenerated && _projectId) {
+                const titles = chartSpecs
+                  .filter((s) => !!s.title)
+                  .map((s) => s.title);
+                const derivedName = deriveNameFromChartTitles(titles);
+                updateDashboard(_projectId, dashboardId, { title: derivedName })
+                  .then((resp) => {
+                    if (resp.success) {
+                      setLocalDashboardName(derivedName);
+                    }
+                  })
+                  .catch(() => {
+                    // Non-critical — dashboard still works without rename
+                  });
+              }
             } else {
               setAutopilotError("Charts were generated but could not be saved. Please try again.");
             }
@@ -809,7 +861,7 @@ export function DashboardDetailView({
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div>
-              <h2 className="text-2xl text-foreground mb-1">{dashboardName}</h2>
+              <h2 className="text-2xl text-foreground mb-1">{localDashboardName}</h2>
               <div className="flex items-center gap-3">
                 <p className="text-muted-foreground text-sm">
                   {isLoadingCharts
@@ -1084,7 +1136,7 @@ export function DashboardDetailView({
                 }
               : null
           }
-          dashboards={[{ id: dashboardId, name: dashboardName }]}
+          dashboards={[{ id: dashboardId, name: localDashboardName }]}
           projectId={_projectId}
           onApplyChanges={(modifiedSql, modifiedSpec) => {
             if (!probeChart) return;
@@ -1143,7 +1195,7 @@ export function DashboardDetailView({
           open={shareLinkModalOpen}
           onOpenChange={setShareLinkModalOpen}
           dashboardId={dashboardId}
-          dashboardName={dashboardName}
+          dashboardName={localDashboardName}
         />
       </div>
     </div>
