@@ -242,7 +242,7 @@ export function DashboardTypeSelectionModal({
       </div>
 
       {/* Mode Selection Cards */}
-      <div className={cn("px-6 py-8 transition-opacity duration-200", isLocked && "opacity-75 pointer-events-none")}>
+      <div className={cn("px-8 py-10 transition-opacity duration-200", isLocked && "opacity-75 pointer-events-none")}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
           {/* Autopilot Dashboard */}
           <motion.div
@@ -250,8 +250,8 @@ export function DashboardTypeSelectionModal({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, delay: 0.05 }}
             className={cn(
-              "relative flex flex-col items-start text-left rounded-xl border p-6 transition-all duration-200 h-full",
-              "border-primary/60 bg-gradient-to-br from-primary/5 via-accent/5 to-transparent",
+              "relative flex flex-col items-start text-left rounded-2xl border p-8 transition-all duration-200 h-full min-h-[460px]",
+              "border-primary/60 bg-card",
               "shadow-sm"
             )}
           >
@@ -260,39 +260,41 @@ export function DashboardTypeSelectionModal({
               Recommended
             </span>
 
-            <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center shadow-sm mb-4">
-              <Sparkles className="w-5 h-5 text-primary" />
+            <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center shadow-sm mb-5">
+              <Sparkles className="w-6 h-6 text-primary" />
             </div>
 
-            <h4 className="text-foreground font-semibold text-base mb-1.5">Autopilot dashboard</h4>
-            <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+            <h4 className="text-foreground font-semibold text-lg mb-2">Autopilot dashboard</h4>
+            <p className="text-sm text-muted-foreground leading-relaxed mb-6 min-h-[44px]">
               Describe the KPIs you want to monitor. AI builds a full dashboard with 5-6 charts.
             </p>
 
-            <ul className="space-y-2.5 text-xs text-muted-foreground mb-6">
-              <li className="flex items-center gap-2.5">
-                <BarChart3 className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+            <ul className="space-y-3.5 text-sm text-muted-foreground mb-8 w-full">
+              <li className="flex items-center gap-3">
+                <BarChart3 className="w-4 h-4 text-primary flex-shrink-0" />
                 <span>5-6 AI-generated charts</span>
               </li>
-              <li className="flex items-center gap-2.5">
-                <Search className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+              <li className="flex items-center gap-3">
+                <Search className="w-4 h-4 text-primary flex-shrink-0" />
                 <span>Probe mode on every chart</span>
               </li>
-              <li className="flex items-center gap-2.5">
-                <Clock className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+              <li className="flex items-center gap-3">
+                <Clock className="w-4 h-4 text-primary flex-shrink-0" />
                 <span>Ready in seconds</span>
               </li>
             </ul>
 
-            <button
-              type="button"
-              onClick={() => setMode("autopilot")}
-              disabled={isLocked}
-              className="w-full py-2.5 px-4 rounded-lg bg-primary text-primary-foreground font-medium text-sm flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-sm cursor-pointer mt-auto"
-            >
-              Get started
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="mt-auto pt-4 w-full">
+              <button
+                type="button"
+                onClick={() => setMode("autopilot")}
+                disabled={isLocked}
+                className="w-full py-3 px-4 rounded-xl bg-primary text-primary-foreground font-medium text-sm flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-sm cursor-pointer"
+              >
+                Get started
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </motion.div>
 
           {/* Generate from .pbit */}
@@ -301,31 +303,31 @@ export function DashboardTypeSelectionModal({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, delay: 0.1 }}
             className={cn(
-              "flex flex-col items-start text-left rounded-xl border p-6 transition-all duration-200 h-full",
+              "flex flex-col items-start text-left rounded-2xl border p-8 transition-all duration-200 h-full min-h-[460px]",
               "border-border/60 bg-card",
               "shadow-sm"
             )}
           >
-            <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shadow-sm mb-4">
-              <FileUp className="w-5 h-5 text-muted-foreground" />
+            <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center shadow-sm mb-5">
+              <FileUp className="w-6 h-6 text-muted-foreground" />
             </div>
 
-            <h4 className="text-foreground font-semibold text-base mb-1.5">Generate from .pbit</h4>
-            <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+            <h4 className="text-foreground font-semibold text-lg mb-2">Generate from .pbit</h4>
+            <p className="text-sm text-muted-foreground leading-relaxed mb-6 min-h-[44px]">
               Upload a Power BI template and pick a data source — AI rebuilds it as a dashboard.
             </p>
 
-            <div className="w-full space-y-3.5 my-2 mb-6">
-              <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground block">Data source</label>
+            <div className="w-full flex-1 flex flex-col justify-between my-1">
+              <div className="space-y-2 mb-6">
+                <label className="text-xs font-medium text-muted-foreground block">Data source</label>
                 {isLoadingConnections ? (
-                  <div className="w-full py-2.5 px-3 rounded-lg border border-border/60 bg-muted/30 flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                  <div className="w-full py-3 px-3.5 rounded-xl border border-border/60 bg-muted/30 flex items-center gap-2.5 text-sm text-muted-foreground">
+                    <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
                     <span>Loading connections...</span>
                   </div>
                 ) : connections.length === 0 ? (
-                  <div className="w-full py-2.5 px-3 rounded-lg border border-border/60 bg-muted/10 flex items-center gap-2 text-sm text-muted-foreground">
-                    <Database className="w-4 h-4" />
+                  <div className="w-full py-3 px-3.5 rounded-xl border border-border/60 bg-muted/10 flex items-center gap-2.5 text-sm text-muted-foreground">
+                    <Database className="w-4 h-4 flex-shrink-0" />
                     <span>No connections available</span>
                   </div>
                 ) : (
@@ -333,7 +335,7 @@ export function DashboardTypeSelectionModal({
                     value={selectedConnectionId}
                     onChange={(e) => setSelectedConnectionId(e.target.value)}
                     disabled={isLocked}
-                    className="w-full py-2.5 px-3 rounded-lg border border-border/60 bg-background hover:bg-accent/20 focus:border-primary focus:outline-none text-sm text-foreground transition-colors cursor-pointer"
+                    className="w-full py-3 px-3.5 rounded-xl border border-border/60 bg-background hover:bg-accent/20 focus:border-primary focus:outline-none text-sm text-foreground transition-colors cursor-pointer"
                   >
                     <option value="" disabled>Select a connection</option>
                     {connections.map((conn) => (
@@ -345,20 +347,20 @@ export function DashboardTypeSelectionModal({
                 )}
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground block">.pbit file</label>
+              <div className="space-y-2 mt-auto pt-4">
+                <label className="text-xs font-medium text-muted-foreground block">.pbit file</label>
                 <div
                   role="button"
                   tabIndex={0}
                   onClick={handlePbitUploadClick}
                   onKeyDown={(e) => e.key === "Enter" && handlePbitUploadClick()}
                   className={cn(
-                    "w-full py-3 px-3 rounded-lg border border-dashed transition-all flex items-center justify-center gap-2 text-sm",
+                    "w-full py-3 px-4 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2 shadow-sm",
                     isLocked
-                      ? "border-primary/60 bg-primary/5 text-primary cursor-default"
+                      ? "bg-primary/50 text-primary-foreground cursor-default"
                       : uploadedFileName
-                      ? "border-emerald-500/60 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 cursor-pointer"
-                      : "border-border/60 hover:border-primary/50 bg-transparent hover:bg-accent/40 text-muted-foreground cursor-pointer"
+                        ? "bg-emerald-600 text-white cursor-pointer hover:bg-emerald-700"
+                        : "bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
                   )}
                 >
                   {pbitFlowPhase === "extracting" ? (
@@ -373,7 +375,7 @@ export function DashboardTypeSelectionModal({
                     </>
                   ) : uploadedFileName ? (
                     <>
-                      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <CheckCircle2 className="w-4 h-4 text-white flex-shrink-0" />
                       <span className="truncate max-w-[180px] font-medium">{uploadedFileName}</span>
                     </>
                   ) : (
@@ -383,11 +385,6 @@ export function DashboardTypeSelectionModal({
                     </>
                   )}
                 </div>
-                {!isLocked && !uploadedFileName && (
-                  <p className="text-[11px] text-muted-foreground/70 text-center">
-                    Dashboard is created automatically after upload
-                  </p>
-                )}
               </div>
             </div>
           </motion.div>
@@ -398,44 +395,46 @@ export function DashboardTypeSelectionModal({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, delay: 0.15 }}
             className={cn(
-              "flex flex-col items-start text-left rounded-xl border p-6 transition-all duration-200 h-full",
+              "flex flex-col items-start text-left rounded-2xl border p-8 transition-all duration-200 h-full min-h-[460px]",
               "border-border/60 bg-card",
               "shadow-sm"
             )}
           >
-            <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shadow-sm mb-4">
-              <Briefcase className="w-5 h-5 text-muted-foreground" />
+            <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center shadow-sm mb-5">
+              <Briefcase className="w-6 h-6 text-muted-foreground" />
             </div>
 
-            <h4 className="text-foreground font-semibold text-base mb-1.5">Manual dashboard</h4>
-            <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+            <h4 className="text-foreground font-semibold text-lg mb-2">Manual dashboard</h4>
+            <p className="text-sm text-muted-foreground leading-relaxed mb-6 min-h-[44px]">
               Start with a blank dashboard and build it your way using the AI Assistant or Charts view.
             </p>
 
-            <ul className="space-y-2.5 text-xs text-muted-foreground mb-6">
-              <li className="flex items-center gap-2.5">
-                <Sliders className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+            <ul className="space-y-3.5 text-sm text-muted-foreground mb-8 w-full">
+              <li className="flex items-center gap-3">
+                <Sliders className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                 <span>Full creative control</span>
               </li>
-              <li className="flex items-center gap-2.5">
-                <Plus className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+              <li className="flex items-center gap-3">
+                <Plus className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                 <span>Add charts one by one</span>
               </li>
-              <li className="flex items-center gap-2.5">
-                <MessageSquare className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+              <li className="flex items-center gap-3">
+                <MessageSquare className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                 <span>Use AI Assistant anytime</span>
               </li>
             </ul>
 
-            <button
-              type="button"
-              onClick={() => setMode("manual")}
-              disabled={isLocked}
-              className="w-full py-2.5 px-4 rounded-lg border border-border/60 bg-transparent hover:bg-accent text-muted-foreground hover:text-foreground font-medium text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer mt-auto"
-            >
-              Create blank
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="mt-auto pt-4 w-full">
+              <button
+                type="button"
+                onClick={() => setMode("manual")}
+                disabled={isLocked}
+                className="w-full py-3 px-4 rounded-xl bg-primary text-primary-foreground font-medium text-sm flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-sm cursor-pointer"
+              >
+                Create blank
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </motion.div>
         </div>
       </div>
