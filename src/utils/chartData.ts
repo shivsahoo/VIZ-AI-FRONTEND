@@ -89,34 +89,73 @@ export const inferChartDataConfig = (
     return getDefaultChartDataConfig();
   }
 
-  const numericKeys = keys.filter(
-    (key) =>
-      typeof sample[key] === "number" ||
-      (!isNaN(Number(sample[key])) &&
-        sample[key] !== null &&
-        sample[key] !== undefined)
-  );
+  if (normalizedRows.length === 1 && keys.length === 1) {
+    const metricKey = keys[0];
+    const rawVal = sample[metricKey];
+    const numericVal =
+      rawVal !== null && rawVal !== undefined && !isNaN(Number(rawVal))
+        ? Number(rawVal)
+        : 0;
+    return {
+      data: [{ label: metricKey, value: numericVal }],
+      dataKeys: { primary: "value" },
+      xAxisKey: "label",
+    };
+  }
+
+  const isKeyNumeric = (key: string) => {
+    return normalizedRows.some((row) => {
+      const val = row[key];
+      return (
+        typeof val === "number" ||
+        (val !== null && val !== undefined && val !== "" && !isNaN(Number(val)))
+      );
+    });
+  };
+
+  const isKeyString = (key: string) => {
+    return normalizedRows.some((row) => {
+      const val = row[key];
+      return (
+        val !== null &&
+        val !== undefined &&
+        (typeof val === "string" ? isNaN(Number(val)) : typeof val === "object")
+      );
+    });
+  };
+
+  const numericKeys = keys.filter((key) => isKeyNumeric(key));
+  const stringKeys = keys.filter((key) => isKeyString(key));
+
+  keys.forEach((key) => {
+    if (!numericKeys.includes(key) && !stringKeys.includes(key)) {
+      if (options?.xAxisHint !== key) {
+        numericKeys.push(key);
+      }
+    }
+  });
 
   if (normalizedRows.length === 1 && numericKeys.length === 1 && keys.length <= 2) {
     const valueKey = numericKeys[0];
     const labelKey = keys.find((key) => key !== valueKey);
+    const rawVal = sample[valueKey];
+    const numericVal =
+      rawVal !== null && rawVal !== undefined && !isNaN(Number(rawVal))
+        ? Number(rawVal)
+        : 0;
     const singleLabel =
       labelKey && sample[labelKey] != null && sample[labelKey] !== ""
         ? String(sample[labelKey])
         : valueKey;
 
     return {
-      data: [{ label: singleLabel, value: Number(sample[valueKey]) || 0 }],
+      data: [{ label: singleLabel, value: numericVal }],
       dataKeys: { primary: "value" },
       xAxisKey: "label",
     };
   }
 
-  // Detect if we have a categorical grouping column (for multi-series charts)
-  // This happens when we have: x-axis, category, value columns
-  const stringKeys = keys.filter(
-    (key) => typeof sample[key] === "string" || typeof sample[key] === "object"
-  );
+
   
   // ── Saved series-keys hint (overrides pivot inference) ────────────────────
   // When the caller provides seriesKeysHint (e.g. restored from a saved chart
@@ -280,7 +319,7 @@ export const inferChartDataConfig = (
   // Handle case where there are NO numeric columns at all
   // This happens when backend sends label/value but value is a string
   // We'll aggregate by counting occurrences of each category
-  if (numericKeys.length === 0 && chartType === 'bar') {
+  if (numericKeys.length === 0 && chartType === 'bar' && stringKeys.length > 0) {
     console.log('[chartData] No numeric columns found for bar chart, aggregating...');
     console.log('[chartData] String keys:', stringKeys);
     console.log('[chartData] Sample data:', sample);
@@ -413,19 +452,15 @@ export interface ExtendedChartInferResult {
 
 /** Whether most sampled values in a column parse as finite numbers. */
 function isNumeric(rows: Record<string, any>[], key: string): boolean {
-  const sample = rows.slice(0, 10);
-  if (sample.length === 0) return false;
-  const ok = sample.filter((r) => {
+  const nonNullSample = rows
+    .slice(0, 20)
+    .filter((r) => r[key] !== null && r[key] !== undefined && r[key] !== "");
+  if (nonNullSample.length === 0) return false;
+  const ok = nonNullSample.filter((r) => {
     const v = r[key];
-    return (
-      typeof v === "number" ||
-      (v !== null &&
-        v !== undefined &&
-        v !== "" &&
-        !Number.isNaN(Number(v)))
-    );
+    return typeof v === "number" || !Number.isNaN(Number(v));
   }).length;
-  return ok > sample.length * 0.7;
+  return ok >= nonNullSample.length * 0.7;
 }
 
 /**
