@@ -155,6 +155,35 @@ export const inferChartDataConfig = (
     };
   }
 
+  // Handle wide-format single-row queries (e.g. SELECT target_gla, current_gla, leased_gla)
+  if (normalizedRows.length === 1 && numericKeys.length > 1 && stringKeys.length === 0) {
+    const formatMetricLabel = (k: string): string => {
+      return k
+        .replace(/_/g, " ")
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+    };
+
+    const unpivotedData = numericKeys.map((key) => {
+      const rawVal = sample[key];
+      const numericVal =
+        rawVal !== null && rawVal !== undefined && !isNaN(Number(rawVal))
+          ? Number(rawVal)
+          : 0;
+      return {
+        label: formatMetricLabel(key),
+        value: numericVal,
+      };
+    });
+
+    return {
+      data: unpivotedData,
+      dataKeys: { primary: "value" },
+      xAxisKey: "label",
+    };
+  }
+
 
   
   // ── Saved series-keys hint (overrides pivot inference) ────────────────────
