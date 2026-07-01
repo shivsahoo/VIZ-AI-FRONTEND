@@ -357,7 +357,7 @@ export function DashboardTypeSelectionModal({
                   className={cn(
                     "w-full py-3 px-4 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2 shadow-sm",
                     isLocked
-                      ? "bg-primary/50 text-primary-foreground cursor-default"
+                      ? "bg-primary text-primary-foreground cursor-default"
                       : uploadedFileName
                         ? "bg-emerald-600 text-white cursor-pointer hover:bg-emerald-700"
                         : "bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
