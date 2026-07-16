@@ -165,7 +165,7 @@ export function AuthView({ onAuthenticated }: AuthViewProps) {
                       placeholder="johndoe"
                       value={loginUsername}
                       onChange={(e) => setLoginUsername(e.target.value)}
-                      className="pl-10"
+                      className="pl-10 bg-white dark:bg-slate-800"
                       autoComplete="username"
                     />
                   </div>
@@ -181,7 +181,7 @@ export function AuthView({ onAuthenticated }: AuthViewProps) {
                       placeholder="••••••••"
                       value={loginPassword}
                       onChange={(e) => setLoginPassword(e.target.value)}
-                      className="pl-10"
+                      className="pl-10 bg-white dark:bg-slate-800"
                       autoComplete="current-password"
                     />
                   </div>
