@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, Lightbulb, BarChart3, Database, Users, Home, Sparkles, Activity } from "lucide-react";
+import { LayoutDashboard, Lightbulb, BarChart3, Database, Users, Home, Sparkles, Activity, BookOpen } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { Separator } from "../ui/separator";
 
@@ -21,6 +21,7 @@ export function WorkspaceSidebar({ activeTab, onTabChange, onOpenAIAssistant, di
 
   const bottomNavItems = [
     { id: 'databases', label: 'Databases', icon: Database },
+    { id: 'ontology', label: 'Data Ontology Explorer', icon: BookOpen },
     { id: 'team', label: 'Team', icon: Users },
   ];
 

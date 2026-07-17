@@ -904,12 +904,6 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                   {selectedDatabase ? `Visual schema graph for ${selectedDatabase.name}` : "Visual schema graph"}
                 </DialogDescription>
               </DialogHeader>
-              <GradientButton
-                onClick={() => selectedDatabase && handleEnrichDatasource(selectedDatabase)}
-                data-tour-target="enrich-datasource-btn"
-              >
-                Enrich Datasource
-              </GradientButton>
             </div>
             {isGraphLoading ? (
               <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Loading graph...</div>

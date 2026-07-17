@@ -7,6 +7,7 @@ import { ChartsView } from "./ChartsView";
 import { InsightsView } from "./InsightsView";
 import { UsersView } from "./UsersView";
 import { ObservabilityView } from "./ObservabilityView";
+import { DataOntologyExplorerView } from "./DataOntologyExplorerView";
 import { DashboardDetailView } from "./DashboardDetailView";
 import { DashboardTypeSelectionModal } from "../components/features/dashboards/DashboardTypeSelectionModal";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "../components/ui/dialog";
@@ -384,6 +385,8 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
         return <UsersView projectId={projectId} />;
       case 'observability':
         return <ObservabilityView projectId={projectId} />;
+      case 'ontology':
+        return <DataOntologyExplorerView projectId={projectId} />;
       default:
         return (
           <HomeDashboardView 

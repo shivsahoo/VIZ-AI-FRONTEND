@@ -562,7 +562,7 @@ export default function App() {
           </main>
 
           {/* AI Assistant Panel - Only visible when in workspace (except Databases and Team pages) */}
-          {isInWorkspace && workspaceTab !== 'databases' && workspaceTab !== 'team' && workspaceTab !== 'observability' && (
+          {isInWorkspace && workspaceTab !== 'databases' && workspaceTab !== 'team' && workspaceTab !== 'observability' && workspaceTab !== 'ontology' && (
                     <AIAssistant
           isOpen={isAIAssistantOpen}
           onOpenChange={(open) => {
