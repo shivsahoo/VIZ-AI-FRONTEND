@@ -18,8 +18,10 @@ import {
   Trash2,
   Upload,
   FileText,
-  LayoutGrid,
   BookOpen,
+  Maximize2,
+  Crosshair,
+  Tag,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "../../shared/ConfirmDialog";
@@ -45,21 +47,25 @@ export interface KnowledgeGraphViewerHandle {
   triggerUpload: () => void;
 }
 
-// ─── Layout constants (mirror DSGraphViewer) ──────────────────────────────────
-const MIN_ZOOM = 0.3;
+// ─── Layout constants ─────────────────────────────────────────────────────────
+const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.15;
 const SVG_W = 900;
 const SVG_H = 500;
 const CX = SVG_W / 2;
 const CY = SVG_H / 2;
-const CENTER_W = 170;
-const CENTER_H = 46;
-const NODE_W = 148;
-const NODE_H = 38;
-const NODE_R = 8;
+const CENTER_W = 172;
+const CENTER_H = 50;
+const NODE_W = 150;
+const NODE_H = 44;
+const NODE_R = 12;
 
-// ─── Entity-type colour palette ───────────────────────────────────────────────
+// Progressive-detail zoom thresholds (Neo4j-Bloom-style level of detail)
+const ZOOM_SHOW_SUBTITLE = 0.6;   // below this, hide the type subtitle
+const ZOOM_SHOW_EDGE_LABELS = 1.15; // above this, reveal all edge labels
+
+// ─── Entity-type colour palette (muted enterprise tones) ──────────────────────
 type KGNodeType =
   | "Person"
   | "Organization"
@@ -69,39 +75,65 @@ type KGNodeType =
   | "Event"
   | "Other";
 
-const TYPE_COLORS: Record<
-  KGNodeType,
-  { stroke: string; centerFill: string; connFill: string; text: string; label: string }
-> = {
-  Person:       { stroke: "#F472B6", centerFill: "#5B1A35", connFill: "#2D0A18", text: "#FBCFE8", label: "#FDA4AF" },
-  Organization: { stroke: "#60A5FA", centerFill: "#1E3A5F", connFill: "#0C1F38", text: "#BFDBFE", label: "#93C5FD" },
-  Concept:      { stroke: "#818CF8", centerFill: "#312e81", connFill: "#12103A", text: "#E0E7FF", label: "#A5B4FC" },
-  Product:      { stroke: "#34D399", centerFill: "#064E3B", connFill: "#052418", text: "#A7F3D0", label: "#6EE7B7" },
-  Location:     { stroke: "#FBBF24", centerFill: "#451A03", connFill: "#2A1800", text: "#FDE68A", label: "#FCD34D" },
-  Event:        { stroke: "#F97316", centerFill: "#431407", connFill: "#2A1000", text: "#FED7AA", label: "#FCA5A1" },
-  Other:        { stroke: "#94A3B8", centerFill: "#1e293b", connFill: "#0a0f1a", text: "#CBD5E1", label: "#64748B" },
+// Each entry: accent (border/icon), gradient fill (from→to), text + subtitle,
+// and a soft glow colour.  Backwards-compatible keys (stroke/centerFill/
+// connFill/text/label) are kept so existing consumers keep working.
+interface TypePalette {
+  stroke: string;      // accent / border  (== accent)
+  centerFill: string;  // gradient top     (== gradFrom)
+  connFill: string;    // gradient bottom  (== gradTo)
+  text: string;        // primary label
+  label: string;       // subtitle
+  gradFrom: string;
+  gradTo: string;
+  glow: string;
+}
+
+const TYPE_COLORS: Record<KGNodeType, TypePalette> = {
+  Organization: { stroke: "#5B9DF0", centerFill: "#182C45", connFill: "#101E30", text: "#DCEAFE", label: "#9DC2F0", gradFrom: "#1B3350", gradTo: "#111E30", glow: "#5B9DF0" },
+  Person:       { stroke: "#A78BFA", centerFill: "#271E42", connFill: "#181330", text: "#E9E3FB", label: "#C4B4F0", gradFrom: "#2A2148", gradTo: "#171330", glow: "#A78BFA" },
+  Location:     { stroke: "#E0A94A", centerFill: "#332614", connFill: "#231A0D", text: "#F6E5C4", label: "#D9BE84", gradFrom: "#392A16", gradTo: "#241A0D", glow: "#E0A94A" },
+  Product:      { stroke: "#3FB98C", centerFill: "#13332A", connFill: "#0C2119", text: "#CFF2E5", label: "#88D9BD", gradFrom: "#153A2E", gradTo: "#0C2119", glow: "#3FB98C" },
+  Concept:      { stroke: "#7C87F0", centerFill: "#1F2245", connFill: "#161832", text: "#E1E4FB", label: "#AAB0F0", gradFrom: "#23264C", gradTo: "#161832", glow: "#7C87F0" },
+  Event:        { stroke: "#EC8B4B", centerFill: "#341F12", connFill: "#23150B", text: "#F7E1CB", label: "#E5B183", gradFrom: "#3A2214", gradTo: "#23150B", glow: "#EC8B4B" },
+  Other:        { stroke: "#8595AB", centerFill: "#1C2634", connFill: "#131B26", text: "#D5DEEA", label: "#93A2B5", gradFrom: "#212C3B", gradTo: "#131B26", glow: "#8595AB" },
 };
 
 const DEFAULT_COLORS = TYPE_COLORS.Other;
 
-function getTypeColor(type: string) {
+function getTypeColor(type: string): TypePalette {
   return TYPE_COLORS[type as KGNodeType] ?? DEFAULT_COLORS;
 }
 
-function getNodeStyle(
-  type: string,
-  isCenter: boolean,
-  isConnected: boolean
-): { fill: string; stroke: string; textFill: string; labelFill: string } {
-  if (isCenter) {
-    const c = getTypeColor(type);
-    return { fill: c.centerFill, stroke: c.stroke, textFill: c.text, labelFill: c.label };
+// Neutral colour used for faded / unrelated nodes in focus mode.
+const MUTED_STROKE = "#26303f";
+
+// ─── Smart label wrapping (up to 2 lines, ellipsis + tooltip beyond) ─────────
+function wrapLabel(label: string, maxCharsPerLine: number, maxLines: number): string[] {
+  const clean = label.trim();
+  if (clean.length <= maxCharsPerLine) return [clean];
+  const words = clean.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= maxCharsPerLine) {
+      current = candidate;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+      if (lines.length === maxLines - 1) break;
+    }
   }
-  if (isConnected) {
-    const c = getTypeColor(type);
-    return { fill: c.connFill, stroke: c.stroke, textFill: c.text, labelFill: c.label };
+  if (current && lines.length < maxLines) lines.push(current);
+  // Whatever remains that didn't fit → ellipsize the final line
+  const consumed = lines.join(" ").length;
+  if (consumed < clean.length && lines.length > 0) {
+    let last = lines[lines.length - 1];
+    if (last.length > maxCharsPerLine - 1) last = last.slice(0, maxCharsPerLine - 1);
+    lines[lines.length - 1] = `${last}…`;
   }
-  return { fill: "#0a0f1a", stroke: "#1e293b", textFill: "#475569", labelFill: "#334155" };
+  return lines.length > 0 ? lines : [clean.slice(0, maxCharsPerLine - 1) + "…"];
 }
 
 // ─── Helper: format ISO date ──────────────────────────────────────────────────
@@ -194,6 +226,205 @@ function normalizeGraph(graph: KGGraph): KGGraph {
   };
 }
 
+type NodePos = { x: number; y: number; w: number; h: number };
+type LayoutResult = {
+  positions: Map<string, NodePos>;
+  suggestedZoom: number;
+  center: { x: number; y: number };
+};
+
+/**
+ * Deterministic force-directed layout tuned for readability (Neo4j-Bloom style):
+ *   • strong repulsion + long links so the graph spreads out
+ *   • category cohesion so same-type nodes drift into loose clusters
+ *   • hard collision resolution so no two node cards ever overlap
+ * Returns a fit zoom + the layout centre so the caller can frame the graph.
+ */
+function computeFullGraphLayout(
+  nodes: KGNode[],
+  edges: { source: string; target: string }[]
+): LayoutResult {
+  const positions = new Map<string, NodePos>();
+  if (nodes.length === 0) {
+    return { positions, suggestedZoom: 1, center: { x: CX, y: CY } };
+  }
+  if (nodes.length === 1) {
+    positions.set(nodes[0].id, { x: CX, y: CY, w: CENTER_W, h: CENTER_H });
+    return { positions, suggestedZoom: 1, center: { x: CX, y: CY } };
+  }
+
+  const n = nodes.length;
+  // World scales with node count so dense graphs get more breathing room.
+  const spread = Math.sqrt(n) * (NODE_W * 0.95);
+  const worldR = Math.max(320, spread);
+
+  // Group node indices by type so we can seed clusters + apply cohesion.
+  const typeList = Array.from(new Set(nodes.map((nd) => nd.type)));
+  const typeAngle = new Map<string, number>();
+  typeList.forEach((t, i) => typeAngle.set(t, (i / typeList.length) * 2 * Math.PI));
+
+  const coords = new Map<string, { x: number; y: number }>();
+  nodes.forEach((node, i) => {
+    // Seed each node in its type's angular sector for natural clustering.
+    const base = typeAngle.get(node.type) ?? 0;
+    const jitter = (((i * 2654435761) % 1000) / 1000 - 0.5) * 0.9;
+    const angle = base + jitter;
+    const r = worldR * (0.45 + 0.55 * (((i * 40503) % 1000) / 1000));
+    coords.set(node.id, {
+      x: CX + r * Math.cos(angle),
+      y: CY + r * Math.sin(angle),
+    });
+  });
+
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const links = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+  const idealLen = Math.max(150, Math.min(260, worldR * 0.5));
+  const repulsion = idealLen * idealLen * 1.15;
+  const iterations = Math.min(240, 90 + n * 3);
+  // Minimum centre-to-centre distances that guarantee no card overlap.
+  const minGapX = NODE_W + 34;
+  const minGapY = NODE_H + 26;
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const t = iter / iterations;
+    const alpha = 1 - t;
+    const disp = new Map<string, { x: number; y: number }>();
+    for (const node of nodes) disp.set(node.id, { x: 0, y: 0 });
+
+    // Node–node repulsion
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        const pa = coords.get(a.id)!;
+        const pb = coords.get(b.id)!;
+        let dx = pa.x - pb.x;
+        let dy = pa.y - pb.y;
+        let dist2 = dx * dx + dy * dy;
+        if (dist2 < 0.01) {
+          dx = (((i + 1) * 0.37) % 1) - 0.5;
+          dy = (((j + 1) * 0.73) % 1) - 0.5;
+          dist2 = dx * dx + dy * dy || 0.01;
+        }
+        const dist = Math.sqrt(dist2);
+        const force = (repulsion / dist2) * alpha;
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+        const da = disp.get(a.id)!;
+        const db = disp.get(b.id)!;
+        da.x += fx;
+        da.y += fy;
+        db.x -= fx;
+        db.y -= fy;
+      }
+    }
+
+    // Edge attraction (springs)
+    for (const link of links) {
+      const pa = coords.get(link.source);
+      const pb = coords.get(link.target);
+      if (!pa || !pb) continue;
+      const dx = pb.x - pa.x;
+      const dy = pb.y - pa.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      const force = (dist - idealLen) * 0.05 * alpha;
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+      const da = disp.get(link.source)!;
+      const db = disp.get(link.target)!;
+      da.x += fx;
+      da.y += fy;
+      db.x -= fx;
+      db.y -= fy;
+    }
+
+    // Category cohesion — gently pull each node toward its type centroid.
+    const centroid = new Map<string, { x: number; y: number; c: number }>();
+    for (const node of nodes) {
+      const p = coords.get(node.id)!;
+      const g = centroid.get(node.type) ?? { x: 0, y: 0, c: 0 };
+      g.x += p.x;
+      g.y += p.y;
+      g.c += 1;
+      centroid.set(node.type, g);
+    }
+    for (const node of nodes) {
+      const g = centroid.get(node.type)!;
+      const gx = g.x / g.c;
+      const gy = g.y / g.c;
+      const p = coords.get(node.id)!;
+      const d = disp.get(node.id)!;
+      d.x += (gx - p.x) * 0.02 * alpha;
+      d.y += (gy - p.y) * 0.02 * alpha;
+    }
+
+    // Weak gravity toward canvas centre keeps the graph framed.
+    for (const node of nodes) {
+      const p = coords.get(node.id)!;
+      const d = disp.get(node.id)!;
+      d.x += (CX - p.x) * 0.01 * alpha;
+      d.y += (CY - p.y) * 0.01 * alpha;
+    }
+
+    // Integrate with a capped step.
+    const maxDisp = worldR * 0.12 * alpha + 2;
+    for (const node of nodes) {
+      const p = coords.get(node.id)!;
+      const d = disp.get(node.id)!;
+      const len = Math.sqrt(d.x * d.x + d.y * d.y) || 1;
+      const scale = Math.min(maxDisp, len) / len;
+      p.x += d.x * scale;
+      p.y += d.y * scale;
+    }
+
+    // Collision resolution — push overlapping cards apart (elliptical bound).
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const pa = coords.get(nodes[i].id)!;
+        const pb = coords.get(nodes[j].id)!;
+        const dx = pb.x - pa.x;
+        const dy = pb.y - pa.y;
+        const overlapX = minGapX - Math.abs(dx);
+        const overlapY = minGapY - Math.abs(dy);
+        if (overlapX > 0 && overlapY > 0) {
+          // Resolve along the axis of least penetration.
+          if (overlapX / minGapX < overlapY / minGapY) {
+            const push = (overlapX / 2) * (dx < 0 ? -1 : 1);
+            pa.x -= push;
+            pb.x += push;
+          } else {
+            const push = (overlapY / 2) * (dy < 0 ? -1 : 1);
+            pa.y -= push;
+            pb.y += push;
+          }
+        }
+      }
+    }
+  }
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const node of nodes) {
+    const p = coords.get(node.id)!;
+    positions.set(node.id, { x: p.x, y: p.y, w: NODE_W, h: NODE_H });
+    minX = Math.min(minX, p.x - NODE_W / 2);
+    minY = Math.min(minY, p.y - NODE_H / 2);
+    maxX = Math.max(maxX, p.x + NODE_W / 2);
+    maxY = Math.max(maxY, p.y + NODE_H / 2);
+  }
+
+  const extentX = Math.max(maxX - minX, 1);
+  const extentY = Math.max(maxY - minY, 1);
+  const fitScale = Math.min((SVG_W * 0.88) / extentX, (SVG_H * 0.86) / extentY);
+  return {
+    positions,
+    suggestedZoom: Math.max(0.25, Math.min(1.1, fitScale)),
+    center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 },
+  };
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
   function KnowledgeGraphViewer(_props, ref) {
@@ -212,12 +443,17 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
     const [nodeSearch, setNodeSearch] = useState("");
     const [activeDetailsTab, setActiveDetailsTab] = useState<"overview" | "properties">("overview");
+    const [summaryOpen, setSummaryOpen] = useState(false);
+    const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+    const [labelMode, setLabelMode] = useState<"auto" | "on" | "off">("auto");
 
     // ── canvas state ──
     const [zoom, setZoom] = useState(1);
     const [offset, setOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
     const panStart = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+    const didPanRef = useRef(false);
+    const hasFittedGraph = useRef(false);
 
     // ── delete state ──
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -273,8 +509,12 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
       setGraphError(null);
       setGraphData(null);
       setSelectedNodeId(null);
+      setNodeSearch("");
+      setSummaryOpen(false);
+      setLabelMode("auto");
       setZoom(1);
       setOffset({ x: 0, y: 0 });
+      hasFittedGraph.current = false;
 
       getKnowledgeGraph(selectedDocId).then((res) => {
         if (cancelled) return;
@@ -282,11 +522,23 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
         if (res.success && res.data) {
           const normalized = normalizeGraph(res.data.graph);
           setGraphData(normalized);
-          // Auto-select first node that has at least one edge
-          const firstConnected = normalized.nodes.find((n) =>
-            normalized.edges.some((e) => e.source === n.id || e.target === n.id)
-          ) ?? normalized.nodes[0];
-          if (firstConnected) setSelectedNodeId(firstConnected.id);
+          // Auto-select the highest-degree node so the initial focus is
+          // meaningful and centrally located in the graph.
+          const degree = new Map<string, number>();
+          for (const e of normalized.edges) {
+            degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
+            degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+          }
+          let hub = normalized.nodes[0];
+          let best = -1;
+          for (const nd of normalized.nodes) {
+            const d = degree.get(nd.id) ?? 0;
+            if (d > best) {
+              best = d;
+              hub = nd;
+            }
+          }
+          if (hub) setSelectedNodeId(hub.id);
         } else {
           setGraphError(res.error?.message ?? "Failed to load graph");
         }
@@ -308,86 +560,134 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
       return { outgoing, incoming, all: [...outgoing, ...incoming] };
     }, [selectedNodeId, graphData]);
 
-    const connectedIds = useMemo(
-      () =>
-        new Set(
-          relatedEdges.all
-            .flatMap((e) => [e.source, e.target])
-            .filter((id) => id !== selectedNodeId)
-        ),
-      [relatedEdges, selectedNodeId]
+    const searchQuery = nodeSearch.trim().toLowerCase();
+
+    const matchingNodeIds = useMemo(() => {
+      if (!graphData || !searchQuery) return null;
+      return new Set(
+        graphData.nodes
+          .filter(
+            (n) =>
+              n.label.toLowerCase().includes(searchQuery) ||
+              n.type.toLowerCase().includes(searchQuery) ||
+              n.id.toLowerCase().includes(searchQuery)
+          )
+          .map((n) => n.id)
+      );
+    }, [graphData, searchQuery]);
+
+    const searchMatches = useMemo(() => {
+      if (!graphData || !matchingNodeIds) return [];
+      return graphData.nodes.filter((n) => matchingNodeIds.has(n.id));
+    }, [graphData, matchingNodeIds]);
+
+    // ── full-graph layout (all nodes + edges for the selected document) ──
+    const baseLayout = useMemo<LayoutResult>(() => {
+      if (!graphData) {
+        return {
+          positions: new Map<string, NodePos>(),
+          suggestedZoom: 1,
+          center: { x: CX, y: CY },
+        };
+      }
+      return computeFullGraphLayout(graphData.nodes, graphData.edges);
+    }, [graphData]);
+
+    // Base positions are stable across selection so selecting never reflows.
+    const nodePositions = baseLayout.positions;
+    const suggestedZoom = baseLayout.suggestedZoom;
+    const layoutCenter = baseLayout.center;
+
+    // ── adjacency: first-level neighbours of the selected node ──
+    const neighborIds = useMemo(() => {
+      const first = new Set<string>();
+      if (!graphData || !selectedNodeId) return first;
+      for (const e of graphData.edges) {
+        if (e.source === selectedNodeId) first.add(e.target);
+        if (e.target === selectedNodeId) first.add(e.source);
+      }
+      return first;
+    }, [graphData, selectedNodeId]);
+
+    // The node that drives focus/highlight — hover takes visual priority.
+    const focusId = hoveredNodeId ?? selectedNodeId;
+
+    const focusNeighborIds = useMemo(() => {
+      const s = new Set<string>();
+      if (!graphData || !focusId) return s;
+      for (const e of graphData.edges) {
+        if (e.source === focusId) s.add(e.target);
+        if (e.target === focusId) s.add(e.source);
+      }
+      return s;
+    }, [graphData, focusId]);
+
+    // Per-node render size (visual hierarchy). Layout stays fixed; only the
+    // drawn card scales, so selecting/hovering never reflows the graph.
+    const sizeFor = useCallback(
+      (id: string): { w: number; h: number } => {
+        if (id === selectedNodeId) return { w: CENTER_W, h: CENTER_H };
+        if (neighborIds.has(id)) return { w: NODE_W + 8, h: NODE_H + 3 };
+        return { w: NODE_W, h: NODE_H };
+      },
+      [selectedNodeId, neighborIds]
     );
 
-    // ── radial layout (same algorithm as DSGraphViewer) ──
-    const { nodePositions, suggestedZoom } = useMemo(() => {
-      if (!graphData || !selectedNodeId) {
-        return { nodePositions: new Map(), suggestedZoom: 1 };
-      }
-      const neighborNodes = graphData.nodes.filter(
-        (n) => n.id !== selectedNodeId && connectedIds.has(n.id)
-      );
-      const count = neighborNodes.length;
-      const minGap = NODE_W + 28;
-      const properRadius = count <= 1 ? 190 : minGap / (2 * Math.tan(Math.PI / count));
-      const radius = Math.max(190, properRadius);
-
-      const positions = new Map<string, { x: number; y: number; w: number; h: number }>();
-      positions.set(selectedNodeId, { x: CX, y: CY, w: CENTER_W, h: CENTER_H });
-
-      neighborNodes.forEach((node, i) => {
-        const angle = (i / count) * 2 * Math.PI - Math.PI / 2;
-        positions.set(node.id, {
-          x: CX + radius * Math.cos(angle),
-          y: CY + radius * Math.sin(angle),
-          w: NODE_W,
-          h: NODE_H,
-        });
-      });
-
-      const extent = radius + NODE_W * 0.6 + 16;
-      const fitScale = count === 0 ? 1 : Math.min(1, Math.min(CX, CY) / extent);
-      return { nodePositions: positions, suggestedZoom: Math.max(0.28, fitScale) };
-    }, [selectedNodeId, graphData, connectedIds]);
-
-    // Auto-fit zoom when selected node changes
-    const prevNodeRef = useRef(selectedNodeId);
+    // Fit the canvas once when a graph first loads
     useEffect(() => {
-      if (prevNodeRef.current !== selectedNodeId) {
-        prevNodeRef.current = selectedNodeId;
-        setOffset({ x: CX * (1 - suggestedZoom), y: CY * (1 - suggestedZoom) });
-        setZoom(suggestedZoom);
-      }
-    }, [selectedNodeId, suggestedZoom]);
+      if (!graphData || hasFittedGraph.current) return;
+      hasFittedGraph.current = true;
+      setOffset({
+        x: CX - suggestedZoom * layoutCenter.x,
+        y: CY - suggestedZoom * layoutCenter.y,
+      });
+      setZoom(suggestedZoom);
+    }, [graphData, suggestedZoom, layoutCenter]);
 
-    // ── bezier edge path (identical to DSGraphViewer) ──
+    // When the search query changes, jump to the first match (if any).
+    const prevSearchQuery = useRef(searchQuery);
+    useEffect(() => {
+      if (prevSearchQuery.current === searchQuery) return;
+      prevSearchQuery.current = searchQuery;
+      if (!searchQuery || searchMatches.length === 0) return;
+      setSelectedNodeId((current) => {
+        if (current && searchMatches.some((n) => n.id === current)) return current;
+        return searchMatches[0].id;
+      });
+      setActiveDetailsTab("overview");
+    }, [searchQuery, searchMatches]);
+
+    // ── bezier edge path (uses render sizes so anchors hug scaled cards) ──
     const getEdgePath = (sourceId: string, targetId: string) => {
       const src = nodePositions.get(sourceId);
       const tgt = nodePositions.get(targetId);
       if (!src || !tgt) return null;
+      const ss = sizeFor(sourceId);
+      const ts = sizeFor(targetId);
       const dx = tgt.x - src.x;
       const dy = tgt.y - src.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist === 0) return null;
       const ux = dx / dist;
       const uy = dy / dist;
-      const startX = src.x + ux * (src.w / 2 + 2);
-      const startY = src.y + uy * (src.h / 2 + 2);
-      const endX = tgt.x - ux * (tgt.w / 2 + 9);
-      const endY = tgt.y - uy * (tgt.h / 2 + 9);
-      // Near-horizontal edges (|uy| < 0.4) overlap node boxes with minimal curve.
-      // Use a larger perpendicular bend so the label clears the node height.
+      const startX = src.x + ux * (ss.w / 2 + 2);
+      const startY = src.y + uy * (ss.h / 2 + 2);
+      const endX = tgt.x - ux * (ts.w / 2 + 9);
+      const endY = tgt.y - uy * (ts.h / 2 + 9);
       const isNearHorizontal = Math.abs(uy) < 0.4;
       const curveAmt = isNearHorizontal
         ? Math.min(dist * 0.32, 60)
         : Math.min(dist * 0.18, 32);
       const mx = (startX + endX) / 2 - uy * curveAmt;
       const my = (startY + endY) / 2 + ux * curveAmt;
-      // Place label at the apex (control point) so it sits at the peak of the
-      // curve — well clear of both node boxes on horizontal/near-horizontal edges.
       return { path: `M ${startX} ${startY} Q ${mx} ${my} ${endX} ${endY}`, lx: mx, ly: my };
     };
 
-    // nodeSearch filters are applied inline in the SVG map below
+    const selectSearchMatch = (nodeId: string) => {
+      setSelectedNodeId(nodeId);
+      setActiveDetailsTab("overview");
+      setNodeSearch("");
+    };
 
     // ── filtered document list ──
     const filteredDocs = useMemo(() => {
@@ -395,24 +695,49 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
       return documents.filter((d) => !q || d.filename.toLowerCase().includes(q));
     }, [documents, docSearch]);
 
-    // ── canvas handlers (mirror DSGraphViewer) ──
+    // ── canvas handlers ──
+    const svgRef = useRef<SVGSVGElement>(null);
+
+    // Convert a client point to SVG viewBox coordinates.
+    const clientToSvg = (clientX: number, clientY: number) => {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return { x: CX, y: CY };
+      return {
+        x: ((clientX - rect.left) / rect.width) * SVG_W,
+        y: ((clientY - rect.top) / rect.height) * SVG_H,
+      };
+    };
+
+    // Zoom while keeping the point under the cursor anchored (smooth zoom UX).
     const handleWheel: React.WheelEventHandler<SVGSVGElement> = (e) => {
       e.preventDefault();
-      const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-      setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number((z + delta).toFixed(2)))));
+      const factor = e.deltaY > 0 ? 1 - ZOOM_STEP : 1 + ZOOM_STEP;
+      setZoom((z) => {
+        const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number((z * factor).toFixed(3))));
+        const p = clientToSvg(e.clientX, e.clientY);
+        setOffset((o) => ({
+          x: p.x - (p.x - o.x) * (next / z),
+          y: p.y - (p.y - o.y) * (next / z),
+        }));
+        return next;
+      });
     };
 
     const beginPan: React.MouseEventHandler<SVGSVGElement> = (e) => {
       if ((e.target as SVGElement).closest("[data-node='true']")) return;
       setIsPanning(true);
+      didPanRef.current = false;
       panStart.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
     };
 
     const onPanMove: React.MouseEventHandler<SVGSVGElement> = (e) => {
       if (!isPanning || !panStart.current) return;
+      const ddx = e.clientX - panStart.current.x;
+      const ddy = e.clientY - panStart.current.y;
+      if (Math.abs(ddx) + Math.abs(ddy) > 3) didPanRef.current = true;
       setOffset({
-        x: panStart.current.ox + (e.clientX - panStart.current.x),
-        y: panStart.current.oy + (e.clientY - panStart.current.y),
+        x: panStart.current.ox + ddx,
+        y: panStart.current.oy + ddy,
       });
     };
 
@@ -421,10 +746,51 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
       panStart.current = null;
     };
 
-    const resetView = () => {
-      setZoom(suggestedZoom);
-      setOffset({ x: CX * (1 - suggestedZoom), y: CY * (1 - suggestedZoom) });
+    // Clicking empty canvas (without dragging) clears focus back to the summary.
+    const handleCanvasClick: React.MouseEventHandler<SVGSVGElement> = (e) => {
+      if ((e.target as SVGElement).closest("[data-node='true']")) return;
+      if (didPanRef.current) return;
+      setSelectedNodeId(null);
     };
+
+    const zoomBy = (factor: number) => {
+      setZoom((z) => {
+        const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number((z * factor).toFixed(3))));
+        setOffset((o) => ({
+          x: CX - (CX - o.x) * (next / z),
+          y: CY - (CY - o.y) * (next / z),
+        }));
+        return next;
+      });
+    };
+
+    // Frame the entire graph.
+    const fitGraph = useCallback(() => {
+      setZoom(suggestedZoom);
+      setOffset({
+        x: CX - suggestedZoom * layoutCenter.x,
+        y: CY - suggestedZoom * layoutCenter.y,
+      });
+    }, [suggestedZoom, layoutCenter]);
+
+    // Center the currently selected node at a comfortable zoom.
+    const centerSelected = useCallback(() => {
+      if (!selectedNodeId) return fitGraph();
+      const pos = nodePositions.get(selectedNodeId);
+      if (!pos) return;
+      const z = Math.max(0.85, Math.min(MAX_ZOOM, zoom));
+      setZoom(z);
+      setOffset({ x: CX - z * pos.x, y: CY - z * pos.y });
+    }, [selectedNodeId, nodePositions, zoom, fitGraph]);
+
+    const resetView = fitGraph;
+
+    const toggleLabels = () =>
+      setLabelMode((m) => (m === "off" ? "auto" : "off"));
+
+    // ── level-of-detail flags (progressive disclosure on zoom) ──
+    const showSubtitles = labelMode === "off" ? false : labelMode === "on" ? true : zoom >= ZOOM_SHOW_SUBTITLE;
+    const showAllEdgeLabels = labelMode === "off" ? false : labelMode === "on" ? true : zoom >= ZOOM_SHOW_EDGE_LABELS;
 
     // ── delete handler ──
     const handleDelete = async () => {
@@ -527,6 +893,58 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
       () => (graphData ? countTypes(graphData.nodes) : {}),
       [graphData]
     );
+
+    // ── minimap geometry ──
+    const MM_W = 156;
+    const MM_H = 104;
+    const MM_PAD = 10;
+    const graphBounds = useMemo(() => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of nodePositions.values()) {
+        minX = Math.min(minX, p.x - NODE_W / 2);
+        minY = Math.min(minY, p.y - NODE_H / 2);
+        maxX = Math.max(maxX, p.x + NODE_W / 2);
+        maxY = Math.max(maxY, p.y + NODE_H / 2);
+      }
+      if (!isFinite(minX)) return { minX: 0, minY: 0, maxX: SVG_W, maxY: SVG_H };
+      return { minX, minY, maxX, maxY };
+    }, [nodePositions]);
+
+    const minimap = useMemo(() => {
+      const bw = Math.max(graphBounds.maxX - graphBounds.minX, 1);
+      const bh = Math.max(graphBounds.maxY - graphBounds.minY, 1);
+      const innerW = MM_W - MM_PAD * 2;
+      const innerH = MM_H - MM_PAD * 2;
+      const scale = Math.min(innerW / bw, innerH / bh);
+      const tx = MM_PAD + (innerW - bw * scale) / 2 - graphBounds.minX * scale;
+      const ty = MM_PAD + (innerH - bh * scale) / 2 - graphBounds.minY * scale;
+      const toMM = (x: number, y: number) => ({ x: x * scale + tx, y: y * scale + ty });
+      // Current viewport in world coords → minimap rect
+      const vx0 = (0 - offset.x) / zoom;
+      const vy0 = (0 - offset.y) / zoom;
+      const vx1 = (SVG_W - offset.x) / zoom;
+      const vy1 = (SVG_H - offset.y) / zoom;
+      const a = toMM(vx0, vy0);
+      const b = toMM(vx1, vy1);
+      return { scale, toMM, view: { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y } };
+    }, [graphBounds, offset, zoom]);
+
+    // Click minimap → recenter viewport on that world point.
+    const handleMinimapClick: React.MouseEventHandler<SVGSVGElement> = (e) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const mx = ((e.clientX - rect.left) / rect.width) * MM_W;
+      const my = ((e.clientY - rect.top) / rect.height) * MM_H;
+      const bw = Math.max(graphBounds.maxX - graphBounds.minX, 1);
+      const bh = Math.max(graphBounds.maxY - graphBounds.minY, 1);
+      const innerW = MM_W - MM_PAD * 2;
+      const innerH = MM_H - MM_PAD * 2;
+      const scale = Math.min(innerW / bw, innerH / bh);
+      const tx = MM_PAD + (innerW - bw * scale) / 2 - graphBounds.minX * scale;
+      const ty = MM_PAD + (innerH - bh * scale) / 2 - graphBounds.minY * scale;
+      const worldX = (mx - tx) / scale;
+      const worldY = (my - ty) / scale;
+      setOffset({ x: CX - zoom * worldX, y: CY - zoom * worldY });
+    };
 
     // ─────────────────────────────────────────────────────────────────────────
     // RENDER
@@ -651,14 +1069,6 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
         <div className="flex-1 flex flex-col min-w-0 bg-[#050d1a] overflow-hidden">
           {/* Toolbar */}
           <div className="flex items-center gap-2.5 px-4 py-2 border-b border-border/50 shrink-0 bg-[#06101e] h-11">
-            {/* Relationship filter pill */}
-            <div className="flex items-center gap-2 h-8 px-3 text-[12px] font-medium text-muted-foreground border border-border/50 rounded-md bg-muted/10 select-none shrink-0">
-              <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-              <span>Direct Relationships</span>
-            </div>
-
-            <div className="w-px h-5 bg-border/40 shrink-0" />
-
             {/* Node search */}
             <div className="relative shrink-0">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/70 pointer-events-none" />
@@ -667,32 +1077,98 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                 placeholder="Search nodes…"
                 value={nodeSearch}
                 onChange={(e) => setNodeSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && searchMatches[0]) {
+                    e.preventDefault();
+                    selectSearchMatch(searchMatches[0].id);
+                  } else if (e.key === "Escape") {
+                    setNodeSearch("");
+                  }
+                }}
               />
+              {searchQuery && (
+                <div className="absolute left-0 right-0 top-full mt-1 z-20 max-h-48 overflow-y-auto rounded-md border border-border/60 bg-[#0a1525] shadow-lg">
+                  {searchMatches.length === 0 ? (
+                    <p className="px-3 py-2 text-[12px] text-muted-foreground">No matching nodes</p>
+                  ) : (
+                    searchMatches.slice(0, 12).map((node) => (
+                      <button
+                        key={node.id}
+                        type="button"
+                        className={`w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/30 transition-colors ${
+                          node.id === selectedNodeId ? "bg-primary/15" : ""
+                        }`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => selectSearchMatch(node.id)}
+                      >
+                        <span
+                          className="w-1.5 h-1.5 rounded-full shrink-0"
+                          style={{ background: getTypeColor(node.type).stroke }}
+                        />
+                        <span className="text-[12px] text-foreground truncate flex-1">{node.label}</span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">{node.type}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex-1" />
 
-            {/* Zoom controls */}
+            {/* Compact icon controls */}
             <div className="flex items-center gap-1">
               <button
-                className="h-7 w-7 flex items-center justify-center rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
-                onClick={() => setZoom((z) => Math.max(MIN_ZOOM, Number((z - ZOOM_STEP).toFixed(2))))}
+                className="h-7 w-7 flex items-center justify-center rounded-md border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                onClick={fitGraph}
+                title="Fit graph"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                className="h-7 w-7 flex items-center justify-center rounded-md border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors disabled:opacity-40"
+                onClick={centerSelected}
+                disabled={!selectedNodeId}
+                title="Center selected node"
+              >
+                <Crosshair className="w-3.5 h-3.5" />
+              </button>
+
+              <div className="w-px h-5 bg-border/40 mx-0.5" />
+
+              <button
+                className="h-7 w-7 flex items-center justify-center rounded-md border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                onClick={() => zoomBy(1 - ZOOM_STEP)}
                 title="Zoom out"
               >
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
-              <span className="text-[11px] text-muted-foreground min-w-[36px] text-center tabular-nums">
+              <span className="text-[11px] text-muted-foreground min-w-[36px] text-center tabular-nums select-none">
                 {Math.round(zoom * 100)}%
               </span>
               <button
-                className="h-7 w-7 flex items-center justify-center rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
-                onClick={() => setZoom((z) => Math.min(MAX_ZOOM, Number((z + ZOOM_STEP).toFixed(2))))}
+                className="h-7 w-7 flex items-center justify-center rounded-md border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                onClick={() => zoomBy(1 + ZOOM_STEP)}
                 title="Zoom in"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
               </button>
+
+              <div className="w-px h-5 bg-border/40 mx-0.5" />
+
               <button
-                className="h-7 w-7 flex items-center justify-center rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors ml-0.5"
+                className={`h-7 w-7 flex items-center justify-center rounded-md border transition-colors ${
+                  labelMode === "off"
+                    ? "border-primary/50 text-primary bg-primary/10"
+                    : "border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                }`}
+                onClick={toggleLabels}
+                title={labelMode === "off" ? "Show labels" : "Hide labels"}
+              >
+                <Tag className="w-3.5 h-3.5" />
+              </button>
+              <button
+                className="h-7 w-7 flex items-center justify-center rounded-md border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
                 onClick={resetView}
                 title="Reset view"
               >
@@ -723,6 +1199,7 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
               </div>
             ) : (
               <svg
+                ref={svgRef}
                 viewBox={`0 0 ${SVG_W} ${SVG_H}`}
                 className={`w-full h-full ${isPanning ? "cursor-grabbing" : "cursor-grab"}`}
                 onWheel={handleWheel}
@@ -730,67 +1207,138 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                 onMouseMove={onPanMove}
                 onMouseUp={endPan}
                 onMouseLeave={endPan}
+                onClick={handleCanvasClick}
               >
                 <defs>
-                  <marker id="kg-arrow-out" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
-                    <path d="M0,0.5 L8.5,4 L0,7.5" fill="none" stroke="#818CF8" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  <marker id="kg-arrow-out" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                    <path d="M0,0.5 L7.5,3.5 L0,6.5" fill="none" stroke="#7C87F0" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
                   </marker>
-                  <marker id="kg-arrow-in" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
-                    <path d="M0,0.5 L8.5,4 L0,7.5" fill="none" stroke="#38BDF8" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  <marker id="kg-arrow-in" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                    <path d="M0,0.5 L7.5,3.5 L0,6.5" fill="none" stroke="#57C0F5" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
                   </marker>
-                  <filter id="kg-glow" x="-30%" y="-30%" width="160%" height="160%">
-                    <feGaussianBlur stdDeviation="4" result="blur" />
+                  {/* Per-type card gradients */}
+                  {(Object.entries(TYPE_COLORS) as [KGNodeType, TypePalette][]).map(
+                    ([t, c]) => (
+                      <linearGradient key={t} id={`kg-grad-${t}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={c.gradFrom} />
+                        <stop offset="100%" stopColor={c.gradTo} />
+                      </linearGradient>
+                    )
+                  )}
+                  <linearGradient id="kg-grad-muted" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#151d2a" />
+                    <stop offset="100%" stopColor="#0d141f" />
+                  </linearGradient>
+                  <filter id="kg-glow" x="-60%" y="-60%" width="220%" height="220%">
+                    <feGaussianBlur stdDeviation="3.5" result="blur" />
                     <feMerge>
                       <feMergeNode in="blur" />
                       <feMergeNode in="SourceGraphic" />
                     </feMerge>
                   </filter>
-                  <filter id="kg-shadow" x="-10%" y="-10%" width="120%" height="130%">
-                    <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#000" floodOpacity="0.4" />
+                  <filter id="kg-shadow" x="-20%" y="-20%" width="140%" height="150%">
+                    <feDropShadow dx="0" dy="2" stdDeviation="4" floodColor="#000" floodOpacity="0.45" />
                   </filter>
+                  <pattern id="kg-dots" width="28" height="28" patternUnits="userSpaceOnUse">
+                    <circle cx="2" cy="2" r="1" fill="#17223a" />
+                  </pattern>
                 </defs>
 
                 <g transform={`translate(${offset.x}, ${offset.y}) scale(${zoom})`}>
-                  {/* Edges */}
-                  {relatedEdges.all.map((edge) => {
+                  {/* Spatial reference grid (pans with the graph) */}
+                  <rect x={-3000} y={-3000} width={6000} height={6000} fill="url(#kg-dots)" pointerEvents="none" />
+                  {/* Edges — render every relation for this document */}
+                  {graphData.edges.map((edge) => {
                     const result = getEdgePath(edge.source, edge.target);
                     if (!result) return null;
-                    const isOutgoing = edge.source === selectedNodeId;
-                    const strokeColor = isOutgoing ? "#818CF8" : "#38BDF8";
-                    const markerId = isOutgoing ? "url(#kg-arrow-out)" : "url(#kg-arrow-in)";
+
+                    const touchesFocus =
+                      !!focusId &&
+                      (edge.source === focusId || edge.target === focusId);
+                    const isOutgoing = edge.source === focusId;
+                    const searchActive = matchingNodeIds != null;
+                    const searchDim =
+                      searchActive &&
+                      !matchingNodeIds!.has(edge.source) &&
+                      !matchingNodeIds!.has(edge.target);
+
+                    // Focus mode: highlight edges on the focused node, fade the rest.
+                    const groupOpacity = searchDim
+                      ? 0.06
+                      : touchesFocus
+                        ? 1
+                        : focusId
+                          ? 0.16
+                          : 0.5;
+
+                    const strokeColor = touchesFocus
+                      ? isOutgoing
+                        ? "#7C87F0"
+                        : "#57C0F5"
+                      : "#3a4a63";
+                    const markerId = touchesFocus
+                      ? isOutgoing
+                        ? "url(#kg-arrow-out)"
+                        : "url(#kg-arrow-in)"
+                      : undefined;
+
                     const rawLabel = edge.label ?? "";
-                    const displayLabel = rawLabel.length > 18 ? `${rawLabel.slice(0, 17)}…` : rawLabel;
-                    const labelW = displayLabel.length * 5.8 + 10;
+                    const showLabel =
+                      rawLabel.length > 0 &&
+                      !searchDim &&
+                      (touchesFocus || showAllEdgeLabels);
+                    const displayLabel =
+                      rawLabel.length > 20 ? `${rawLabel.slice(0, 19)}…` : rawLabel;
+                    const labelW = displayLabel.length * 5.6 + 12;
 
                     return (
-                      <g key={edge.id}>
+                      <g
+                        key={edge.id}
+                        opacity={groupOpacity}
+                        style={{ transition: "opacity 220ms ease" }}
+                      >
+                        {touchesFocus && (
+                          <path
+                            d={result.path}
+                            fill="none"
+                            stroke={strokeColor}
+                            strokeOpacity="0.14"
+                            strokeWidth="5"
+                          />
+                        )}
                         <path
                           d={result.path}
                           fill="none"
                           stroke={strokeColor}
-                          strokeOpacity="0.12"
-                          strokeWidth="5"
-                        />
-                        <path
-                          d={result.path}
-                          fill="none"
-                          stroke={strokeColor}
-                          strokeOpacity="0.75"
-                          strokeWidth="1.5"
+                          strokeOpacity={touchesFocus ? 0.9 : 0.55}
+                          strokeWidth={touchesFocus ? 1.4 : 0.9}
+                          strokeLinecap="round"
                           markerEnd={markerId}
-                        />
-                        {displayLabel && (
+                          strokeDasharray={touchesFocus ? "5 6" : undefined}
+                        >
+                          {touchesFocus && (
+                            <animate
+                              attributeName="stroke-dashoffset"
+                              from="22"
+                              to="0"
+                              dur="1.1s"
+                              repeatCount="indefinite"
+                            />
+                          )}
+                        </path>
+                        {showLabel && (
                           <g>
+                            <title>{rawLabel}</title>
                             <rect
                               x={result.lx - labelW / 2}
-                              y={result.ly - 9}
+                              y={result.ly - 8}
                               width={labelW}
-                              height={13}
-                              rx={4}
-                              fill="#080e1c"
-                              fillOpacity="0.88"
+                              height={14}
+                              rx={5}
+                              fill="#0a1220"
+                              fillOpacity="0.92"
                               stroke={strokeColor}
-                              strokeOpacity="0.28"
+                              strokeOpacity="0.3"
                               strokeWidth="0.8"
                             />
                             <text
@@ -799,10 +1347,9 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                               textAnchor="middle"
                               dominantBaseline="middle"
                               fontSize="8.5"
-                              fill={strokeColor}
+                              fill={touchesFocus ? strokeColor : "#8595ab"}
                               fillOpacity="0.95"
                               className="select-none"
-                              fontFamily="monospace"
                             >
                               {displayLabel}
                             </text>
@@ -812,35 +1359,65 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                     );
                   })}
 
-                  {/* Nodes */}
+                  {/* Nodes — all entities for this document */}
                   {graphData.nodes.map((node) => {
                     const pos = nodePositions.get(node.id);
-                    // Show all nodes but make unconnected ones invisible (same radius trick)
                     if (!pos) return null;
-                    const isCenter = node.id === selectedNodeId;
-                    const isConnected = connectedIds.has(node.id);
 
-                    // For node search: dim non-matching when search active
-                    const matchesSearch =
-                      !nodeSearch ||
-                      node.label.toLowerCase().includes(nodeSearch.toLowerCase()) ||
-                      node.type.toLowerCase().includes(nodeSearch.toLowerCase());
-                    if (!isCenter && !isConnected) return null; // only show center + neighbors
-                    if (nodeSearch && !matchesSearch && !isCenter) return null;
+                    const isSelected = node.id === selectedNodeId;
+                    const isNeighbor = neighborIds.has(node.id);
+                    const isHovered = hoveredNodeId === node.id;
+                    const searchActive = matchingNodeIds != null;
+                    const matchesSearch = !searchActive || matchingNodeIds!.has(node.id);
 
-                    const style = getNodeStyle(node.type, isCenter, isConnected);
-                    const nx = pos.x - pos.w / 2;
-                    const ny = pos.y - pos.h / 2;
-                    const truncLabel = node.label.length > 18 ? `${node.label.slice(0, 18)}…` : node.label;
-                    const truncType = node.type.length > 14 ? `${node.type.slice(0, 14)}…` : node.type;
-                    const iconSize = pos.h - 10;
-                    const iconX = nx + 6;
-                    const iconY = ny + 5;
-                    const iconBg = isCenter
-                      ? getTypeColor(node.type).centerFill
-                      : getTypeColor(node.type).connFill;
-                    const iconAccent = style.stroke;
-                    const textX = nx + iconSize + 14;
+                    // Focus/hover fade (Neo4j-Bloom style).
+                    const inFocusSet =
+                      !focusId ||
+                      node.id === focusId ||
+                      focusNeighborIds.has(node.id);
+                    const opacity = searchActive
+                      ? matchesSearch
+                        ? 1
+                        : 0.12
+                      : inFocusSet
+                        ? 1
+                        : 0.3;
+
+                    const size = sizeFor(node.id);
+                    const w = size.w;
+                    const h = size.h;
+                    const nx = pos.x - w / 2;
+                    const ny = pos.y - h / 2;
+
+                    const palette = getTypeColor(node.type);
+                    const accent = palette.stroke;
+                    // Faded nodes drop to a muted fill so the focus set pops.
+                    const bright = inFocusSet || isHovered || matchesSearch;
+                    const fillUrl = bright
+                      ? `url(#kg-grad-${(TYPE_COLORS[node.type as KGNodeType] ? node.type : "Other") as string})`
+                      : "url(#kg-grad-muted)";
+                    const borderColor = bright ? accent : MUTED_STROKE;
+                    const strokeWidth = isSelected ? 2.2 : isNeighbor ? 1.5 : 1.1;
+
+                    // Card geometry
+                    const iconD = Math.min(h - 14, 22);
+                    const iconCx = nx + 11 + iconD / 2;
+                    const iconCy = pos.y;
+                    const textX = nx + 11 + iconD + 9;
+                    const availW = nx + w - 10 - textX;
+                    const titleSize = isSelected ? 12 : 10.5;
+                    const maxChars = Math.max(6, Math.floor(availW / (titleSize * 0.56)));
+                    const allowTwoLines = isSelected || isHovered;
+                    const titleLines = wrapLabel(
+                      node.label,
+                      maxChars,
+                      allowTwoLines ? 2 : 1
+                    );
+                    const twoLines = titleLines.length > 1;
+                    const showSub = showSubtitles && !twoLines;
+
+                    const textColor = bright ? palette.text : "#5c6b80";
+                    const subColor = bright ? palette.label : "#3c4759";
 
                     return (
                       <g
@@ -850,66 +1427,136 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                           setSelectedNodeId(node.id);
                           setActiveDetailsTab("overview");
                         }}
-                        style={{ cursor: "pointer" }}
-                        filter={isCenter ? "url(#kg-glow)" : "url(#kg-shadow)"}
+                        onMouseEnter={() => setHoveredNodeId(node.id)}
+                        onMouseLeave={() =>
+                          setHoveredNodeId((id) => (id === node.id ? null : id))
+                        }
+                        style={{
+                          cursor: "pointer",
+                          opacity,
+                          transformBox: "fill-box",
+                          transformOrigin: "center",
+                          transform: isHovered ? "scale(1.06)" : "scale(1)",
+                          transition:
+                            "transform 160ms cubic-bezier(0.2,0.7,0.3,1), opacity 220ms ease",
+                        }}
+                        filter={
+                          isSelected || isHovered
+                            ? "url(#kg-glow)"
+                            : "url(#kg-shadow)"
+                        }
                       >
+                        <title>{`${node.label} — ${node.type}`}</title>
+
+                        {/* Animated selection ring */}
+                        {isSelected && (
+                          <rect
+                            x={nx - 3.5}
+                            y={ny - 3.5}
+                            width={w + 7}
+                            height={h + 7}
+                            rx={NODE_R + 3}
+                            fill="none"
+                            stroke={accent}
+                            strokeWidth="1.4"
+                          >
+                            <animate
+                              attributeName="stroke-opacity"
+                              values="0.55;0.12;0.55"
+                              dur="2.6s"
+                              repeatCount="indefinite"
+                            />
+                          </rect>
+                        )}
+
+                        {/* Card body */}
                         <rect
                           x={nx}
                           y={ny}
-                          width={pos.w}
-                          height={pos.h}
+                          width={w}
+                          height={h}
                           rx={NODE_R}
-                          fill={style.fill}
-                          stroke={style.stroke}
-                          strokeWidth={isCenter ? 1.8 : 1}
+                          fill={fillUrl}
+                          stroke={borderColor}
+                          strokeWidth={strokeWidth}
+                          strokeOpacity={bright ? (isSelected ? 1 : 0.85) : 0.7}
                         />
-                        {/* Type-colored top strip */}
-                        <rect
-                          x={nx}
-                          y={ny}
-                          width={pos.w}
-                          height={isCenter ? 4 : 3}
-                          rx={NODE_R}
-                          fill={style.stroke}
-                          fillOpacity="0.7"
+                        {/* Accent side rail */}
+                        {bright && (
+                          <rect
+                            x={nx}
+                            y={ny + NODE_R / 2}
+                            width={3}
+                            height={h - NODE_R}
+                            rx={1.5}
+                            fill={accent}
+                            fillOpacity={isSelected ? 0.95 : 0.7}
+                          />
+                        )}
+
+                        {/* Type icon dot */}
+                        <circle
+                          cx={iconCx}
+                          cy={iconCy}
+                          r={iconD / 2}
+                          fill={accent}
+                          fillOpacity={bright ? 0.92 : 0.5}
                         />
-                        {/* Entity icon background */}
-                        <rect x={iconX} y={iconY} width={iconSize} height={iconSize} rx={4} fill={iconBg} />
-                        {/* Letter initial */}
                         <text
-                          x={iconX + iconSize / 2}
-                          y={iconY + iconSize / 2}
+                          x={iconCx}
+                          y={iconCy}
                           textAnchor="middle"
-                          dominantBaseline="middle"
-                          fontSize={iconSize * 0.55}
+                          dominantBaseline="central"
+                          fontSize={iconD * 0.56}
                           fontWeight="700"
-                          fill={iconAccent}
-                          fillOpacity="0.9"
+                          fill="#0b1220"
                           className="select-none"
                         >
-                          {node.type.charAt(0)}
+                          {node.type.charAt(0).toUpperCase()}
                         </text>
-                        {/* Primary label */}
+
+                        {/* Title (1–2 smart-wrapped lines) */}
                         <text
                           x={textX}
-                          y={ny + (isCenter ? 18 : 15)}
-                          fontSize={isCenter ? "11" : "10"}
-                          fontWeight={isCenter ? "700" : "500"}
-                          fill={style.textFill}
+                          fontSize={titleSize}
+                          fontWeight={isSelected ? 700 : 600}
+                          fill={textColor}
                           className="select-none"
                         >
-                          {truncLabel}
+                          {twoLines ? (
+                            <>
+                              <tspan x={textX} y={pos.y - 6} dominantBaseline="middle">
+                                {titleLines[0]}
+                              </tspan>
+                              <tspan x={textX} y={pos.y + 6} dominantBaseline="middle">
+                                {titleLines[1]}
+                              </tspan>
+                            </>
+                          ) : (
+                            <tspan
+                              x={textX}
+                              y={showSub ? pos.y - 6 : pos.y}
+                              dominantBaseline="middle"
+                            >
+                              {titleLines[0]}
+                            </tspan>
+                          )}
                         </text>
-                        {/* Sub-label (type) */}
-                        <text
-                          x={textX}
-                          y={ny + (isCenter ? 31 : 27)}
-                          fontSize="8.5"
-                          fill={style.labelFill}
-                          className="select-none"
-                        >
-                          {isCenter ? truncType : truncType}
-                        </text>
+
+                        {/* Subtitle (type) — hidden when zoomed out or wrapped */}
+                        {showSub && (
+                          <text
+                            x={textX}
+                            y={pos.y + 8}
+                            fontSize="8.5"
+                            fontWeight="500"
+                            fill={subColor}
+                            dominantBaseline="middle"
+                            className="select-none"
+                          >
+                            {node.type}
+                          </text>
+                        )}
                       </g>
                     );
                   })}
@@ -919,7 +1566,7 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
 
             {/* Entity Type Legend */}
             {graphData && graphData.nodes.length > 0 && (
-              <div className="absolute bottom-3 left-4 flex flex-wrap items-center gap-x-4 gap-y-1">
+              <div className="absolute bottom-3 left-4 flex flex-wrap items-center gap-x-4 gap-y-1 max-w-[calc(100%-200px)]">
                 {(Object.keys(TYPE_COLORS) as KGNodeType[])
                   .filter((t) => typeCounts[t])
                   .map((t) => (
@@ -935,17 +1582,84 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                   ))}
               </div>
             )}
+
+            {/* Minimap */}
+            {graphData && graphData.nodes.length > 1 && (
+              <div className="absolute bottom-3 right-3 rounded-lg border border-border/50 bg-[#070f1c]/85 backdrop-blur-sm shadow-lg overflow-hidden">
+                <svg
+                  width={MM_W}
+                  height={MM_H}
+                  viewBox={`0 0 ${MM_W} ${MM_H}`}
+                  className="cursor-pointer block"
+                  onClick={handleMinimapClick}
+                >
+                  <rect x={0} y={0} width={MM_W} height={MM_H} fill="transparent" />
+                  {graphData.edges.map((edge) => {
+                    const s = nodePositions.get(edge.source);
+                    const t = nodePositions.get(edge.target);
+                    if (!s || !t) return null;
+                    const a = minimap.toMM(s.x, s.y);
+                    const b = minimap.toMM(t.x, t.y);
+                    return (
+                      <line
+                        key={edge.id}
+                        x1={a.x}
+                        y1={a.y}
+                        x2={b.x}
+                        y2={b.y}
+                        stroke="#26374f"
+                        strokeWidth="0.5"
+                        strokeOpacity="0.6"
+                      />
+                    );
+                  })}
+                  {graphData.nodes.map((node) => {
+                    const p = nodePositions.get(node.id);
+                    if (!p) return null;
+                    const m = minimap.toMM(p.x, p.y);
+                    const isSel = node.id === selectedNodeId;
+                    return (
+                      <circle
+                        key={node.id}
+                        cx={m.x}
+                        cy={m.y}
+                        r={isSel ? 2.6 : 1.6}
+                        fill={getTypeColor(node.type).stroke}
+                        fillOpacity={isSel ? 1 : 0.75}
+                      />
+                    );
+                  })}
+                  {/* Viewport rectangle */}
+                  <rect
+                    x={minimap.view.x}
+                    y={minimap.view.y}
+                    width={minimap.view.w}
+                    height={minimap.view.h}
+                    fill="#5B9DF0"
+                    fillOpacity="0.1"
+                    stroke="#5B9DF0"
+                    strokeOpacity="0.7"
+                    strokeWidth="1"
+                    rx={2}
+                    pointerEvents="none"
+                  />
+                </svg>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* ══════════════ RIGHT: Details Panel ══════════════ */}
-        <div className="w-[280px] shrink-0 flex flex-col border-l border-border bg-card overflow-hidden">
+        {/* ══════════════ RIGHT: Details Panel (fixed width — never resizes the canvas) ══════════════ */}
+        <div
+          className="shrink-0 flex flex-col border-l border-border bg-card overflow-hidden"
+          style={{ width: 300, minWidth: 300, maxWidth: 300 }}
+        >
           {selectedNode ? (
-            /* ── Node selected: show node details ── */
+            /* ── Node selected: fixed header + tabs + scrollable body + pinned footer ── */
             <>
-              {/* Node header — no bottom border so no line above tabs */}
-              <div className="px-4 pt-4 pb-3 shrink-0">
-                <div className="flex items-center gap-3">
+              {/* Fixed-height header */}
+              <div className="px-4 pt-4 pb-3 shrink-0 h-[76px] overflow-hidden">
+                <div className="flex items-start gap-3 h-full">
                   <div
                     className="w-9 h-9 rounded-lg border-2 flex items-center justify-center shrink-0 text-[13px] font-bold"
                     style={{
@@ -956,31 +1670,34 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                   >
                     {selectedNode.type.charAt(0)}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-semibold text-foreground leading-tight truncate" title={selectedNode.label}>
-                      {selectedNode.label}
+                  <div className="min-w-0 flex-1 overflow-hidden">
+                    <p
+                      className="text-[13px] font-semibold text-foreground leading-snug line-clamp-2 break-words"
+                      title={selectedNode.label}
+                    >
+                      {selectedNode.label || "—"}
                     </p>
                     <span
-                      className="inline-flex items-center px-1.5 py-px rounded text-[11px] font-medium mt-1"
+                      className="inline-flex items-center max-w-full truncate px-1.5 py-px rounded text-[11px] font-medium mt-1"
                       style={{
                         background: getTypeColor(selectedNode.type).centerFill,
                         color: getTypeColor(selectedNode.type).stroke,
                         border: `1px solid ${getTypeColor(selectedNode.type).stroke}35`,
                       }}
                     >
-                      {selectedNode.type}
+                      {selectedNode.type || "Other"}
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* Overview / Properties tabs — border-b-2 -mb-px for correct underline position */}
-              <div className="flex border-b border-border/60 shrink-0">
+              {/* Fixed tabs */}
+              <div className="flex border-b border-border/60 shrink-0 h-9">
                 {(["overview", "properties"] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveDetailsTab(tab)}
-                    className={`flex-1 text-[13px] font-medium py-2 transition-colors duration-150 border-b-2 -mb-px ${
+                    className={`flex-1 text-[13px] font-medium transition-colors duration-150 border-b-2 -mb-px ${
                       activeDetailsTab === tab
                         ? "border-primary text-primary"
                         : "border-transparent text-muted-foreground hover:text-foreground"
@@ -991,146 +1708,157 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                 ))}
               </div>
 
-              {/*
-                Layout anchor: Overview always stays rendered (defines the panel height).
-                Properties overlays it absolutely so the panel never shrinks.
-              */}
-              <div className="relative overflow-y-auto">
-
-                {/* ── OVERVIEW — always in DOM, defines the container height ── */}
-                <div className={`px-4 py-3 flex flex-col gap-4 ${activeDetailsTab !== "overview" ? "opacity-0 pointer-events-none select-none" : ""}`}>
-
-                  {/* Relationship count cards */}
-                  <div>
-                    <p className="text-[13px] font-semibold text-foreground mb-2">Direct Relationships</p>
-                    <div className="flex gap-2">
-                      <div className="flex-1 rounded-md bg-muted/15 border border-border/50 py-2.5 text-center">
-                        <p className="text-[18px] font-bold text-[#818CF8] leading-none">{relatedEdges.outgoing.length}</p>
-                        <p className="text-[11px] text-muted-foreground mt-1">Outgoing</p>
+              {/* Scrollable content — only the active tab is mounted (avoids stacked-panel bugs) */}
+              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-3">
+                {activeDetailsTab === "overview" ? (
+                  <div className="flex flex-col gap-4">
+                    {/* Relationship count cards */}
+                    <div className="shrink-0">
+                      <p className="text-[13px] font-semibold text-foreground mb-2">Direct Relationships</p>
+                      <div className="flex gap-2">
+                        <div className="flex-1 min-w-0 rounded-md bg-muted/15 border border-border/50 py-2.5 text-center">
+                          <p className="text-[18px] font-bold text-[#818CF8] leading-none tabular-nums">
+                            {relatedEdges.outgoing.length}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-1">Outgoing</p>
+                        </div>
+                        <div className="flex-1 min-w-0 rounded-md bg-muted/15 border border-border/50 py-2.5 text-center">
+                          <p className="text-[18px] font-bold text-[#38BDF8] leading-none tabular-nums">
+                            {relatedEdges.incoming.length}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-1">Incoming</p>
+                        </div>
                       </div>
-                      <div className="flex-1 rounded-md bg-muted/15 border border-border/50 py-2.5 text-center">
-                        <p className="text-[18px] font-bold text-[#38BDF8] leading-none">{relatedEdges.incoming.length}</p>
-                        <p className="text-[11px] text-muted-foreground mt-1">Incoming</p>
-                      </div>
+                    </div>
+
+                    {/* Outgoing */}
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold text-foreground mb-2 flex items-center gap-1.5 min-w-0">
+                        <ArrowUpRight className="w-3.5 h-3.5 text-[#818CF8] shrink-0" />
+                        <span className="shrink-0">Outgoing</span>
+                        <span className="text-[12px] text-muted-foreground font-normal truncate">
+                          ({selectedNode.label} → Other)
+                        </span>
+                      </p>
+                      {relatedEdges.outgoing.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {relatedEdges.outgoing.map((edge) => {
+                            const targetNode = graphData?.nodes.find((n) => n.id === edge.target);
+                            return (
+                              <button
+                                key={edge.id}
+                                className="w-full h-8 flex items-center gap-2 px-2.5 rounded-md hover:bg-muted/25 transition-colors group text-left min-w-0"
+                                onClick={() => { setSelectedNodeId(edge.target); setActiveDetailsTab("overview"); }}
+                              >
+                                <div
+                                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                                  style={{ background: getTypeColor(targetNode?.type ?? "Other").stroke }}
+                                />
+                                <span className="text-[13px] text-foreground truncate flex-1 min-w-0">
+                                  {targetNode?.label ?? edge.target}
+                                </span>
+                                <span
+                                  className="text-[11px] text-muted-foreground/70 shrink-0 font-mono max-w-[72px] truncate"
+                                  title={edge.label}
+                                >
+                                  {edge.label || "—"}
+                                </span>
+                                <ChevronRight className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 transition-colors" />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[12px] text-muted-foreground px-2.5 py-2">No relationships</p>
+                      )}
+                    </div>
+
+                    {/* Incoming */}
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold text-foreground mb-2 flex items-center gap-1.5 min-w-0">
+                        <ArrowDownLeft className="w-3.5 h-3.5 text-[#38BDF8] shrink-0" />
+                        <span className="shrink-0">Incoming</span>
+                        <span className="text-[12px] text-muted-foreground font-normal truncate">
+                          (Other → {selectedNode.label})
+                        </span>
+                      </p>
+                      {relatedEdges.incoming.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {relatedEdges.incoming.map((edge) => {
+                            const sourceNode = graphData?.nodes.find((n) => n.id === edge.source);
+                            return (
+                              <button
+                                key={edge.id}
+                                className="w-full h-8 flex items-center gap-2 px-2.5 rounded-md hover:bg-muted/25 transition-colors group text-left min-w-0"
+                                onClick={() => { setSelectedNodeId(edge.source); setActiveDetailsTab("overview"); }}
+                              >
+                                <div
+                                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                                  style={{ background: getTypeColor(sourceNode?.type ?? "Other").stroke }}
+                                />
+                                <span className="text-[13px] text-foreground truncate flex-1 min-w-0">
+                                  {sourceNode?.label ?? edge.source}
+                                </span>
+                                <span
+                                  className="text-[11px] text-muted-foreground/70 shrink-0 font-mono max-w-[72px] truncate"
+                                  title={edge.label}
+                                >
+                                  {edge.label || "—"}
+                                </span>
+                                <ChevronRight className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 transition-colors" />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[12px] text-muted-foreground px-2.5 py-2">No relationships</p>
+                      )}
                     </div>
                   </div>
-
-                  {/* Outgoing relationships */}
-                  {relatedEdges.outgoing.length > 0 && (
-                    <div>
-                      <p className="text-[13px] font-semibold text-foreground mb-2 flex items-center gap-1.5">
-                        <ArrowUpRight className="w-3.5 h-3.5 text-[#818CF8]" />
-                        <span>Outgoing</span>
-                        <span className="text-[13px] text-muted-foreground font-normal">({selectedNode.label} → Other)</span>
-                      </p>
-                      <div className="space-y-0.5">
-                        {relatedEdges.outgoing.slice(0, 12).map((edge) => {
-                          const targetNode = graphData?.nodes.find((n) => n.id === edge.target);
-                          return (
-                            <button
-                              key={edge.id}
-                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-muted/25 transition-colors group text-left"
-                              onClick={() => { setSelectedNodeId(edge.target); setActiveDetailsTab("overview"); }}
-                            >
-                              <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: getTypeColor(targetNode?.type ?? "Other").stroke }} />
-                              <span className="text-[13px] text-foreground truncate flex-1 min-w-0">{targetNode?.label ?? edge.target}</span>
-                              <span className="text-[11px] text-muted-foreground/70 shrink-0 font-mono">{edge.label}</span>
-                              <ChevronRight className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 transition-colors" />
-                            </button>
-                          );
-                        })}
-                        {relatedEdges.outgoing.length > 12 && (
-                          <p className="text-[13px] text-muted-foreground px-2.5 pt-1">+{relatedEdges.outgoing.length - 12} more</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Incoming relationships */}
-                  {relatedEdges.incoming.length > 0 && (
-                    <div>
-                      <p className="text-[13px] font-semibold text-foreground mb-2 flex items-center gap-1.5">
-                        <ArrowDownLeft className="w-3.5 h-3.5 text-[#38BDF8]" />
-                        <span>Incoming</span>
-                        <span className="text-[13px] text-muted-foreground font-normal">(Other → {selectedNode.label})</span>
-                      </p>
-                      <div className="space-y-0.5">
-                        {relatedEdges.incoming.slice(0, 12).map((edge) => {
-                          const sourceNode = graphData?.nodes.find((n) => n.id === edge.source);
-                          return (
-                            <button
-                              key={edge.id}
-                              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-muted/25 transition-colors group text-left"
-                              onClick={() => { setSelectedNodeId(edge.source); setActiveDetailsTab("overview"); }}
-                            >
-                              <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: getTypeColor(sourceNode?.type ?? "Other").stroke }} />
-                              <span className="text-[13px] text-foreground truncate flex-1 min-w-0">{sourceNode?.label ?? edge.source}</span>
-                              <span className="text-[11px] text-muted-foreground/70 shrink-0 font-mono">{edge.label}</span>
-                              <ChevronRight className="w-3 h-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0 transition-colors" />
-                            </button>
-                          );
-                        })}
-                        {relatedEdges.incoming.length > 12 && (
-                          <p className="text-[13px] text-muted-foreground px-2.5 pt-1">+{relatedEdges.incoming.length - 12} more</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {relatedEdges.all.length === 0 && (
-                    <div className="text-center py-6">
-                      <p className="text-[13px] text-muted-foreground">No relationships found for this node.</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* ── PROPERTIES — overlaid absolutely, never affects container height ── */}
-                {activeDetailsTab === "properties" && (
-                  <div className="absolute inset-0 bg-card overflow-y-auto px-4 py-3 space-y-3">
+                ) : (
+                  <div className="space-y-3">
                     {[
-                      { label: "Label", value: selectedNode.label },
-                      { label: "Type", value: selectedNode.type },
-                      { label: "Node ID", value: selectedNode.id },
+                      { label: "Label", value: selectedNode.label || "—" },
+                      { label: "Type", value: selectedNode.type || "—" },
+                      { label: "Node ID", value: selectedNode.id || "—" },
                       { label: "Outgoing", value: String(relatedEdges.outgoing.length) },
                       { label: "Incoming", value: String(relatedEdges.incoming.length) },
                       { label: "Total Relations", value: String(relatedEdges.all.length) },
                     ].map(({ label, value }) => (
-                      <div key={label} className="flex flex-col gap-0.5">
+                      <div key={label} className="flex flex-col gap-0.5 min-w-0">
                         <p className="text-[13px] font-semibold text-muted-foreground">{label}</p>
                         <p className="text-[13px] text-foreground truncate" title={value}>{value}</p>
                       </div>
                     ))}
                   </div>
                 )}
+              </div>
 
-              </div>{/* relative scroll container */}
-
-              {/* View Graph Summary footer */}
-              <div className="px-3 py-2.5 border-t border-border/60 shrink-0">
+              {/* Pinned footer */}
+              <div className="px-3 py-2.5 border-t border-border/60 shrink-0 bg-card">
                 <button
                   className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md border border-border/50 text-[13px] text-muted-foreground hover:text-foreground hover:bg-muted/20 transition-colors"
-                  onClick={() => setSelectedNodeId(null)}
+                  onClick={() => setSummaryOpen(true)}
                 >
                   View Graph Summary
                 </button>
               </div>
             </>
           ) : (
-            /* ── No node selected: graph/document summary ── */
-            <div className="flex-1 min-h-0 overflow-y-auto">
+            /* ── No node selected: graph/document summary (same fixed panel width) ── */
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
               {!selectedDoc ? (
                 <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-4 text-center">
                   <BookOpen className="w-8 h-8 opacity-30 mb-2" />
                   <p className="text-[13px]">Select a document from the sidebar.</p>
                 </div>
               ) : (
-                <div className="px-4 py-3 flex flex-col gap-4">
-                  {/* Document info header */}
-                  <div className="flex items-center gap-3">
+                <div className="px-4 py-3 flex flex-col gap-4 min-w-0">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="w-9 h-9 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center shrink-0">
                       <FileText className="w-4 h-4 text-primary" />
                     </div>
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 overflow-hidden">
                       <p className="text-[13px] font-semibold text-foreground leading-tight truncate" title={selectedDoc.filename}>
                         {selectedDoc.filename}
                       </p>
@@ -1138,43 +1866,40 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                     </div>
                   </div>
 
-                  {/* Document metadata */}
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-[13px] font-semibold text-foreground mb-2">Document Info</p>
                     <div className="space-y-1.5">
                       {[
                         { label: "Upload Date", value: formatDate(selectedDoc.created_at) },
                         { label: "Page Count", value: `${selectedDoc.page_count} ${selectedDoc.page_count === 1 ? "page" : "pages"}` },
                       ].map(({ label, value }) => (
-                        <div key={label} className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
-                          <span className="text-[13px] text-muted-foreground">{label}</span>
-                          <span className="text-[13px] text-foreground font-medium">{value}</span>
+                        <div key={label} className="flex items-center justify-between gap-2 py-1 border-b border-border/30 last:border-0 min-w-0">
+                          <span className="text-[13px] text-muted-foreground shrink-0">{label}</span>
+                          <span className="text-[13px] text-foreground font-medium truncate">{value}</span>
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  {/* Graph statistics */}
-                  {graphData && (
+                  {graphData ? (
                     <>
                       <div>
                         <p className="text-[13px] font-semibold text-foreground mb-2">Graph Statistics</p>
                         <div className="grid grid-cols-2 gap-2">
                           <div className="rounded-md bg-muted/15 border border-border/50 py-2.5 text-center">
-                            <p className="text-[18px] font-bold text-primary leading-none">{graphData.stats.node_count}</p>
+                            <p className="text-[18px] font-bold text-primary leading-none tabular-nums">{graphData.stats.node_count}</p>
                             <p className="text-[11px] text-muted-foreground mt-1">Nodes</p>
                           </div>
                           <div className="rounded-md bg-muted/15 border border-border/50 py-2.5 text-center">
-                            <p className="text-[18px] font-bold text-accent leading-none">{graphData.stats.edge_count}</p>
+                            <p className="text-[18px] font-bold text-accent leading-none tabular-nums">{graphData.stats.edge_count}</p>
                             <p className="text-[11px] text-muted-foreground mt-1">Relations</p>
                           </div>
                         </div>
                       </div>
 
-                      {/* Entity type breakdown */}
-                      {Object.keys(typeCounts).length > 0 && (
-                        <div>
-                          <p className="text-[13px] font-semibold text-foreground mb-2">Entity Types</p>
+                      <div>
+                        <p className="text-[13px] font-semibold text-foreground mb-2">Entity Types</p>
+                        {Object.keys(typeCounts).length > 0 ? (
                           <div className="space-y-2">
                             {(Object.entries(typeCounts) as [string, number][])
                               .sort(([, a], [, b]) => b - a)
@@ -1185,12 +1910,12 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                                 const color = getTypeColor(type).stroke;
                                 return (
                                   <div key={type}>
-                                    <div className="flex items-center justify-between mb-1">
-                                      <div className="flex items-center gap-1.5">
+                                    <div className="flex items-center justify-between mb-1 gap-2 min-w-0">
+                                      <div className="flex items-center gap-1.5 min-w-0">
                                         <div className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-                                        <span className="text-[13px] text-foreground">{type}</span>
+                                        <span className="text-[13px] text-foreground truncate">{type}</span>
                                       </div>
-                                      <span className="text-[13px] text-muted-foreground">{count}</span>
+                                      <span className="text-[13px] text-muted-foreground tabular-nums shrink-0">{count}</span>
                                     </div>
                                     <div className="h-1 rounded-full bg-muted/30 overflow-hidden">
                                       <div
@@ -1202,9 +1927,16 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                                 );
                               })}
                           </div>
-                        </div>
-                      )}
+                        ) : (
+                          <p className="text-[12px] text-muted-foreground">Not Available</p>
+                        )}
+                      </div>
                     </>
+                  ) : (
+                    <div>
+                      <p className="text-[13px] font-semibold text-foreground mb-2">Graph Statistics</p>
+                      <p className="text-[12px] text-muted-foreground">{isLoadingGraph ? "Loading…" : "Not Available"}</p>
+                    </div>
                   )}
 
                   {isLoadingGraph && (
@@ -1225,6 +1957,86 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
             </div>
           )}
         </div>
+
+        {/* ══════════════ Graph Summary Dialog ══════════════ */}
+        <Dialog open={summaryOpen} onOpenChange={setSummaryOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Graph Summary</DialogTitle>
+              <DialogDescription>
+                {selectedDoc
+                  ? `Overview of entities and relationships in "${selectedDoc.filename}".`
+                  : "Overview of the selected knowledge graph."}
+              </DialogDescription>
+            </DialogHeader>
+            {selectedDoc && (
+              <div className="flex flex-col gap-4 pt-1">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-primary/15 border border-primary/25 flex items-center justify-center shrink-0">
+                    <FileText className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold text-foreground leading-tight truncate" title={selectedDoc.filename}>
+                      {selectedDoc.filename}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {selectedDoc.page_count} {selectedDoc.page_count === 1 ? "page" : "pages"} · {formatDate(selectedDoc.created_at)}
+                    </p>
+                  </div>
+                </div>
+
+                {graphData && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-md bg-muted/15 border border-border/50 py-2.5 text-center">
+                        <p className="text-[18px] font-bold text-primary leading-none">{graphData.stats.node_count}</p>
+                        <p className="text-[11px] text-muted-foreground mt-1">Nodes</p>
+                      </div>
+                      <div className="rounded-md bg-muted/15 border border-border/50 py-2.5 text-center">
+                        <p className="text-[18px] font-bold text-accent leading-none">{graphData.stats.edge_count}</p>
+                        <p className="text-[11px] text-muted-foreground mt-1">Relations</p>
+                      </div>
+                    </div>
+
+                    {Object.keys(typeCounts).length > 0 && (
+                      <div>
+                        <p className="text-[13px] font-semibold text-foreground mb-2">Entity Types</p>
+                        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                          {(Object.entries(typeCounts) as [string, number][])
+                            .sort(([, a], [, b]) => b - a)
+                            .map(([type, count]) => {
+                              const pct =
+                                graphData.stats.node_count > 0
+                                  ? Math.round((count / graphData.stats.node_count) * 100)
+                                  : 0;
+                              const color = getTypeColor(type).stroke;
+                              return (
+                                <div key={type}>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                                      <span className="text-[13px] text-foreground">{type}</span>
+                                    </div>
+                                    <span className="text-[13px] text-muted-foreground">{count}</span>
+                                  </div>
+                                  <div className="h-1 rounded-full bg-muted/30 overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full transition-all duration-300"
+                                      style={{ width: `${pct}%`, background: color }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* ══════════════ Delete Confirmation ══════════════ */}
         <ConfirmDialog
