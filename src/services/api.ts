@@ -2024,6 +2024,8 @@ export const createDatabase = async (
     username?: string;
     password?: string;
     consentGiven?: boolean;
+    useSSL?: boolean;
+    additionalParams?: string;
     // Salesforce OAuth2 fields (session-based authentication only)
     sessionId?: string;
     instanceUrl?: string;
@@ -2084,19 +2086,16 @@ export const createDatabase = async (
         requestBody.access_token = data.accessToken || '';
       } else {
         // Traditional database fields
-        // Construct host with port if port is provided and different from default
+        // Always include the port when explicitly provided so non-standard ports
+        // (e.g. 15432) are never silently dropped. If the host already embeds a
+        // port (host:port format) we skip to avoid duplication.
         let hostWithPort = data.host || '';
-        if (data.port) {
+        if (data.port && !hostWithPort.includes(':')) {
           const portStr = String(data.port).trim();
           if (portStr) {
             const portNum = parseInt(portStr);
             if (!isNaN(portNum)) {
-              const defaultPort = dbType === 'postgres' ? 5432 : dbType === 'mysql' ? 3306 : 1521;
-
-              // Only append port if it's different from default and not already in host
-              if (portNum !== defaultPort && !hostWithPort.includes(':')) {
-                hostWithPort = `${hostWithPort}:${portNum}`;
-              }
+              hostWithPort = `${hostWithPort}:${portNum}`;
             }
           }
         }
@@ -2108,6 +2107,12 @@ export const createDatabase = async (
         requestBody.password = data.password || '';
         if (data.schemaName) {
           requestBody.schema_name = data.schemaName;
+        }
+        if (data.useSSL) {
+          requestBody.use_ssl = true;
+        }
+        if (data.additionalParams) {
+          requestBody.additional_params = data.additionalParams;
         }
       }
     }

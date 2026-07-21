@@ -331,6 +331,16 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
           toast.error("Please fill in all required fields");
           return;
         }
+        // Warn if host doesn't embed a port and the port field is blank —
+        // a missing port silently falls back to the database default (e.g. 5432
+        // for PostgreSQL) which may not be correct for this server.
+        const hostHasPort = host.trim().includes(':');
+        if (!hostHasPort && !port.trim()) {
+          toast.error(
+            "Please enter the port number. If your database uses a non-standard port (e.g. 15432) you must fill in the Port field."
+          );
+          return;
+        }
       }
     }
 
@@ -374,6 +384,7 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
           // Traditional database request data
           const portValue = port && port.trim() ? port.trim() : undefined;
           const schemaValue = pgSchemaName.trim() || undefined;
+          const extraParams = additionalParams.trim() || undefined;
           
           requestData = {
             connectionName: normalizedConnectionName,
@@ -384,6 +395,8 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
             username: username.trim(),
             password: password || "",
             ...(schemaValue && { schemaName: schemaValue }),
+            ...(useSSL && { useSSL: true }),
+            ...(extraParams && { additionalParams: extraParams }),
             consentGiven: true,
           };
         }
@@ -687,22 +700,27 @@ export function DatabaseSetupGuided({ projectName, projectId, onComplete }: Data
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="port">Port</Label>
+                    <Label htmlFor="port">
+                      Port <span className="text-destructive">*</span>
+                    </Label>
                     <Input
                       id="port"
                       placeholder={
-                        dbType === "postgresql" 
-                          ? "5432" 
-                          : dbType === "mysql" 
-                          ? "3306" 
+                        dbType === "postgresql"
+                          ? "5432 (required)"
+                          : dbType === "mysql"
+                          ? "3306 (required)"
                           : dbType === "oracle"
-                          ? "1521"
-                          : ""
+                          ? "1521 (required)"
+                          : "required"
                       }
                       value={port}
                       onChange={(e) => setPort(e.target.value)}
                       className="h-12"
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Must match the actual server port — non-standard ports (e.g. 15432) will fail if left blank
+                    </p>
                   </div>
 
                   <div className="space-y-2">
