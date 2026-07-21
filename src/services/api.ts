@@ -3949,3 +3949,107 @@ export const getUsageAnalytics = async (params: {
     return { success: false, error: { code: 'ANALYTICS_FETCH_FAILED', message: error.message || 'Failed to fetch analytics' } };
   }
 };
+
+// ============================================================================
+// KNOWLEDGE GRAPH
+// ============================================================================
+
+/** An entity node extracted from a document */
+export interface KGNode {
+  id: string;
+  label: string;
+  /** Person | Organization | Concept | Product | Location | Event | Other */
+  type: string;
+}
+
+/** A directed relationship between two entity nodes */
+export interface KGEdge {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+}
+
+/** Aggregate counts for a knowledge graph */
+export interface KGStats {
+  node_count: number;
+  edge_count: number;
+  page_count: number;
+}
+
+/** Full graph payload (nodes + edges + stats) returned by GET /{graph_id} */
+export interface KGGraph {
+  nodes: KGNode[];
+  edges: KGEdge[];
+  stats: KGStats;
+}
+
+/** Summary item returned by GET /knowledge-graphs (list) */
+export interface KGDocument {
+  graph_id: string;
+  filename: string;
+  page_count: number;
+  created_at: string | null;
+}
+
+/** Full detail response returned by GET /knowledge-graphs/{graph_id} */
+export interface KGDetailResponse extends KGDocument {
+  graph: KGGraph;
+}
+
+/** List the current user's knowledge graphs (newest first, no graph payload) */
+export const listKnowledgeGraphs = async (): Promise<ApiResponse<{ items: KGDocument[] }>> => {
+  try {
+    const data = await apiRequest<{ items: KGDocument[] }>('/api/v1/knowledge-graphs');
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: { code: 'KG_LIST_FAILED', message: error.message || 'Failed to list knowledge graphs' } };
+  }
+};
+
+/** Fetch one knowledge graph with its full node/edge payload */
+export const getKnowledgeGraph = async (graphId: string): Promise<ApiResponse<KGDetailResponse>> => {
+  try {
+    const data = await apiRequest<KGDetailResponse>(`/api/v1/knowledge-graphs/${graphId}`);
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: { code: 'KG_GET_FAILED', message: error.message || 'Failed to load knowledge graph' } };
+  }
+};
+
+/** Upload a PDF or DOCX file; backend extracts entities synchronously and returns graph_id */
+export const uploadKnowledgeGraph = async (file: File): Promise<ApiResponse<{ graph_id: string }>> => {
+  try {
+    const token = localStorage.getItem('vizai_access_token');
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`${API_BASE_URL}/api/v1/knowledge-graphs/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+      body: formData,
+    });
+    if (!response.ok) {
+      let msg = `Upload failed (${response.status})`;
+      try {
+        const err = await response.json();
+        msg = err.detail || err.message || msg;
+      } catch {}
+      return { success: false, error: { code: 'KG_UPLOAD_FAILED', message: msg } };
+    }
+    const data = await response.json();
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: { code: 'KG_UPLOAD_FAILED', message: error.message || 'Upload failed' } };
+  }
+};
+
+/** Delete a knowledge graph and its uploaded file */
+export const deleteKnowledgeGraph = async (graphId: string): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const data = await apiRequest<{ message: string }>(`/api/v1/knowledge-graphs/${graphId}`, { method: 'DELETE' });
+    return { success: true, data };
+  } catch (error: any) {
+    return { success: false, error: { code: 'KG_DELETE_FAILED', message: error.message || 'Failed to delete knowledge graph' } };
+  }
+};

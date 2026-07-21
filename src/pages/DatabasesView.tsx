@@ -1,4 +1,4 @@
-import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye, TrendingUp, Clock, Tag, Filter, Bot } from "lucide-react";
+import { Plus, Database, Check, X, MoreVertical, Pencil, Trash2, Eye, TrendingUp, Clock, Tag, Filter, Bot, Upload } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -35,6 +35,7 @@ import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
 import { DSGraphViewer } from "../components/features/databases/DSGraphViewer";
 import { OntologyViewer } from "../components/features/databases/OntologyViewer";
+import { KnowledgeGraphViewer, type KnowledgeGraphViewerHandle } from "../components/features/databases/KnowledgeGraphViewer";
 import { OnboardingTour, type TourOutcome } from "../components/shared/OnboardingTour";
 
 import {
@@ -81,6 +82,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
   const [graphError, setGraphError] = useState<string | null>(null);
   const [currentGraph, setCurrentGraph] = useState<DSGraphPayload | null>(null);
   const [showTour, setShowTour] = useState(false);
+  const [dsGraphTab, setDsGraphTab] = useState<"datasource" | "knowledge">("datasource");
+  const kgViewerRef = useRef<KnowledgeGraphViewerHandle>(null);
 
   // Ontology dialog state
   const [ontologyDialogOpen, setOntologyDialogOpen] = useState(false);
@@ -874,6 +877,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
           setDsGraphDialogOpen(open);
           if (!open) {
             setShowTour(false);
+            setDsGraphTab("datasource");
           }
         }}>
           <DialogContent
@@ -897,30 +901,69 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
               }
             }}
           >
-            <div className="flex items-start justify-between pr-8">
-              <DialogHeader>
-                <DialogTitle>Datasource Graph</DialogTitle>
-                <DialogDescription>
-                  {selectedDatabase ? `Visual schema graph for ${selectedDatabase.name}` : "Visual schema graph"}
-                </DialogDescription>
-              </DialogHeader>
-              <GradientButton
-                onClick={() => selectedDatabase && handleEnrichDatasource(selectedDatabase)}
-                data-tour-target="enrich-datasource-btn"
-              >
-                Enrich Datasource
-              </GradientButton>
-            </div>
-            {isGraphLoading ? (
-              <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Loading graph...</div>
-            ) : graphError ? (
-              <div className="flex-1 min-h-0 flex items-center justify-center text-destructive">{graphError}</div>
-            ) : currentGraph ? (
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <DSGraphViewer graph={currentGraph} />
+            {/* ── Tab bar + action button ── */}
+            <div className="flex items-start justify-between pr-8 shrink-0">
+              <div className="flex flex-col gap-1">
+                {/* Tab switcher */}
+                <div className="flex items-center border-b border-border/40">
+                  {(["datasource", "knowledge"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setDsGraphTab(tab)}
+                      className={`px-4 py-2.5 text-[13px] font-medium whitespace-nowrap transition-colors duration-150 border-b-2 -mb-px ${
+                        dsGraphTab === tab
+                          ? "border-primary text-primary"
+                          : "border-transparent text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {tab === "datasource" ? "Datasource Graph" : "Knowledge Graph"}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[13px] text-muted-foreground pl-4 pt-0.5">
+                  {dsGraphTab === "datasource"
+                    ? selectedDatabase
+                      ? `Visual schema graph for ${selectedDatabase.name}`
+                      : "Visual schema graph"
+                    : "Extract entities and relationships from uploaded PDF and DOCX documents."}
+                </p>
               </div>
-            ) : (
-              <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Graph not available.</div>
+
+              {dsGraphTab === "datasource" ? (
+                <GradientButton
+                  onClick={() => selectedDatabase && handleEnrichDatasource(selectedDatabase)}
+                  data-tour-target="enrich-datasource-btn"
+                >
+                  Enrich Datasource
+                </GradientButton>
+              ) : (
+                <GradientButton onClick={() => kgViewerRef.current?.triggerUpload()}>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Upload Document
+                </GradientButton>
+              )}
+            </div>
+
+            {/* ── Datasource Graph tab content (unchanged) ── */}
+            {dsGraphTab === "datasource" && (
+              isGraphLoading ? (
+                <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Loading graph...</div>
+              ) : graphError ? (
+                <div className="flex-1 min-h-0 flex items-center justify-center text-destructive">{graphError}</div>
+              ) : currentGraph ? (
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <DSGraphViewer graph={currentGraph} />
+                </div>
+              ) : (
+                <div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">Graph not available.</div>
+              )
+            )}
+
+            {/* ── Knowledge Graph tab content ── */}
+            {dsGraphTab === "knowledge" && (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <KnowledgeGraphViewer ref={kgViewerRef} />
+              </div>
             )}
 
             {/* Guided onboarding tour – rendered inside the dialog so
