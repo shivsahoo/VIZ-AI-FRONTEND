@@ -557,7 +557,7 @@ export default function App() {
           )}
           
           {/* Content */}
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 min-w-0 overflow-auto">
             {renderView()}
           </main>
 

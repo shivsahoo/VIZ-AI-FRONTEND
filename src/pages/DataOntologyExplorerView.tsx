@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import {
   BookOpen,
   Bot,
@@ -13,24 +13,47 @@ import {
   Database,
   CheckCircle2,
   XCircle,
-  AlertCircle,
   Loader2,
   Columns3,
-  ChevronUp,
   Pencil,
   Sparkles,
-  LayoutList,
-  LayoutGrid,
+  Wand2,
   History,
   Eye,
   Table2,
-  Link2,
   MoreHorizontal,
+  Briefcase,
+  Filter,
+  ListChecks,
+  CalendarClock,
+  RefreshCw,
+  ArrowRight,
+  X,
+  BadgeCheck,
+  CircleX,
+  FileText,
+  Brain,
+  Info,
+  ShieldCheck,
+  Clock3,
+  Building2,
+  User,
+  CalendarDays,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Network,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { GradientButton } from "../components/shared/GradientButton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -42,14 +65,16 @@ import {
 import { toast } from "sonner";
 import {
   getDatabases,
-  getLatestOntology,
-  bootstrapOntology,
+  getAiCatalogStatus,
+  generateAiCatalog,
+  getDatabaseDSGraph,
   downloadLatestOntologyTTL,
   startOntologyEnrichment,
   sendOntologyEnrichmentChat,
   applyOntologyEnrichment,
   uploadPbitFile,
   type OntologyVersionPayload,
+  type CatalogJobStatus,
 } from "../services/api";
 
 // ─── Local types ────────────────────────────────────────────────────────────
@@ -58,6 +83,8 @@ interface DatabaseConnection {
   id: string;
   name: string;
   type: string;
+  status?: string;
+  environment?: string;
 }
 
 interface OntologyColumn {
@@ -90,28 +117,58 @@ interface OntologyTable {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+// Resolves the effective category for a table strictly from backend data — the
+// AI-generated `category` field returned by the catalog enrichment pipeline.
+// We never fabricate or infer a category client-side: if the backend hasn't
+// generated one yet, this returns undefined and the table is simply excluded
+// from category-based filtering/grouping until it has real data.
+function resolveCategory(table: { category?: string }): string | undefined {
+  const explicit = table.category?.trim();
+  return explicit && explicit.length > 0 ? explicit : undefined;
+}
+
 const STATUS_FILTERS: Array<{
   id: string;
   label: string;
-  dot: string;
+  color: string;
   Icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { id: "all",              label: "All Tables",       dot: "bg-primary",        Icon: Table2 },
-  { id: "PENDING",          label: "Pending Review",   dot: "bg-amber-400",      Icon: AlertCircle },
-  { id: "APPROVED",         label: "Approved",         dot: "bg-emerald-400",    Icon: CheckCircle2 },
-  { id: "REJECTED",         label: "Rejected",         dot: "bg-red-400",        Icon: XCircle },
-  { id: "ai_generated",     label: "AI Generated",     dot: "bg-blue-400",       Icon: Sparkles },
-  { id: "human_edited",     label: "Human Edited",     dot: "bg-violet-400",     Icon: Pencil },
-  { id: "recently_updated", label: "Recently Updated", dot: "bg-sky-400",        Icon: Clock },
-  { id: "favorites",        label: "Favorites",        dot: "bg-yellow-400",     Icon: Star },
+  { id: "all",              label: "All Tables",       color: "text-primary",      Icon: Database },
+  { id: "PENDING",          label: "Pending Review",   color: "text-amber-400",    Icon: Clock },
+  { id: "APPROVED",         label: "Approved",         color: "text-emerald-400",  Icon: BadgeCheck },
+  { id: "REJECTED",         label: "Rejected",         color: "text-red-400",      Icon: CircleX },
+  { id: "ai_generated",     label: "AI Generated",     color: "text-blue-400",     Icon: Sparkles },
+  { id: "human_edited",     label: "Human Edited",     color: "text-violet-400",   Icon: Pencil },
+  { id: "recently_updated", label: "Recently Updated", color: "text-sky-400",      Icon: History },
+  { id: "favorites",        label: "Favorites",        color: "text-yellow-400",   Icon: Star },
 ];
 
-function statusBg(status?: string) {
+// Inline color tokens — Tailwind opacity utilities are unreliable in this
+// build; use explicit rgba so badges always render with distinct colors.
+type BadgeTone = { backgroundColor: string; color: string; borderColor: string };
+
+function statusStyle(status?: string): BadgeTone {
   const s = (status || "").toUpperCase();
-  if (s === "APPROVED") return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
-  if (s === "PENDING" || s === "PENDING_REVIEW") return "bg-amber-500/15 text-amber-400 border-amber-500/30";
-  if (s === "REJECTED") return "bg-red-500/15 text-red-400 border-red-500/30";
-  return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+  if (s === "APPROVED" || s === "COMPLETED") {
+    return { backgroundColor: "rgba(16,185,129,0.22)", color: "#6EE7B7", borderColor: "rgba(52,211,153,0.55)" };
+  }
+  if (s === "PENDING" || s === "PENDING_REVIEW" || s === "NEEDS_REVIEW") {
+    return { backgroundColor: "rgba(245,158,11,0.22)", color: "#FCD34D", borderColor: "rgba(251,191,36,0.55)" };
+  }
+  if (s === "REJECTED") {
+    return { backgroundColor: "rgba(239,68,68,0.22)", color: "#FCA5A5", borderColor: "rgba(248,113,113,0.55)" };
+  }
+  if (s === "GENERATING") {
+    return { backgroundColor: "rgba(14,165,233,0.22)", color: "#7DD3FC", borderColor: "rgba(56,189,248,0.55)" };
+  }
+  if (s === "QUEUED") {
+    return { backgroundColor: "rgba(148,163,184,0.14)", color: "#CBD5E1", borderColor: "rgba(148,163,184,0.35)" };
+  }
+  if (s === "HUMAN_EDITED" || s === "HUMAN EDITED") {
+    return { backgroundColor: "rgba(59,130,246,0.22)", color: "#93C5FD", borderColor: "rgba(96,165,250,0.55)" };
+  }
+  // AI Generated / default
+  return { backgroundColor: "rgba(139,92,246,0.22)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.55)" };
 }
 
 function statusLabel(status?: string) {
@@ -119,23 +176,149 @@ function statusLabel(status?: string) {
   if (s === "APPROVED") return "Approved";
   if (s === "PENDING" || s === "PENDING_REVIEW") return "Pending Review";
   if (s === "REJECTED") return "Rejected";
+  if (s === "NEEDS_REVIEW") return "Needs Review";
+  if (s === "COMPLETED") return "Completed";
+  if (s === "GENERATING") return "Generating…";
+  if (s === "QUEUED") return "Queued";
+  if (s === "HUMAN_EDITED" || s === "HUMAN EDITED") return "Human Edited";
   return status || "AI Generated";
 }
 
-function semanticTypeBg(type?: string) {
-  const t = (type || "").toLowerCase();
-  if (t === "metric") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
-  if (t === "dimension") return "bg-sky-500/10 text-sky-400 border-sky-500/20";
-  if (t === "identifier" || t === "pk") return "bg-violet-500/10 text-violet-400 border-violet-500/20";
-  if (t === "reference" || t === "fk") return "bg-orange-500/10 text-orange-400 border-orange-500/20";
-  if (t === "descriptive") return "bg-slate-500/10 text-slate-300 border-slate-500/20";
-  return "bg-muted/40 text-muted-foreground border-border";
+function StatusBadge({ status, className = "" }: { status?: string; className?: string }) {
+  const s = (status || "").toUpperCase();
+  const tone = statusStyle(status);
+  const Icon =
+    s === "APPROVED" || s === "COMPLETED" ? CheckCircle2
+    : s === "REJECTED" ? XCircle
+    : s === "PENDING" || s === "PENDING_REVIEW" || s === "NEEDS_REVIEW" ? Clock
+    : s === "HUMAN_EDITED" || s === "HUMAN EDITED" ? Pencil
+    : s === "GENERATING" ? Loader2
+    : Sparkles;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full font-medium leading-none border transition-colors duration-150 ${s === "GENERATING" ? "animate-pulse" : ""} ${className}`}
+      style={{
+        backgroundColor: tone.backgroundColor,
+        color: tone.color,
+        borderColor: tone.borderColor,
+        padding: "5px 12px",
+        height: 26,
+        fontSize: 14,
+      }}
+    >
+      <Icon className={`w-3 h-3 shrink-0 ${s === "GENERATING" ? "animate-spin" : ""}`} strokeWidth={2} style={{ color: tone.color }} />
+      {statusLabel(status)}
+    </span>
+  );
 }
 
-function confidenceColor(val: number) {
-  if (val >= 90) return "bg-emerald-500";
-  if (val >= 70) return "bg-amber-400";
-  return "bg-red-400";
+function semanticTypeStyle(type?: string): BadgeTone {
+  const t = (type || "").toLowerCase();
+  if (t === "identifier" || t === "pk" || t === "primary key") {
+    return { backgroundColor: "rgba(139,92,246,0.18)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.5)" };
+  }
+  if (t === "descriptive" || t === "attribute") {
+    return { backgroundColor: "rgba(59,130,246,0.18)", color: "#93C5FD", borderColor: "rgba(96,165,250,0.5)" };
+  }
+  if (t === "metric" || t === "measure") {
+    return { backgroundColor: "rgba(249,115,22,0.18)", color: "#FDBA74", borderColor: "rgba(251,146,60,0.5)" };
+  }
+  if (t === "dimension") {
+    return { backgroundColor: "rgba(16,185,129,0.18)", color: "#6EE7B7", borderColor: "rgba(52,211,153,0.5)" };
+  }
+  if (t === "date" || t === "datetime" || t === "timestamp") {
+    return { backgroundColor: "rgba(6,182,212,0.18)", color: "#67E8F9", borderColor: "rgba(34,211,238,0.5)" };
+  }
+  if (t === "reference" || t === "fk" || t === "foreign key") {
+    return { backgroundColor: "rgba(14,165,233,0.18)", color: "#7DD3FC", borderColor: "rgba(56,189,248,0.5)" };
+  }
+  if (t === "boolean" || t === "bool") {
+    return { backgroundColor: "rgba(236,72,153,0.18)", color: "#F9A8D4", borderColor: "rgba(244,114,182,0.5)" };
+  }
+  if (t === "enum") {
+    return { backgroundColor: "rgba(99,102,241,0.18)", color: "#A5B4FC", borderColor: "rgba(129,140,248,0.5)" };
+  }
+  return { backgroundColor: "rgba(148,163,184,0.12)", color: "#CBD5E1", borderColor: "rgba(148,163,184,0.35)" };
+}
+
+// Confidence values from the LLM service may arrive as a 0-1 fraction or a
+// 0-100 percentage depending on the code path; normalize to 0-100 for display.
+function toConfidencePct(val?: number | null): number | null {
+  if (typeof val !== "number" || Number.isNaN(val)) return null;
+  const pct = val <= 1 ? val * 100 : val;
+  return Math.round(Math.max(0, Math.min(100, pct)));
+}
+
+function confidenceBarHex(val: number) {
+  if (val >= 95) return "#10B981";
+  if (val >= 80) return "#FBBF24";
+  if (val >= 60) return "#F59E0B";
+  return "#F87171";
+}
+
+function confidenceTextHex(val: number) {
+  if (val >= 95) return "#6EE7B7";
+  if (val >= 80) return "#FCD34D";
+  if (val >= 60) return "#FBBF24";
+  return "#FCA5A5";
+}
+
+function dataTypeBadge(type?: string): { label: string; style: BadgeTone } | null {
+  const t = (type || "").toLowerCase();
+  if (t.includes("int") || t.includes("serial") || t.includes("number")) {
+    return { label: type || "integer", style: { backgroundColor: "rgba(59,130,246,0.18)", color: "#93C5FD", borderColor: "rgba(96,165,250,0.5)" } };
+  }
+  if (t.includes("char") || t.includes("text") || t.includes("string") || t.includes("uuid")) {
+    return { label: type || "varchar", style: { backgroundColor: "rgba(139,92,246,0.18)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.5)" } };
+  }
+  if (t.includes("date") || t.includes("time")) {
+    return { label: type || "date", style: { backgroundColor: "rgba(249,115,22,0.18)", color: "#FDBA74", borderColor: "rgba(251,146,60,0.5)" } };
+  }
+  if (t.includes("bool")) {
+    return { label: type || "boolean", style: { backgroundColor: "rgba(16,185,129,0.18)", color: "#6EE7B7", borderColor: "rgba(52,211,153,0.5)" } };
+  }
+  if (t.includes("decimal") || t.includes("numeric") || t.includes("float") || t.includes("double") || t.includes("money")) {
+    return { label: type || "decimal", style: { backgroundColor: "rgba(6,182,212,0.18)", color: "#67E8F9", borderColor: "rgba(34,211,238,0.5)" } };
+  }
+  if (!type) return null;
+  return { label: type, style: { backgroundColor: "rgba(148,163,184,0.14)", color: "#CBD5E1", borderColor: "rgba(148,163,184,0.35)" } };
+}
+
+
+// Graph nodes carry a semantic `label` (e.g. "Customers" PascalCase, derived by
+// the backend's class-naming step) that does NOT match the raw physical table
+// name used everywhere else (ontology.tables[i].physical_name). The backend
+// preserves the original physical name in `node.meta.table` — use that for any
+// matching against physical table names, falling back to `label` defensively.
+function nodePhysicalName(n: { label: string; meta?: Record<string, any> }): string {
+  return (n.meta?.table as string) || n.label;
+}
+
+// ─── Datasource display helpers (aligned with the Databases module) ──────────
+function dbTypeLabel(type?: string) {
+  const t = (type || "").toLowerCase();
+  if (t === "postgresql" || t === "postgres") return "PostgreSQL";
+  if (t === "mysql") return "MySQL";
+  if (t === "oracledb" || t === "oracle") return "Oracle";
+  if (t === "databricks") return "Databricks";
+  if (t === "salesforce") return "Salesforce";
+  if (t === "spreadsheet") return "Spreadsheet";
+  return type ? type.charAt(0).toUpperCase() + type.slice(1) : "Database";
+}
+
+function statusDotColor(status?: string) {
+  const s = (status || "").toLowerCase();
+  if (s === "connected") return "bg-emerald-400";
+  if (s === "error") return "bg-red-400";
+  return "bg-muted-foreground/40";
+}
+
+function statusText(status?: string) {
+  const s = (status || "").toLowerCase();
+  if (s === "connected") return "Connected";
+  if (s === "error") return "Error";
+  if (s === "disconnected") return "Disconnected";
+  return status || "Unknown";
 }
 
 function relativeTime(dateStr?: string) {
@@ -182,6 +365,84 @@ function SkeletonCard() {
   );
 }
 
+// ─── Right-panel presentational helpers ──────────────────────────────────────
+
+function PanelSection({
+  icon,
+  iconColor,
+  title,
+  action,
+  children,
+}: {
+  icon: React.ReactNode;
+  iconColor?: string;
+  title: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-border/60 bg-card/60 p-3.5 shadow-sm transition-colors">
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <h3 className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground/80">
+          <span className={iconColor ?? "text-muted-foreground/70"}>{icon}</span>
+          {title}
+        </h3>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function MetaCard({
+  icon,
+  iconColor,
+  label,
+  children,
+}: {
+  icon: React.ReactNode;
+  iconColor?: string;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-border/50 bg-muted/15 px-2.5 py-2 min-w-0">
+      <p className="flex items-center gap-1 text-[9px] font-medium text-muted-foreground/60 uppercase tracking-wide mb-1">
+        <span className={iconColor ?? "text-muted-foreground/60"}>{icon}</span>
+        {label}
+      </p>
+      <div className="text-[12px] text-foreground/85 font-medium truncate">{children}</div>
+    </div>
+  );
+}
+
+function RelationshipRow({ dot, name, label }: { dot: string; name: string; label: string }) {
+  return (
+    <div className="group flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/40 bg-muted/10 hover:bg-muted/25 hover:border-border/70 transition-colors cursor-default">
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+      <Table2 className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
+      <span className="text-[12px] font-medium text-foreground/85 truncate flex-1">{name}</span>
+      <span className="text-[9px] text-muted-foreground/60 truncate max-w-[90px]">{label}</span>
+      <ArrowRight className="w-3 h-3 text-muted-foreground/40 shrink-0 transition-all group-hover:text-primary group-hover:translate-x-0.5" />
+    </div>
+  );
+}
+
+function EmptyHint({
+  text = "No information available.",
+  sub = "Generate AI Catalog to enrich this entity.",
+}: {
+  text?: string;
+  sub?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-dashed border-border/50 bg-muted/10 px-3 py-3 text-center">
+      <p className="text-[11px] text-muted-foreground/70">{text}</p>
+      {sub && <p className="text-[10px] text-muted-foreground/40 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 interface DataOntologyExplorerViewProps {
@@ -194,21 +455,35 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
   const [selectedDb, setSelectedDb] = useState<DatabaseConnection | null>(null);
   const [dbsLoading, setDbsLoading] = useState(false);
 
+  // ── Welcome / datasource selection dialog ──
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [pendingDbId, setPendingDbId] = useState<string>("");
+
   // ── Ontology data ──
   const [ontology, setOntology] = useState<OntologyVersionPayload | null>(null);
   const [ontologyLoading, setOntologyLoading] = useState(false);
   const [ontologyError, setOntologyError] = useState<string | null>(null);
 
+  // ── AI Catalog generation job (datasource-level, polled while running) ──
+  const [catalogJob, setCatalogJob] = useState<CatalogJobStatus | null>(null);
+
+  // ── Raw schema preview (table/column counts from the actual DB schema graph),
+  // used only to show a real "estimated time" on the pre-generation onboarding
+  // card — never fabricated. ──
+  const [schemaPreview, setSchemaPreview] = useState<{ tables: number; columns: number } | null>(null);
+
   // ── UI filters / selection ──
-  const [searchQuery, setSearchQuery] = useState("");
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [domainFilter, setDomainFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedTableName, setSelectedTableName] = useState<string | null>(null);
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [rightPanelTab, setRightPanelTab] = useState<"overview" | "columns" | "relationships" | "history">("overview");
   const [sortOrder, setSortOrder] = useState<"recently_updated" | "name_az" | "status">("recently_updated");
+
+  // ── Top-level view (Catalog Explorer vs Business Context) ──
+  const [activeView, setActiveView] = useState<"catalog" | "business_context">("catalog");
 
   // ── Enrichment chat ──
   const [enrichChatOpen, setEnrichChatOpen] = useState(false);
@@ -224,13 +499,15 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  // ─── Parse tables from ontology ────────────────────────────────────────────
+  // ─── Parse tables from ontology (strictly backend data — no synthesized
+  // placeholder rows; the table list is only shown once generation completes,
+  // see the "generating" panel in the render below) ──────────────────────────
   const ontologyTables: OntologyTable[] = (() => {
     if (!ontology) return [];
     const raw = ontology.ontology ?? {};
     if (Array.isArray(raw.tables)) return raw.tables as OntologyTable[];
     return (ontology.graph?.nodes ?? []).map((n) => ({
-      physical_name: n.label,
+      physical_name: nodePhysicalName(n),
       category: n.meta?.category as string | undefined,
       description: n.meta?.description as string | undefined,
       status: n.meta?.status as string | undefined,
@@ -247,14 +524,56 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
     rejected: ontologyTables.filter((t) => (t.status || "").toUpperCase() === "REJECTED").length,
   };
 
-  const categories = Array.from(new Set(ontologyTables.map((t) => t.category).filter(Boolean) as string[])).sort();
+  // ─── AI Catalog generation summary (datasource-level) ───────────────────────
+  const catalogMeta = ((ontology?.ontology as any)?.metadata ?? {}) as Record<string, any>;
+
+  // Real (non-fabricated) estimate for the onboarding card, from the connection's
+  // actual schema graph. Tables are enriched sequentially on the backend, so the
+  // time estimate scales with table count based on typical per-table latency.
+  const schemaEstimate = schemaPreview
+    ? { tables: schemaPreview.tables, columns: schemaPreview.columns, seconds: Math.max(5, Math.round(schemaPreview.tables * 4)) }
+    : null;
+  const catalogTotalRelationships = ontology?.graph?.edges?.length ?? 0;
+  const catalogAvgConfidencePct = toConfidencePct(catalogJob?.avg_confidence ?? catalogMeta.catalog_avg_confidence);
+  const catalogGeneratedAt: string | undefined = catalogJob?.completed_at ?? catalogMeta.catalog_generated_at ?? undefined;
+
+  // A raw/bootstrapped schema (tables pulled straight from the DB, never AI
+  // enriched) must NOT be treated as a generated catalog — otherwise the table
+  // list would render dozens of "Not generated" cards instead of the onboarding
+  // panel. Only count it as "has catalog" once AI enrichment has actually run.
+  const hasCatalog = Boolean(catalogGeneratedAt) || ontologyTables.some((t) => t.is_ai_generated);
+
+  // Per-table relationship counts, derived once from the graph edges (mirrors
+  // the selected-table relationship logic below, but for every visible card).
+  const relCountByTable: Record<string, number> = (() => {
+    const counts: Record<string, number> = {};
+    const nodes = ontology?.graph?.nodes ?? [];
+    const edges = ontology?.graph?.edges ?? [];
+    const idToTable = new Map<string, string>();
+    nodes.forEach((n) => idToTable.set(n.id, nodePhysicalName(n)));
+    edges.forEach((e) => {
+      const sourceTable = idToTable.get(e.source);
+      const targetTable = idToTable.get(e.target);
+      if (sourceTable) counts[sourceTable] = (counts[sourceTable] ?? 0) + 1;
+      if (targetTable) counts[targetTable] = (counts[targetTable] ?? 0) + 1;
+    });
+    return counts;
+  })();
+
+  // AI categories: only the real `category` values the backend has generated so
+  // far. Tables without a category yet are simply left out — never invented.
+  const aiCategories = Array.from(
+    new Set(
+      ontologyTables
+        .map((t) => resolveCategory(t))
+        .filter((c): c is string => !!c)
+    )
+  ).sort();
 
   // ─── Filtered + sorted tables ──────────────────────────────────────────────
   const filteredTables = (() => {
     let list = ontologyTables.filter((table) => {
-      const q = searchQuery.trim().toLowerCase();
-      const sq = sidebarSearch.trim().toLowerCase();
-      const searchQ = q || sq;
+      const searchQ = sidebarSearch.trim().toLowerCase();
       if (searchQ) {
         const nameMatch = table.physical_name.toLowerCase().includes(searchQ);
         const descMatch = (table.description || "").toLowerCase().includes(searchQ);
@@ -270,7 +589,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
       if (statusFilter === "human_edited") return !table.is_ai_generated && !!table.description;
       if (statusFilter === "recently_updated") return !!table.last_updated;
       if (statusFilter === "favorites") return favorites.has(table.physical_name);
-      if (domainFilter !== "all") return table.category === domainFilter;
+      if (categoryFilter !== "all") return resolveCategory(table) === categoryFilter;
       return true;
     });
 
@@ -280,6 +599,60 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
   })();
 
   const selectedTable = ontologyTables.find((t) => t.physical_name === selectedTableName) ?? null;
+  const selectedTableGenStatus = selectedTable ? catalogJob?.per_table?.[selectedTable.physical_name] : undefined;
+  const isSelectedTableGenerating = selectedTableGenStatus === "queued" || selectedTableGenStatus === "generating";
+
+  // ─── Relationships for the selected table (derived from the ontology graph) ──
+  const tableRelationships = (() => {
+    const empty = { outgoing: [] as Array<{ label: string; target: string }>, incoming: [] as Array<{ label: string; source: string }> };
+    if (!selectedTable || !ontology?.graph) return empty;
+    const nodes = ontology.graph.nodes ?? [];
+    const edges = ontology.graph.edges ?? [];
+    const idToTable = new Map<string, string>();
+    nodes.forEach((n) => idToTable.set(n.id, nodePhysicalName(n)));
+    const selfNode = nodes.find((n) => nodePhysicalName(n) === selectedTable.physical_name);
+    if (!selfNode) return empty;
+    const outgoing = edges
+      .filter((e) => e.source === selfNode.id)
+      .map((e) => ({ label: e.label || e.type || "references", target: idToTable.get(e.target) || e.target }));
+    const incoming = edges
+      .filter((e) => e.target === selfNode.id)
+      .map((e) => ({ label: e.label || e.type || "referenced by", source: idToTable.get(e.source) || e.source }));
+    return { outgoing, incoming };
+  })();
+  const relCount = tableRelationships.outgoing.length + tableRelationships.incoming.length;
+
+  // ─── Business context (metrics / rules / aliases) ──────────────────────────
+  // Sourced from the persisted, enriched ontology and merged with anything the
+  // enrichment chatbot captured during the current session (so it shows up the
+  // moment the user submits, even before a fresh ontology fetch).
+  const businessContext = (() => {
+    const source = (ontology?.ontology ?? {}) as Record<string, any>;
+    const asObject = (v: any) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+    const asArray = (v: any) => (Array.isArray(v) ? v : []);
+
+    const metrics: Record<string, any> = {
+      ...asObject(enrichmentUpdates.metrics),
+      ...asObject(source.metrics),
+    };
+    const rules: Record<string, any> = {
+      ...asObject(enrichmentUpdates.rules),
+      ...asObject(source.rules),
+    };
+
+    const aliasMap = new Map<string, any>();
+    [...asArray(enrichmentUpdates.aliases), ...asArray(source.aliases)].forEach((a) => {
+      if (a && a.term) aliasMap.set(String(a.term), a);
+    });
+    const aliases = Array.from(aliasMap.values());
+
+    return { metrics, rules, aliases };
+  })();
+
+  const metricEntries = Object.entries(businessContext.metrics);
+  const ruleKeys = Object.keys(businessContext.rules);
+  const hasBusinessContext =
+    metricEntries.length > 0 || ruleKeys.length > 0 || businessContext.aliases.length > 0;
 
   // ─── Count by filter ────────────────────────────────────────────────────────
   const countFor = (id: string) => {
@@ -294,48 +667,168 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
     return 0;
   };
 
-  // ─── Fetch databases ────────────────────────────────────────────────────────
+  // ─── Fetch datasources (reuses the Databases module API) ─────────────────────
   useEffect(() => {
     if (!projectId) return;
     setDbsLoading(true);
     getDatabases(String(projectId))
       .then((res) => {
         if (res.success && res.data) {
-          const mapped = res.data.map((db) => ({ id: db.id, name: db.name, type: db.type }));
+          const mapped: DatabaseConnection[] = res.data.map((db) => ({
+            id: db.id,
+            name: db.name,
+            type: db.type,
+            status: db.status,
+          }));
           setDatabases(mapped);
+
+          // Same-session revisit: auto-load the datasource chosen earlier this session.
+          const sessionId = sessionStorage.getItem(`vizai_ontology_session_db_${projectId}`);
+          const sessionDb = mapped.find((d) => d.id === sessionId);
+          if (sessionDb) {
+            setSelectedDb(sessionDb);
+            setShowWelcome(false);
+            return;
+          }
+
+          // First open this session: pre-select last used (or first) but wait for Continue.
           const savedId = localStorage.getItem(`vizai_ontology_db_${projectId}`);
-          const restored = mapped.find((d) => d.id === savedId) ?? mapped[0] ?? null;
-          if (restored) setSelectedDb(restored);
+          const preferred = mapped.find((d) => d.id === savedId) ?? mapped[0] ?? null;
+          setPendingDbId(preferred?.id ?? "");
+          setShowWelcome(true);
         }
       })
       .finally(() => setDbsLoading(false));
   }, [projectId]);
 
-  // ─── Load ontology when DB selected ────────────────────────────────────────
+  // ─── Load ontology + AI Catalog job status for a datasource ─────────────────
+  // getAiCatalogStatus returns the ontology/graph plus `job` — the live/last-known
+  // catalog generation job. There is no more
+  // 404-message sniffing: "no catalog yet" is simply job.status === "idle" with
+  // no ontology_version_id. If a job is still running (e.g. the user navigated
+  // away and back), the polling effect below picks it back up automatically.
   const loadOntology = useCallback(async (db: DatabaseConnection) => {
     setOntologyLoading(true);
     setOntologyError(null);
     setOntology(null);
+    setCatalogJob(null);
+    setSchemaPreview(null);
     setSelectedTableName(null);
     setExpandedTables(new Set());
     try {
-      let res = await getLatestOntology(db.id);
-      if (!res.success || !res.data) res = await bootstrapOntology(db.id);
-      if (res.success && res.data) setOntology(res.data);
-      else setOntologyError(res.error?.message || "Unable to load ontology");
+      const res = await getAiCatalogStatus(db.id);
+      if (res.success && res.data) {
+        const { job, ...ontologyPayload } = res.data;
+        setOntology(ontologyPayload);
+        setCatalogJob(job ?? null);
+      } else {
+        setOntologyError(res.error?.message || "Unable to load ontology");
+      }
     } catch (err: any) {
       setOntologyError(err.message || "Unable to load ontology");
     } finally {
       setOntologyLoading(false);
     }
+    // Real schema stats (table/column counts) for the pre-generation onboarding
+    // card's "estimated time" — sourced from the connection's actual schema
+    // graph, not fabricated.
+    try {
+      const dsRes = await getDatabaseDSGraph(db.id);
+      if (dsRes.success && dsRes.data) {
+        const nodes = dsRes.data.nodes ?? [];
+        setSchemaPreview({
+          tables: dsRes.data.stats?.table_count ?? nodes.length,
+          columns: nodes.reduce((acc, n) => acc + (n.column_count ?? 0), 0),
+        });
+      }
+    } catch {
+      // Non-critical — the onboarding card just omits the estimate if unavailable.
+    }
   }, []);
+
+  // ─── Generate (or regenerate) the AI Catalog for the whole datasource ───────
+  // Bootstraps a base ontology internally if one doesn't exist yet, then kicks
+  // off a background job that enriches every table. Returns the initial job
+  // snapshot immediately; the polling effect below takes it from there.
+  const handleGenerateCatalog = async () => {
+    if (!selectedDb) return;
+    setOntologyError(null);
+    try {
+      const res = await generateAiCatalog(selectedDb.id);
+      if (res.success && res.data) {
+        const { job, ...ontologyPayload } = res.data;
+        setOntology(ontologyPayload);
+        setCatalogJob(job ?? null);
+      } else {
+        toast.error(res.error?.message || "Unable to start AI Catalog generation");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Unable to start AI Catalog generation");
+    }
+  };
+
+  // ─── Poll AI Catalog job status while it's running ──────────────────────────
+  // The table list stays hidden (behind a progress panel) for the whole run, so
+  // this simply refreshes `ontology` + `catalogJob` from the freshest backend
+  // response every tick — every downstream value (table list, selected table,
+  // right panel, summary strip) is derived directly from this state, so nothing
+  // is ever left stale or reused from a previous response.
+  useEffect(() => {
+    if (!selectedDb || catalogJob?.status !== "running") return;
+    const connectionId = selectedDb.id;
+    const interval = setInterval(async () => {
+      try {
+        const res = await getAiCatalogStatus(connectionId);
+        if (!res.success || !res.data) return;
+        const { job, ...ontologyPayload } = res.data;
+        setOntology(ontologyPayload);
+        setCatalogJob(job ?? null);
+        if (job?.status === "completed") {
+          toast.success("AI Catalog generated successfully");
+        } else if (job?.status === "error") {
+          toast.error(job.error || "AI Catalog generation failed");
+        }
+      } catch {
+        // Transient poll failure — try again on the next tick.
+      }
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [selectedDb, catalogJob?.status]);
 
   useEffect(() => {
     if (selectedDb) {
-      if (projectId) localStorage.setItem(`vizai_ontology_db_${projectId}`, selectedDb.id);
+      if (projectId) {
+        localStorage.setItem(`vizai_ontology_db_${projectId}`, selectedDb.id);
+        sessionStorage.setItem(`vizai_ontology_session_db_${projectId}`, selectedDb.id);
+      }
       loadOntology(selectedDb);
     }
   }, [selectedDb, loadOntology, projectId]);
+
+  // ─── Datasource selection handlers ──────────────────────────────────────────
+  const openWelcome = () => {
+    setPendingDbId(selectedDb?.id ?? pendingDbId);
+    setShowWelcome(true);
+  };
+
+  const handleWelcomeContinue = () => {
+    const db = databases.find((d) => d.id === pendingDbId);
+    if (!db) return;
+    setShowWelcome(false);
+    // Re-selecting the same datasource still refreshes it.
+    if (selectedDb?.id === db.id) loadOntology(db);
+    else setSelectedDb(db);
+  };
+
+  const handleWelcomeCancel = () => {
+    setShowWelcome(false);
+  };
+
+  const handleDatasourceChange = (id: string) => {
+    const db = databases.find((d) => d.id === id);
+    if (!db || db.id === selectedDb?.id) return;
+    setSelectedDb(db);
+  };
 
   useEffect(() => {
     if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
@@ -397,6 +890,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
       if (!res.success || !res.data) { toast.error(res.error?.message || "Unable to apply enrichment"); return; }
       setOntology(res.data);
       setEnrichChatOpen(false);
+      setActiveView("business_context");
       const metricWarnings = (res.data as any)?.metric_warnings as Array<{ metric_name: string; missing_columns: string[]; formula: string }> | undefined;
       if (metricWarnings && metricWarnings.length > 0) {
         for (const w of metricWarnings) toast.error(`Metric "${w.metric_name}" was dropped: column(s) ${w.missing_columns.map((c) => `"${c}"`).join(", ")} do not exist.`, { duration: 12000 });
@@ -431,8 +925,12 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
       const res = await uploadPbitFile(selectedDb.id, file);
       if (!res.success || !res.data) { toast.error(res.error?.message || "Failed to import .pbit file"); return; }
       toast.success("Business metrics imported successfully.");
-      const refreshed = await getLatestOntology(selectedDb.id);
-      if (refreshed.success && refreshed.data) setOntology(refreshed.data);
+      const refreshed = await getAiCatalogStatus(selectedDb.id);
+      if (refreshed.success && refreshed.data) {
+        const { job, ...ontologyPayload } = refreshed.data;
+        setOntology(ontologyPayload);
+        setCatalogJob(job ?? null);
+      }
     } catch (err: any) { toast.error(err.message || "Failed to import .pbit file"); }
     finally { setIsPbitUploading(false); }
   };
@@ -457,7 +955,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-background text-foreground">
+    <div className="flex flex-col h-full w-full max-w-full min-h-0 min-w-0 overflow-hidden bg-background text-foreground">
 
       {/* ── Hidden PBIT file input ── */}
       <input type="file" accept=".pbit" hidden ref={fileInputRef} onChange={handlePbitFileChange} />
@@ -469,85 +967,190 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
           <h1 className="text-[13px] font-semibold text-foreground leading-snug tracking-tight">Catalog Explorer</h1>
           <p className="text-[11px] text-muted-foreground leading-snug mt-0.5 truncate">
             AI-powered semantic catalog for{" "}
-            {databases.length === 1
-              ? <span className="text-foreground/70">{selectedDb?.name ?? "—"}</span>
-              : (
-                <select
-                  className="ml-0.5 text-[11px] rounded border border-border bg-transparent text-foreground/70 px-1 py-0 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                  value={selectedDb?.id ?? ""}
-                  onChange={(e) => { const db = databases.find((d) => d.id === e.target.value); if (db) setSelectedDb(db); }}
-                >
-                  {databases.map((db) => <option key={db.id} value={db.id}>{db.name}</option>)}
-                </select>
-              )}
+            <span className="text-foreground/70">{selectedDb?.name ?? "—"}</span>
           </p>
+        </div>
+
+        {/* View switch tabs */}
+        <div className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/20 p-0.5 shrink-0 ml-2">
+          {([
+            { id: "catalog" as const, label: "Catalog Explorer", Icon: BookOpen },
+            { id: "business_context" as const, label: "Business Context", Icon: Briefcase },
+          ]).map((t) => {
+            const isActive = activeView === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setActiveView(t.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
+                  isActive
+                    ? "bg-primary/15 text-primary shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                }`}
+              >
+                <t.Icon className="w-3.5 h-3.5" />
+                {t.label}
+              </button>
+            );
+          })}
         </div>
 
         <div className="flex-1" />
 
-        {/* Global search */}
-        <div className="relative w-[420px]">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-          <input
-            className="w-full h-8 pl-8 pr-3 text-[11px] rounded-md border border-border bg-muted/20 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary/50"
-            placeholder="Search tables, columns, business terms..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+        {/* Datasource selector */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[11px] text-muted-foreground hidden xl:inline">Datasource</span>
+          <Select value={selectedDb?.id ?? ""} onValueChange={handleDatasourceChange}>
+            <SelectTrigger className="h-7 min-w-[190px] text-[11px] gap-1.5">
+              <SelectValue placeholder="Select datasource" />
+            </SelectTrigger>
+            <SelectContent>
+              {databases.map((db) => (
+                <SelectItem key={db.id} value={db.id}>
+                  <span className="flex items-center gap-2">
+                    <Database className="w-3.5 h-3.5 text-primary/70 shrink-0" />
+                    <span className="font-medium">{db.name}</span>
+                    <span className="text-muted-foreground text-[11px]">{dbTypeLabel(db.type)}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${statusDotColor(db.status)}`} title={statusText(db.status)} />
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="ghost" size="sm" onClick={openWelcome} className="h-7 gap-1 text-[11px] px-2" title="Change datasource">
+            <RefreshCw className="w-3 h-3" />
+            <span className="hidden 2xl:inline">Change</span>
+          </Button>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className={isPbitUploading ? "pbit-glow-btn" : undefined} style={isPbitUploading ? { display: "inline-flex", isolation: "isolate" } : undefined}>
-            <Button variant="outline" size="sm" onClick={handlePbitUploadClick}
-              disabled={isPbitUploading || ontologyLoading || !ontology} className="h-7 gap-1.5 text-[11px] px-2.5"
-              style={isPbitUploading ? { background: "linear-gradient(135deg,rgba(129,140,248,.15),rgba(34,211,238,.1))", borderColor: "rgba(129,140,248,.6)", color: "#a5b4fc", pointerEvents: "none" } : undefined}>
-              <Upload className="w-3 h-3" />
-              {isPbitUploading ? "Importing…" : "Upload .PBIT File"}
+        {/* Actions — Upload + Start Enriching share height / width / radius */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          {/* Gradient border matches Start Enriching (primary → accent) */}
+          <div
+            className={isPbitUploading ? "pbit-glow-btn" : undefined}
+            style={{
+              display: "inline-flex",
+              isolation: "isolate",
+              padding: 1,
+              borderRadius: 9999,
+              background: "linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%)",
+              height: 36,
+              width: 172,
+              minWidth: 172,
+              maxWidth: 172,
+              boxSizing: "border-box",
+              flexShrink: 0,
+            }}
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePbitUploadClick}
+              disabled={isPbitUploading || ontologyLoading || !hasCatalog}
+              className="gap-1.5 text-[11px] px-3 border-0 shadow-none justify-center"
+              style={
+                isPbitUploading
+                  ? { background: "linear-gradient(135deg,rgba(129,140,248,.15),rgba(34,211,238,.1))", color: "#a5b4fc", pointerEvents: "none", height: "100%", width: "100%", borderRadius: 9999 }
+                  : { background: "var(--background)", color: "inherit", height: "100%", width: "100%", borderRadius: 9999 }
+              }
+            >
+              <Upload className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{isPbitUploading ? "Importing…" : "Upload .PBIT File"}</span>
             </Button>
           </div>
+          {/* Temporarily hidden — Download RDF/OWL
           <Button variant="outline" size="sm" onClick={handleDownloadTTL}
-            disabled={ontologyLoading || !ontology} className="h-7 gap-1.5 text-[11px] px-2.5">
+            disabled={ontologyLoading || !hasCatalog} className="h-7 gap-1.5 text-[11px] px-2.5">
             <Download className="w-3 h-3" />
             Download RDF/OWL
           </Button>
-          <GradientButton onClick={handleStartEnriching}
-            disabled={isEnriching || ontologyLoading || !ontology || isPbitUploading}>
-            <span className="flex items-center gap-1.5 text-[11px]">
-              <Sparkles className="w-3 h-3" />
-              {isEnriching ? "Preparing…" : "Start Enriching"}
+          */}
+          {/* Single primary CTA — always "Start Enriching", regardless of whether a
+              catalog already exists. No separate "Regenerate" button. */}
+          <GradientButton
+            onClick={handleGenerateCatalog}
+            disabled={catalogJob?.status === "running" || ontologyLoading || !selectedDb || isPbitUploading}
+            className="rounded-full shadow-none justify-center text-white"
+            style={{
+              backgroundImage: "linear-gradient(90deg, #6366F1 0%, #0E9AB8 100%)",
+              height: 36,
+              width: 172,
+              minWidth: 172,
+              maxWidth: 172,
+              paddingLeft: 12,
+              paddingRight: 12,
+              boxSizing: "border-box",
+              flexShrink: 0,
+            }}
+          >
+            <span className="flex items-center justify-center gap-1.5 text-[11px] w-full">
+              {catalogJob?.status === "running" ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  <span className="truncate">Generating… ({catalogJob.completed_tables}/{catalogJob.total_tables})</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Start Enriching</span>
+                </>
+              )}
             </span>
           </GradientButton>
         </div>
       </header>
 
-      {/* ══════════════ THREE-COLUMN BODY ══════════════ */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      {/* ── No datasource chosen (behind the welcome dialog) ── */}
+      {!selectedDb && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+          <div className="w-12 h-12 rounded-xl bg-muted/30 flex items-center justify-center">
+            <Database className="w-6 h-6 opacity-50" />
+          </div>
+          <p className="text-sm font-medium text-foreground">Choose a datasource to begin</p>
+          <p className="text-xs opacity-70 max-w-sm text-center">
+            Select an existing database connection to explore and enrich its business ontology.
+          </p>
+          <Button variant="outline" size="sm" onClick={openWelcome}>Choose Datasource</Button>
+        </div>
+      )}
 
-        {/* ──────────── LEFT SIDEBAR (280px) ──────────── */}
-        <aside className="w-[200px] shrink-0 flex flex-col border-r border-border bg-card/50 overflow-hidden">
+      {/* ══════════════ CATALOG EXPLORER BODY (FIXED THREE-COLUMN GRID) ══════════════
+          CSS Grid (not flex) so column tracks cannot grow/shrink from content.
+          Selecting a table ONLY updates selectedTableName — never remounts or
+          swaps these three panes. */}
+      {activeView === "catalog" && selectedDb && (
+      <div
+        className="flex-1 min-h-0 min-w-0 overflow-hidden"
+        style={{ display: "grid", gridTemplateColumns: "212px minmax(0, 1fr) 400px", gridTemplateRows: "minmax(0, 1fr)" }}
+      >
+
+        {/* ──────────── LEFT SIDEBAR ──────────── */}
+        <aside className="min-w-0 overflow-hidden flex flex-col border-r border-border bg-card/50">
           <div className="flex-1 min-h-0 overflow-y-auto py-3">
 
+            {/* Section label */}
+            <div className="flex items-center gap-1.5 px-3 mb-2">
+              <p className="text-[9.5px] font-semibold text-primary uppercase tracking-[0.14em]">Filters</p>
+            </div>
+
             {/* Status filter list */}
-            <div className="px-1.5 space-y-px">
+            <div className="px-3 space-y-px">
               {STATUS_FILTERS.map((f) => {
                 const count = countFor(f.id);
-                const isActive = statusFilter === f.id && domainFilter === "all";
+                const isActive = statusFilter === f.id && categoryFilter === "all";
                 return (
                   <button
                     key={f.id}
-                    onClick={() => { setStatusFilter(f.id); setDomainFilter("all"); }}
-                    className={`w-full flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-sm text-left transition-colors border-l-2 ${
+                    onClick={() => { setStatusFilter(f.id); setCategoryFilter("all"); }}
+                    className={`group w-full flex items-center gap-2.5 px-2.5 py-1 rounded-lg text-left transition-all duration-150 ${
                       isActive
-                        ? "border-primary text-foreground font-medium"
-                        : "border-transparent text-muted-foreground hover:text-foreground/80"
+                        ? "bg-primary/15 text-foreground font-medium ring-1 ring-inset ring-primary/30"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
                     }`}
                   >
-                    <span className={`shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/50"}`}>
-                      <f.Icon className="w-3 h-3" />
-                    </span>
-                    <span className="flex-1 text-[11px] truncate">{f.label}</span>
-                    <span className={`text-[10px] tabular-nums shrink-0 ${isActive ? "text-primary font-semibold" : "text-muted-foreground/60"}`}>
+                    <f.Icon className={`w-3.5 h-3.5 shrink-0 transition-opacity ${f.color} ${isActive ? "opacity-100" : "opacity-50 group-hover:opacity-90"}`} />
+                    <span className="flex-1 text-[12.5px] truncate">{f.label}</span>
+                    <span className={`text-[10.5px] tabular-nums shrink-0 min-w-[22px] text-right ${isActive ? "text-primary font-semibold" : "text-muted-foreground/50"}`}>
                       {count}
                     </span>
                   </button>
@@ -555,24 +1158,32 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               })}
             </div>
 
-            {/* Domain filters */}
-            {categories.length > 0 && (
-              <div className="mt-3 pt-2.5 border-t border-border/40 px-1.5">
-                <p className="text-[9px] font-semibold text-muted-foreground/60 uppercase tracking-widest px-2 mb-1">Filter by Domain</p>
-                <div className="space-y-px">
-                  {categories.map((cat) => {
-                    const isActive = domainFilter === cat;
-                    const cnt = ontologyTables.filter((t) => t.category === cat).length;
+            {/* Filter by Category (AI generated) */}
+            {aiCategories.length > 0 && (
+              <div className="mt-4 px-2">
+                <div className="-mx-2 mb-4 border-t border-border/50" />
+                <div className="px-1 mb-2">
+                  <p className="text-[9.5px] font-semibold text-primary uppercase tracking-[0.08em] whitespace-nowrap">
+                    Filter by Category
+                  </p>
+                </div>
+                <div className="px-1 space-y-px max-h-[30vh] overflow-y-auto">
+                  {aiCategories.map((cat) => {
+                    const isActive = categoryFilter === cat;
+                    const cnt = ontologyTables.filter((t) => resolveCategory(t) === cat).length;
                     return (
                       <button
                         key={cat}
-                        onClick={() => { setDomainFilter(cat); setStatusFilter("all"); }}
-                        className={`w-full flex items-center justify-between pl-2 pr-2.5 py-1.5 rounded-sm text-left text-[11px] transition-colors border-l-2 ${
-                          isActive ? "border-primary text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground/80"
+                        onClick={() => { setCategoryFilter(cat); setStatusFilter("all"); }}
+                        className={`group w-full flex items-center gap-2.5 px-2.5 py-1 rounded-lg text-left transition-all duration-150 ${
+                          isActive
+                            ? "bg-primary/15 text-foreground font-medium ring-1 ring-inset ring-primary/30"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
                         }`}
                       >
-                        <span className="truncate">{cat}</span>
-                        <span className="ml-1 shrink-0 tabular-nums text-[10px] text-muted-foreground/60">{cnt}</span>
+                        <Tag className={`w-3.5 h-3.5 shrink-0 transition-opacity ${isActive ? "text-primary opacity-100" : "text-violet-400/70 opacity-70 group-hover:opacity-100"}`} />
+                        <span className="flex-1 text-[12.5px] truncate">{cat}</span>
+                        <span className={`text-[10.5px] tabular-nums shrink-0 min-w-[22px] text-right ${isActive ? "text-primary font-semibold" : "text-muted-foreground/50"}`}>{cnt}</span>
                       </button>
                     );
                   })}
@@ -582,73 +1193,210 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
           </div>
         </aside>
 
-        {/* ──────────── CENTER PANEL (flex-1) ──────────── */}
-        <main className="flex-1 flex flex-col min-w-0 overflow-hidden border-r border-border">
+        {/* ──────────── CENTER PANEL (table list) ──────────── */}
+        <main className="min-w-0 overflow-hidden flex flex-col border-r border-border">
 
-          {/* ── Stats row ── */}
-          <div className="shrink-0 flex items-stretch border-b border-border bg-card/20">
-            {[
-              { label: "Tables",        sub: "Total",            value: stats.tables,   icon: <Database className="w-3.5 h-3.5" />,     color: "text-primary",       iconBg: "bg-primary/10 text-primary" },
-              { label: "Columns",       sub: "Total",            value: stats.columns,  icon: <Columns3 className="w-3.5 h-3.5" />,     color: "text-sky-400",       iconBg: "bg-sky-500/10 text-sky-400" },
-              { label: "Pending Review",sub: "AI Generated",     value: stats.pending,  icon: <Clock className="w-3.5 h-3.5" />,        color: "text-amber-400",     iconBg: "bg-amber-500/10 text-amber-400" },
-              { label: "Approved",      sub: "Human Verified",   value: stats.approved, icon: <CheckCircle2 className="w-3.5 h-3.5" />, color: "text-emerald-400",   iconBg: "bg-emerald-500/10 text-emerald-400" },
-              { label: "Rejected",      sub: "Needs Attention",  value: stats.rejected, icon: <XCircle className="w-3.5 h-3.5" />,     color: "text-red-400",       iconBg: "bg-red-500/10 text-red-400" },
-            ].map((s, i, arr) => (
-              <div
-                key={s.label}
-                className={`flex items-center gap-2.5 flex-1 px-3.5 py-2.5 ${i < arr.length - 1 ? "border-r border-border/40" : ""}`}
-              >
-                <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${s.iconBg}`}>
-                  {s.icon}
-                </div>
-                <div className="min-w-0">
-                  <p className={`text-[15px] font-bold leading-none tabular-nums ${s.color}`}>
-                    {ontologyLoading
-                      ? <span className="inline-block w-5 h-3.5 rounded bg-muted/40 animate-pulse align-middle" />
-                      : s.value.toLocaleString()}
-                  </p>
-                  <p className="text-[10px] text-foreground/70 font-medium leading-snug mt-0.5 truncate">{s.label}</p>
-                  <p className="text-[9px] text-muted-foreground/60 leading-snug truncate">{s.sub}</p>
-                </div>
+          {/* ── Compact KPI status bar + attached summary ── */}
+          <div className="shrink-0 border-b border-border bg-card/10 min-w-0">
+            <div className="overflow-x-auto">
+              <div className="flex items-center px-4 py-3 w-max min-w-full">
+                {[
+                  {
+                    label: "Tables",
+                    sub: "Total",
+                    value: stats.tables,
+                    Icon: Database,
+                    color: "#8B5CF6",
+                  },
+                  {
+                    label: "Columns",
+                    sub: "Total",
+                    value: hasCatalog ? stats.columns : (schemaPreview?.columns ?? stats.columns),
+                    Icon: Columns3,
+                    color: "#3B82F6",
+                  },
+                  {
+                    label: "Pending Review",
+                    sub: "AI Generated",
+                    value: stats.pending,
+                    Icon: Clock,
+                    color: "#F59E0B",
+                  },
+                  {
+                    label: "Approved",
+                    sub: "Human Verified",
+                    value: stats.approved,
+                    Icon: CheckCircle2,
+                    color: "#22C55E",
+                  },
+                  {
+                    label: "Rejected",
+                    sub: "Needs Attention",
+                    value: stats.rejected,
+                    Icon: XCircle,
+                    color: "#EF4444",
+                  },
+                  {
+                    label: "Business Metrics",
+                    sub: "Defined",
+                    value: metricEntries.length,
+                    Icon: TrendingUp,
+                    color: "#06B6D4",
+                  },
+                ].map((s, i, arr) => (
+                  <Fragment key={s.label}>
+                    <div className="group/tile flex items-center gap-3 shrink-0 rounded-lg px-1.5 py-1 transition-colors duration-[180ms] ease-out hover:bg-white/[0.035]">
+                      <div
+                        className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-[filter] duration-[180ms] ease-out group-hover/tile:brightness-125"
+                        style={{
+                          backgroundColor: `${s.color}1F`,
+                          border: `1px solid ${s.color}40`,
+                        }}
+                      >
+                        <s.Icon className="w-[18px] h-[18px]" strokeWidth={1.75} style={{ color: s.color }} />
+                      </div>
+
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <span className="text-[24px] font-bold leading-none tabular-nums tracking-tight text-foreground">
+                          {ontologyLoading
+                            ? <span className="inline-block w-7 h-5 rounded bg-muted/40 animate-pulse align-middle" />
+                            : s.value.toLocaleString()}
+                        </span>
+                        <div className="flex flex-col justify-center gap-0.5 shrink-0">
+                          <span className="text-[14px] font-semibold leading-none text-foreground whitespace-nowrap">
+                            {s.label}
+                          </span>
+                          <span
+                            className="text-[11px] font-medium whitespace-nowrap leading-[1.2]"
+                            style={{ color: "rgba(255,255,255,0.55)" }}
+                          >
+                            {s.sub}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {i < arr.length - 1 && (
+                      <div
+                        aria-hidden
+                        className="h-9 w-px shrink-0 self-center"
+                        style={{
+                          backgroundColor: "rgba(255,255,255,0.14)",
+                          marginLeft: 14,
+                          marginRight: 14,
+                        }}
+                      />
+                    )}
+                  </Fragment>
+                ))}
               </div>
-            ))}
-          </div>
-
-          {/* ── Center sub-toolbar: search + sort + view ── */}
-          <div className="shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border bg-card/20">
-            <div className="relative flex-1 max-w-xs">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-              <input
-                className="w-full h-7 pl-7 pr-3 text-[11px] rounded border border-border bg-muted/20 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
-                placeholder="Search tables..."
-                value={sidebarSearch}
-                onChange={(e) => setSidebarSearch(e.target.value)}
-              />
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground ml-auto">
-              <span className="shrink-0">Sort by:</span>
-              <select
-                className="h-7 text-[11px] rounded border border-border bg-muted/20 text-foreground px-1.5 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                value={sortOrder}
-                onChange={(e) => setSortOrder(e.target.value as any)}
+
+            {/* AI Catalog summary — centered, branded gradient + colored metrics */}
+            {catalogJob?.status !== "running" && hasCatalog ? (
+              <div className="flex items-center justify-start gap-3 h-8 px-4 border-t border-white/[0.05] text-[11px] font-normal overflow-x-auto whitespace-nowrap"
+                style={{ background: "linear-gradient(90deg, rgba(91,103,241,0.07) 0%, transparent 35%, transparent 65%, rgba(6,182,212,0.06) 100%)" }}
               >
-                <option value="recently_updated">Recently Updated</option>
-                <option value="name_az">Name (A–Z)</option>
-                <option value="status">Status</option>
-              </select>
-            </div>
-            <div className="flex items-center rounded border border-border overflow-hidden">
-              <button className="p-1.5 bg-primary/15 text-primary border-r border-border" title="List view">
-                <LayoutList className="w-3.5 h-3.5" />
-              </button>
-              <button className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors" title="Grid view">
-                <LayoutGrid className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                <span className="flex items-center gap-1.5 shrink-0">
+                  <span className="w-[22px] h-[22px] rounded-full flex items-center justify-center shrink-0 bg-gradient-to-r from-primary to-accent shadow-sm">
+                    <Wand2 className="w-3 h-3 text-white" strokeWidth={1.75} />
+                  </span>
+                  <span className="font-normal tracking-wide text-foreground/80">
+                    {catalogJob?.status === "error" ? "AI Catalog Partial" : "AI Catalog Generated"}
+                  </span>
+                </span>
+
+                <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.14)" }} />
+
+                <span className="flex items-center gap-1.5 shrink-0 tabular-nums">
+                  <span className="font-normal" style={{ color: "#7DD3FC" }}>{stats.tables}</span>
+                  <span style={{ color: "rgba(255,255,255,0.42)" }}>Tables</span>
+                </span>
+                <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.14)" }} />
+                <span className="flex items-center gap-1.5 shrink-0 tabular-nums">
+                  <span className="font-normal" style={{ color: "#A5B4FC" }}>{stats.columns}</span>
+                  <span style={{ color: "rgba(255,255,255,0.42)" }}>Columns</span>
+                </span>
+                <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.14)" }} />
+                <span className="flex items-center gap-1.5 shrink-0 tabular-nums">
+                  <span className="font-normal" style={{ color: "#F0ABFC" }}>{catalogTotalRelationships}</span>
+                  <span style={{ color: "rgba(255,255,255,0.42)" }}>Relationships</span>
+                </span>
+                {catalogAvgConfidencePct !== null && (
+                  <>
+                    <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.14)" }} />
+                    <span className="flex items-center gap-1.5 shrink-0 tabular-nums">
+                      <span
+                        className="font-normal"
+                        style={{
+                          color:
+                            catalogAvgConfidencePct >= 90
+                              ? "#6EE7B7"
+                              : catalogAvgConfidencePct >= 70
+                                ? "#FCD34D"
+                                : "#FCA5A5",
+                        }}
+                      >
+                        {catalogAvgConfidencePct}%
+                      </span>
+                      <span style={{ color: "rgba(255,255,255,0.42)" }}>Confidence</span>
+                    </span>
+                  </>
+                )}
+                {catalogGeneratedAt && (
+                  <>
+                    <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.14)" }} />
+                    <span className="flex items-center gap-1 shrink-0 font-normal" style={{ color: "#FBBF24" }}>
+                      <Clock3 className="w-3 h-3" strokeWidth={1.75} style={{ color: "#F59E0B" }} />
+                      {relativeTime(catalogGeneratedAt)}
+                    </span>
+                  </>
+                )}
+              </div>
+            ) : null}
           </div>
 
-          {/* ── Scrollable table cards ── */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2">
+          {/* ── Center sub-toolbar: search + sort ── */}
+          {!ontologyLoading && !ontologyError && catalogJob?.status !== "running" && hasCatalog && (
+            <div className="shrink-0 flex items-center gap-3 px-3 py-2 border-b border-border bg-card/15">
+              <div className="relative flex-1 max-w-sm group">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/70 group-focus-within:text-primary transition-colors pointer-events-none" />
+                <input
+                  className="w-full h-8 pl-9 pr-8 text-[12px] rounded-lg border border-border bg-muted/30 text-foreground placeholder:text-muted-foreground/60 transition-colors focus:outline-none focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+                  placeholder="Search tables..."
+                  value={sidebarSearch}
+                  onChange={(e) => setSidebarSearch(e.target.value)}
+                />
+                {sidebarSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setSidebarSearch("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground transition-colors"
+                    title="Clear search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 ml-auto">
+                <span className="text-[11px] text-muted-foreground shrink-0">Sort by</span>
+                <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as any)}>
+                  <SelectTrigger className="h-8 min-w-[160px] text-[12px] gap-1.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="recently_updated">Recently Updated</SelectItem>
+                    <SelectItem value="name_az">Name (A–Z)</SelectItem>
+                    <SelectItem value="status">Status</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          {/* ── Main content area ── */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-4">
 
             {ontologyLoading && Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)}
 
@@ -656,11 +1404,77 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-destructive">
                 <XCircle className="w-7 h-7" />
                 <p className="text-sm">{ontologyError}</p>
-                <Button variant="outline" size="sm" onClick={() => selectedDb && loadOntology(selectedDb)}>Retry</Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => selectedDb && loadOntology(selectedDb)}>Retry</Button>
+                  <Button variant="outline" size="sm" onClick={openWelcome}>Change Datasource</Button>
+                </div>
               </div>
             )}
 
-            {!ontologyLoading && !ontologyError && filteredTables.length === 0 && ontology && (
+            {/* Generation in progress — table list stays hidden the whole run so we
+                never show a wall of half-empty "Not yet analyzed" cards; instead a
+                single progress panel takes over until every table is done. */}
+            {!ontologyLoading && !ontologyError && catalogJob?.status === "running" && (
+              <div className="flex flex-col items-center justify-center py-20 gap-5 text-center max-w-md mx-auto">
+                <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/10 border border-primary/20 flex items-center justify-center">
+                  <Loader2 className="w-7 h-7 text-primary animate-spin" />
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-[15px] font-semibold text-foreground">Generating your AI Catalog…</p>
+                  <p className="text-[12px] text-muted-foreground leading-relaxed">
+                    {catalogJob.current_stage || "Analyzing your schema and enriching every table…"}
+                  </p>
+                </div>
+                <div className="w-full space-y-1.5">
+                  <div className="h-2 rounded-full bg-muted/40 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-all duration-500 ease-out"
+                      style={{ width: `${Math.min(100, Math.round((catalogJob.completed_tables / Math.max(catalogJob.total_tables, 1)) * 100))}%` }}
+                    />
+                  </div>
+                  <p className="text-[10.5px] text-muted-foreground/70 tabular-nums">
+                    {catalogJob.completed_tables} / {catalogJob.total_tables} tables enriched
+                  </p>
+                </div>
+                <p className="text-[10px] text-muted-foreground/50">
+                  This runs in the background — the table list will appear automatically once it's done.
+                </p>
+              </div>
+            )}
+
+            {/* No AI Catalog generated yet for this datasource — single onboarding CTA */}
+            {!ontologyLoading && !ontologyError && !hasCatalog && catalogJob?.status !== "running" && (
+              <div className="flex flex-col items-center justify-center py-20 gap-4 text-center max-w-md mx-auto">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/10 border border-primary/20 flex items-center justify-center">
+                  <Sparkles className="w-7 h-7 text-primary" />
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-[15px] font-semibold text-foreground">✨ AI Catalog</p>
+                  <p className="text-[12px] text-muted-foreground leading-relaxed">
+                    Generate AI descriptions, relationships, business concepts, categories and semantic
+                    metadata for every table.
+                  </p>
+                </div>
+                {schemaEstimate && (
+                  <div className="w-full rounded-lg border border-border/50 bg-muted/15 px-3.5 py-2.5 text-left">
+                    <p className="text-[9.5px] font-semibold text-muted-foreground/70 uppercase tracking-wide mb-1.5">Estimated time</p>
+                    <ul className="space-y-0.5 text-[11.5px] text-foreground/75">
+                      <li>• {schemaEstimate.tables} Tables</li>
+                      <li>• {schemaEstimate.columns} Columns</li>
+                      <li>• ~{schemaEstimate.seconds}s</li>
+                    </ul>
+                  </div>
+                )}
+                <GradientButton onClick={handleGenerateCatalog} disabled={ontologyLoading || !selectedDb}>
+                  <span className="flex items-center gap-1.5 text-[11px]">
+                    <Sparkles className="w-3 h-3" />
+                    Generate AI Catalog
+                  </span>
+                </GradientButton>
+              </div>
+            )}
+
+            {!ontologyLoading && !ontologyError && catalogJob?.status !== "running" && filteredTables.length === 0 && hasCatalog && (
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
                 <BookOpen className="w-8 h-8 opacity-30" />
                 <p className="text-sm font-medium">No tables match your filters.</p>
@@ -668,165 +1482,328 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               </div>
             )}
 
-            {!ontologyLoading && !ontologyError && filteredTables.map((table) => {
+            {!ontologyLoading && !ontologyError && catalogJob?.status !== "running" && hasCatalog && filteredTables.map((table) => {
               const isExpanded = expandedTables.has(table.physical_name);
               const isSelected = selectedTableName === table.physical_name;
               const isFav = favorites.has(table.physical_name);
               const colCount = table.columns?.length ?? 0;
+              const relCount = relCountByTable[table.physical_name] ?? 0;
               const timeAgo = relativeTime(table.last_updated);
+              const confPct = toConfidencePct(table.ai_confidence);
+              const tags = (table.tags && table.tags.length > 0)
+                ? table.tags
+                : (table.category ? [table.category] : []);
 
               return (
                 <div
                   key={table.physical_name}
-                  className={`rounded-lg border shadow-sm transition-all duration-150 cursor-pointer ${
+                  className={`group/card rounded-2xl border cursor-pointer overflow-hidden transition-[border-color,box-shadow,background-color,transform] duration-200 ease-out ${
                     isSelected
-                      ? "border-primary/50 bg-primary/[0.04] shadow-primary/5"
-                      : "border-border/60 bg-card/80 hover:border-border hover:shadow-md hover:bg-card/90"
+                      ? "border-primary/50 bg-gradient-to-br from-primary/[0.08] via-card/80 to-card/80 shadow-[0_0_0_1px_rgba(129,140,248,0.15)]"
+                      : "border-white/[0.08] bg-gradient-to-br from-white/[0.035] via-card/75 to-card/60 hover:border-primary/40 hover:shadow-[0_10px_28px_-14px_rgba(0,0,0,0.65)] hover:-translate-y-0.5"
                   }`}
                   onClick={() => { setSelectedTableName(table.physical_name); setRightPanelTab("overview"); }}
                 >
-                  {/* ── Card header ── */}
-                  <div className="flex items-start gap-2.5 px-3 pt-2.5 pb-2">
-                    {/* Table icon */}
-                    <div className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 border ${
-                      isSelected ? "bg-primary/15 border-primary/30" : "bg-muted/25 border-border/40"
-                    }`}>
-                      <Table2 className={`w-4 h-4 ${isSelected ? "text-primary" : "text-muted-foreground/70"}`} />
+                  {/* ── Card header: top row = title/badges + meta; description uses full width under meta ── */}
+                  <div className="flex items-start gap-4 p-5">
+                    {/* Left icon — unified primary tint */}
+                    <div
+                      className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                      style={{
+                        backgroundColor: "rgba(129,140,248,0.12)",
+                        border: "1px solid rgba(129,140,248,0.25)",
+                      }}
+                    >
+                      <Table2 className="w-5 h-5 text-primary" strokeWidth={1.75} />
                     </div>
 
-                    {/* Name + badges + meta */}
                     <div className="flex-1 min-w-0">
-                      {/* Row 1: name, star, badge, timestamp */}
-                      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                        <span className="text-[13px] font-semibold text-foreground leading-tight">{table.physical_name}</span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); toggleFavorite(table.physical_name); }}
-                          className="text-muted-foreground/30 hover:text-yellow-400 transition-colors"
-                        >
-                          <Star className={`w-3 h-3 ${isFav ? "text-yellow-400 fill-yellow-400" : ""}`} />
-                        </button>
-                        <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-[18px] leading-none rounded-full border ${statusBg(table.status)}`}>
-                          {statusLabel(table.status)}
-                        </Badge>
-                        {timeAgo && (
-                          <span className="text-[10px] text-muted-foreground/50">
-                            • Updated {timeAgo}{table.updated_by ? ` by ${table.updated_by}` : ""}
+                      {/* Top row: title/badges | Columns/Relationships + expand */}
+                      <div className="flex items-start gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <h3 className="text-[15px] font-semibold text-foreground tracking-tight truncate">
+                              {table.physical_name}
+                            </h3>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleFavorite(table.physical_name); }}
+                              className="p-0.5 rounded text-muted-foreground/35 hover:text-yellow-400 transition-colors duration-150 shrink-0"
+                              title="Toggle favorite"
+                            >
+                              <Star className={`w-3.5 h-3.5 ${isFav ? "text-yellow-400 fill-yellow-400" : ""}`} />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center flex-wrap gap-2 mt-2.5">
+                            <StatusBadge status={table.status} />
+                            {(table.is_ai_generated) && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full font-medium leading-none border"
+                                style={{ backgroundColor: "rgba(139,92,246,0.22)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.55)", padding: "5px 12px", height: 26, fontSize: 13 }}
+                              >
+                                <Sparkles className="w-3 h-3" strokeWidth={2} style={{ color: "#C4B5FD" }} />
+                                AI Generated
+                              </span>
+                            )}
+                            {confPct !== null && (
+                              <span className="inline-flex items-center gap-1.5 font-medium tabular-nums" style={{ color: "#93C5FD", fontSize: 13 }}>
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: confidenceBarHex(confPct) }} />
+                                {confPct}%
+                                <span className="font-normal" style={{ color: "rgba(147,197,253,0.75)" }}>Confidence</span>
+                              </span>
+                            )}
+                            {timeAgo && (
+                              <span className="font-normal" style={{ color: "rgba(255,255,255,0.42)", fontSize: 13 }}>
+                                Updated {timeAgo}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Right metadata + expand (stays top-right) */}
+                        <div className="shrink-0 flex items-center gap-2.5 self-start pt-0.5">
+                          <span
+                            className="inline-flex items-center gap-1.5 h-8 rounded-lg tabular-nums"
+                            style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", padding: "0 12px", fontSize: 13, color: "rgba(255,255,255,0.75)" }}
+                          >
+                            <Columns3 className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
+                            {colCount} Columns
                           </span>
-                        )}
+                          <span className="text-white/15 select-none" style={{ fontSize: 13 }}>|</span>
+                          <span
+                            className="inline-flex items-center gap-1.5 h-8 rounded-lg tabular-nums"
+                            style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", padding: "0 12px", fontSize: 13, color: "rgba(255,255,255,0.75)" }}
+                          >
+                            <Network className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
+                            {relCount} Relationships
+                          </span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleExpanded(table.physical_name); }}
+                            className={`w-9 h-9 rounded-lg flex items-center justify-center border transition-all duration-200 ease-out shrink-0 ${
+                              isExpanded
+                                ? "bg-primary/15 border-primary/35 text-primary"
+                                : "bg-white/[0.03] border-white/[0.08] text-muted-foreground/60 hover:text-primary hover:border-primary/30 hover:bg-primary/10"
+                            }`}
+                            title={isExpanded ? "Collapse columns" : "Expand columns"}
+                          >
+                            <ChevronDown
+                              className={`w-[18px] h-[18px] transition-transform duration-200 ease-out ${isExpanded ? "rotate-180" : "rotate-0"}`}
+                              strokeWidth={2}
+                            />
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Row 2: description — always shown, placeholder if missing */}
-                      <p className="text-[11px] text-muted-foreground/70 mt-1 leading-relaxed line-clamp-2">
-                        {table.description || <span className="italic opacity-40">No description yet — use Start Enriching to generate AI descriptions.</span>}
+                      {/* Description — full width under Columns/Relationships */}
+                      <p
+                        className="mt-3 leading-[1.7] line-clamp-2"
+                        style={{
+                          fontSize: 15,
+                          color: table.description ? "rgba(255,255,255,0.58)" : "rgba(255,255,255,0.28)",
+                          maskImage: table.description ? "linear-gradient(180deg, #000 60%, transparent)" : undefined,
+                          WebkitMaskImage: table.description ? "linear-gradient(180deg, #000 60%, transparent)" : undefined,
+                        }}
+                      >
+                        {table.description || "Not generated"}
                       </p>
 
-                      {/* Row 3: tags */}
-                      {(table.tags && table.tags.length > 0) ? (
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {table.tags.map((tag) => (
-                            <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded-full bg-muted/30 text-muted-foreground border border-border/50 font-medium">
-                              #{tag}
-                            </span>
-                          ))}
+                      {/* Tags */}
+                      {tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-3">
+                          {tags.map((tag, i) => {
+                            const tagPalettes = [
+                              { backgroundColor: "rgba(139,92,246,0.14)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.4)" },
+                              { backgroundColor: "rgba(59,130,246,0.14)", color: "#93C5FD", borderColor: "rgba(96,165,250,0.4)" },
+                              { backgroundColor: "rgba(16,185,129,0.14)", color: "#6EE7B7", borderColor: "rgba(52,211,153,0.4)" },
+                              { backgroundColor: "rgba(249,115,22,0.14)", color: "#FDBA74", borderColor: "rgba(251,146,60,0.4)" },
+                              { backgroundColor: "rgba(6,182,212,0.14)", color: "#67E8F9", borderColor: "rgba(34,211,238,0.4)" },
+                              { backgroundColor: "rgba(236,72,153,0.14)", color: "#F9A8D4", borderColor: "rgba(244,114,182,0.4)" },
+                            ];
+                            const tone = tagPalettes[i % tagPalettes.length];
+                            return (
+                              <span
+                                key={tag}
+                                className="rounded-full font-medium capitalize transition-opacity duration-150 hover:opacity-90"
+                                style={{
+                                  backgroundColor: tone.backgroundColor,
+                                  border: `1px solid ${tone.borderColor}`,
+                                  color: tone.color,
+                                  padding: "5px 16px",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  lineHeight: 1.4,
+                                  fontSize: 13,
+                                }}
+                              >
+                                #{tag}
+                              </span>
+                            );
+                          })}
                         </div>
-                      ) : table.category ? (
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-muted/30 text-muted-foreground border border-border/40 font-medium">
-                            #{table.category}
-                          </span>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    {/* Col/relation count + expand chevron */}
-                    <div className="shrink-0 flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-muted-foreground/60 whitespace-nowrap tabular-nums">
-                        {colCount} Columns
-                      </span>
-                      <span className="text-[10px] text-muted-foreground/40">·</span>
-                      <span className="text-[10px] text-muted-foreground/60 whitespace-nowrap tabular-nums">
-                        0 Relations
-                      </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); toggleExpanded(table.physical_name); }}
-                        className={`p-1 rounded transition-colors ${
-                          isExpanded ? "text-primary" : "text-muted-foreground/50 hover:text-foreground"
-                        }`}
-                      >
-                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                      </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* ── Expanded column grid ── */}
+                  {/* ── Expanded table — continuous card, no double border ── */}
                   {isExpanded && (
-                    <div className="border-t border-border/50">
+                    <div className="border-t border-white/[0.06] animate-in fade-in duration-200">
                       {(table.columns ?? []).length > 0 ? (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-[11px]">
-                            <thead>
-                              <tr className="bg-muted/20 border-b border-border/40">
+                        <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
+                          <table className="w-full border-collapse" style={{ fontSize: 14 }}>
+                            <thead className="sticky top-0 z-[1]">
+                              <tr className="bg-[#0e1018]/95 backdrop-blur-sm border-b border-white/[0.06]">
                                 {["Column Name", "AI Description", "Type", "Tag", "Confidence", "Status", "Actions"].map((h) => (
-                                  <th key={h} className="text-left text-[9px] font-semibold text-muted-foreground uppercase tracking-wider px-3 py-1.5 whitespace-nowrap">{h}</th>
+                                  <th
+                                    key={h}
+                                    className="text-left font-semibold uppercase tracking-[0.1em] px-4 py-3 whitespace-nowrap"
+                                    style={{ color: "#FFFFFF", fontSize: 14 }}
+                                  >
+                                    {h}
+                                  </th>
                                 ))}
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-border/30">
+                            <tbody>
                               {(table.columns ?? []).map((col) => {
-                                const conf = col.confidence;
-                                const isPK = (col.semantic_type || "").toLowerCase() === "identifier" || (col.semantic_type || "").toLowerCase() === "pk";
+                                const conf = toConfidencePct(col.confidence);
+                                const sem = (col.semantic_type || "").toLowerCase();
+                                const isPK = sem === "identifier" || sem === "pk";
+                                const isFK = sem === "reference" || sem === "fk";
+                                const typeBadge = dataTypeBadge(col.data_type);
+                                const tagTone = semanticTypeStyle(col.semantic_type);
+                                const barHex = conf !== null ? confidenceBarHex(conf) : null;
+                                const confHex = conf !== null ? confidenceTextHex(conf) : null;
+                                const keyBadgeBase: React.CSSProperties = {
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  borderRadius: 4,
+                                  border: "1px solid",
+                                  padding: "1px 8px",
+                                  fontSize: 14,
+                                  fontWeight: 400,
+                                  lineHeight: "18px",
+                                  height: 22,
+                                };
+
                                 return (
-                                  <tr key={col.physical_name} className="hover:bg-muted/10 transition-colors group">
-                                    <td className="px-3 py-2 font-mono text-[10px] text-foreground whitespace-nowrap align-middle">
-                                      <div className="flex items-center gap-1">
-                                        {isPK && <span className="text-[8px] px-1 py-0 rounded bg-violet-500/20 text-violet-400 border border-violet-500/30 font-bold leading-4">PK</span>}
-                                        {col.physical_name}
+                                  <tr
+                                    key={col.physical_name}
+                                    className="group/row border-b border-white/[0.04] last:border-b-0 cursor-pointer transition-colors duration-150 hover:bg-white/[0.035]"
+                                  >
+                                    <td className="px-4 py-3.5 align-middle whitespace-nowrap" style={{ fontSize: 14 }}>
+                                      <div className="flex items-center gap-2">
+                                        {isPK && (
+                                          <span
+                                            style={{
+                                              ...keyBadgeBase,
+                                              backgroundColor: "rgba(139,92,246,0.22)",
+                                              color: "#C4B5FD",
+                                              borderColor: "rgba(167,139,250,0.55)",
+                                            }}
+                                          >
+                                            PK
+                                          </span>
+                                        )}
+                                        {isFK && (
+                                          <span
+                                            style={{
+                                              ...keyBadgeBase,
+                                              backgroundColor: "rgba(59,130,246,0.22)",
+                                              color: "#93C5FD",
+                                              borderColor: "rgba(96,165,250,0.55)",
+                                            }}
+                                          >
+                                            FK
+                                          </span>
+                                        )}
+                                        {!isPK && !isFK && (
+                                          <span
+                                            style={{
+                                              ...keyBadgeBase,
+                                              backgroundColor: "rgba(255,255,255,0.05)",
+                                              color: "rgba(255,255,255,0.45)",
+                                              borderColor: "rgba(255,255,255,0.1)",
+                                            }}
+                                          >
+                                            COL
+                                          </span>
+                                        )}
+                                        <span className="font-mono tracking-tight" style={{ color: "rgba(255,255,255,0.92)", fontSize: 14, fontWeight: 400 }}>
+                                          {col.physical_name}
+                                        </span>
                                       </div>
                                     </td>
-                                    <td className="px-3 py-2 text-[10px] text-muted-foreground align-middle max-w-[200px]">
-                                      <span className="line-clamp-2 leading-relaxed">{col.business_definition || <span className="italic opacity-40">No description</span>}</span>
+                                    <td className="px-4 py-3.5 align-middle max-w-[300px]" style={{ fontSize: 14 }}>
+                                      {col.business_definition ? (
+                                        <span className="line-clamp-2 leading-[1.6]" style={{ color: "rgba(255,255,255,0.62)", fontSize: 14 }}>
+                                          {col.business_definition}
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1.5 italic" style={{ color: "rgba(255,255,255,0.35)", fontSize: 14 }}>
+                                          <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} style={{ color: "rgba(196,181,253,0.55)" }} />
+                                          This field hasn't been analyzed yet.
+                                        </span>
+                                      )}
                                     </td>
-                                    <td className="px-3 py-2 text-[10px] text-muted-foreground align-middle whitespace-nowrap">
-                                      {col.data_type || "—"}
+                                    <td className="px-4 py-3.5 align-middle whitespace-nowrap" style={{ fontSize: 14 }}>
+                                      {typeBadge ? (
+                                        <span
+                                          className="inline-flex items-center rounded-md font-medium border lowercase"
+                                          style={{ backgroundColor: typeBadge.style.backgroundColor, color: typeBadge.style.color, borderColor: typeBadge.style.borderColor, padding: "2px 12px", height: 24, fontSize: 14, fontWeight: 500 }}
+                                        >
+                                          {typeBadge.label}
+                                        </span>
+                                      ) : (
+                                        <span style={{ color: "rgba(255,255,255,0.28)", fontSize: 14 }}>—</span>
+                                      )}
                                     </td>
-                                    <td className="px-3 py-2 align-middle">
+                                    <td className="px-4 py-3.5 align-middle" style={{ fontSize: 14 }}>
                                       {col.semantic_type ? (
-                                        <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 leading-none ${semanticTypeBg(col.semantic_type)}`}>
+                                        <span
+                                          className="inline-flex items-center rounded-full font-medium border capitalize"
+                                          style={{ backgroundColor: tagTone.backgroundColor, color: tagTone.color, borderColor: tagTone.borderColor, padding: "2px 12px", height: 24, fontSize: 14, fontWeight: 500 }}
+                                        >
                                           {col.semantic_type}
-                                        </Badge>
-                                      ) : <span className="text-muted-foreground/40">—</span>}
+                                        </span>
+                                      ) : (
+                                        <span style={{ color: "rgba(255,255,255,0.28)", fontSize: 14 }}>—</span>
+                                      )}
                                     </td>
-                                    <td className="px-3 py-2 align-middle min-w-[80px]">
-                                      {conf !== undefined ? (
-                                        <div className="flex items-center gap-1.5">
-                                          <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[48px]">
-                                            <div className={`h-full rounded-full transition-all ${confidenceColor(conf)}`} style={{ width: `${conf}%` }} />
+                                    <td className="px-4 py-3.5 align-middle min-w-[130px]" style={{ fontSize: 14 }}>
+                                      {conf !== null && barHex && confHex ? (
+                                        <div className="flex items-center gap-2.5">
+                                          <div className="flex-1 h-2 rounded-full overflow-hidden min-w-[64px]" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
+                                            <div
+                                              className="h-full rounded-full transition-all duration-300"
+                                              style={{
+                                                width: `${conf}%`,
+                                                backgroundColor: barHex,
+                                                boxShadow: `0 0 8px ${barHex}88`,
+                                              }}
+                                            />
                                           </div>
-                                          <span className="text-[9px] tabular-nums text-muted-foreground">{conf}%</span>
+                                          <span className="tabular-nums font-semibold min-w-[32px]" style={{ color: confHex, fontSize: 14 }}>
+                                            {conf}%
+                                          </span>
                                         </div>
-                                      ) : <span className="text-[10px] text-muted-foreground/40">—</span>}
+                                      ) : (
+                                        <span style={{ color: "rgba(255,255,255,0.28)", fontSize: 14 }}>—</span>
+                                      )}
                                     </td>
-                                    <td className="px-3 py-2 align-middle whitespace-nowrap">
-                                      <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 leading-none ${statusBg(col.status)}`}>
-                                        {statusLabel(col.status)}
-                                      </Badge>
+                                    <td className="px-4 py-3.5 align-middle whitespace-nowrap" style={{ fontSize: 14 }}>
+                                      <StatusBadge status={col.status} />
                                     </td>
-                                    <td className="px-3 py-2 align-middle whitespace-nowrap">
-                                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        {(col.status || "").toUpperCase() === "PENDING" || (col.status || "").toUpperCase() === "PENDING_REVIEW" ? (
-                                          <>
-                                            <button className="p-1 rounded hover:bg-emerald-500/10 text-emerald-500/60 hover:text-emerald-400 transition-colors" title="Approve">
-                                              <CheckCircle2 className="w-3 h-3" />
-                                            </button>
-                                            <button className="p-1 rounded hover:bg-muted/40 text-muted-foreground/50 hover:text-foreground transition-colors" title="Edit">
-                                              <Pencil className="w-3 h-3" />
-                                            </button>
-                                          </>
-                                        ) : null}
-                                        <button className="p-1 rounded hover:bg-muted/40 text-muted-foreground/40 hover:text-foreground transition-colors" title="More actions">
-                                          <MoreHorizontal className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
+                                    <td className="px-4 py-3.5 align-middle whitespace-nowrap" style={{ fontSize: 14 }}>
+                                      <button
+                                        className="w-8 h-8 rounded-md flex items-center justify-center transition-colors duration-150"
+                                        style={{ color: "rgba(255,255,255,0.35)" }}
+                                        title="More actions"
+                                        onClick={(e) => e.stopPropagation()}
+                                        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.9)"; e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)"; }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.35)"; e.currentTarget.style.backgroundColor = "transparent"; }}
+                                      >
+                                        <MoreHorizontal className="w-4 h-4" />
+                                      </button>
                                     </td>
                                   </tr>
                                 );
@@ -835,7 +1812,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                           </table>
                         </div>
                       ) : (
-                        <p className="px-4 py-3 text-[11px] text-muted-foreground/60 text-center italic">No column data available.</p>
+                        <p className="px-5 py-6 text-center" style={{ color: "rgba(255,255,255,0.4)", fontSize: 14 }}>No column data available.</p>
                       )}
                     </div>
                   )}
@@ -845,46 +1822,56 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
           </div>
         </main>
 
-        {/* ──────────── RIGHT DETAILS PANEL (380px) ──────────── */}
-        <aside className="w-[380px] shrink-0 flex flex-col overflow-hidden bg-card/40">
+        {/* ──────────── RIGHT DETAILS PANEL (always mounted, always 400px) ──────────── */}
+        <aside className="min-w-0 overflow-hidden flex flex-col bg-card/40 border-l border-border">
           {selectedTable ? (
-            <div className="flex flex-col h-full min-h-0">
+            <div key={selectedTable.physical_name} className="flex flex-col h-full min-h-0 animate-in fade-in duration-200">
 
-              {/* Panel header */}
-              <div className="px-4 pt-3 pb-2.5 border-b border-border shrink-0">
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-7 h-7 rounded-md bg-muted/30 border border-border/50 flex items-center justify-center shrink-0">
-                      <Table2 className="w-3.5 h-3.5 text-muted-foreground/80" />
+              {/* Entity header */}
+              <div className="px-4 pt-4 pb-3 border-b border-border shrink-0 bg-gradient-to-b from-primary/[0.05] to-transparent">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-11 h-11 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 shadow-sm">
+                      <Table2 className="w-5 h-5 text-primary" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-[13px] font-semibold text-foreground truncate leading-tight">{selectedTable.physical_name}</p>
-                      <p className="text-[10px] text-muted-foreground leading-tight">Table</p>
+                      <p className="text-[15px] font-semibold text-foreground truncate leading-tight">{selectedTable.physical_name}</p>
+                      <p className="text-[9px] text-muted-foreground uppercase tracking-[0.12em] mt-1">Entity · Table</p>
                     </div>
                   </div>
-                  <button onClick={() => toggleFavorite(selectedTable.physical_name)} className="p-1 rounded hover:bg-muted/40 transition-colors shrink-0 mt-0.5">
-                    <Star className={`w-3.5 h-3.5 ${favorites.has(selectedTable.physical_name) ? "text-yellow-400 fill-yellow-400" : "text-muted-foreground/30 hover:text-yellow-400"}`} />
+                  <button onClick={() => toggleFavorite(selectedTable.physical_name)} className="p-1.5 rounded-md hover:bg-muted/40 transition-colors shrink-0" title="Toggle favorite">
+                    <Star className={`w-4 h-4 transition-colors ${favorites.has(selectedTable.physical_name) ? "text-yellow-400 fill-yellow-400" : "text-muted-foreground/30 hover:text-yellow-400"}`} />
                   </button>
                 </div>
-                {/* Status badge row */}
-                <div className="flex items-center gap-1.5">
-                  <Badge variant="outline" className={`text-[10px] px-2 py-0.5 rounded-full cursor-pointer ${statusBg(selectedTable.status)}`}>
-                    {statusLabel(selectedTable.status)} ▾
-                  </Badge>
+                {/* Badges */}
+                <div className="flex items-center flex-wrap gap-1.5 mt-3">
+                  <StatusBadge status={selectedTable.status} />
                   {selectedTable.is_ai_generated && (
-                    <Badge variant="outline" className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border-blue-500/20 flex items-center gap-1">
-                      <Sparkles className="w-2.5 h-2.5" /> AI Generated
-                    </Badge>
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full font-medium leading-none border"
+                      style={{ backgroundColor: "rgba(139,92,246,0.22)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.55)", padding: "5px 12px", height: 26, fontSize: 13 }}
+                    >
+                      <Sparkles className="w-3 h-3" strokeWidth={2} style={{ color: "#C4B5FD" }} />
+                      AI Generated
+                    </span>
+                  )}
+                  {selectedTable.category && (
+                    <span
+                      className="inline-flex items-center rounded-full font-medium leading-none border"
+                      style={{ backgroundColor: "rgba(148,163,184,0.14)", color: "#CBD5E1", borderColor: "rgba(148,163,184,0.35)", padding: "5px 12px", height: 26, fontSize: 13 }}
+                    >
+                      {selectedTable.category}
+                    </span>
                   )}
                 </div>
               </div>
 
               {/* Tabs */}
-              <div className="flex border-b border-border shrink-0 bg-card/30 px-1 pt-1">
+              <div className="flex border-b border-border shrink-0 bg-card/30 px-1 pt-1 overflow-x-auto">
                 {[
                   { id: "overview" as const, label: "Overview" },
                   { id: "columns" as const, label: `Columns (${selectedTable.columns?.length ?? 0})` },
-                  { id: "relationships" as const, label: "Relationships (0)" },
+                  { id: "relationships" as const, label: `Relationships (${relCount})` },
                   { id: "history" as const, label: "History" },
                 ].map((tab) => (
                   <button
@@ -906,40 +1893,52 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
 
                 {/* ── Overview tab ── */}
                 {rightPanelTab === "overview" && (
-                  <div className="p-4 space-y-3.5">
+                  <div key={selectedTable.physical_name} className="p-3 space-y-3 animate-in fade-in duration-200">
+
+                    {isSelectedTableGenerating && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/20 bg-primary/[0.06] text-[11px] text-foreground/80">
+                        <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
+                        {selectedTableGenStatus === "generating"
+                          ? "Generating AI content for this table…"
+                          : "Queued — this table will be enriched shortly…"}
+                      </div>
+                    )}
 
                     {/* AI Generated Description */}
-                    <section>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <h3 className="text-[11px] font-semibold text-foreground/80">AI Generated Description</h3>
+                    <PanelSection
+                      icon={<FileText className="w-3.5 h-3.5" />}
+                      iconColor="text-primary/70"
+                      title="AI Generated Description"
+                      action={
                         <button className="flex items-center gap-1 text-[10px] text-primary/60 hover:text-primary transition-colors">
                           <Pencil className="w-2.5 h-2.5" /> Edit
                         </button>
-                      </div>
-                      <p className="text-[12px] text-foreground/70 leading-relaxed">
-                        {selectedTable.description
-                          ? selectedTable.description
-                          : `Table with ${selectedTable.columns?.length ?? 0} column${selectedTable.columns?.length === 1 ? "" : "s"}.`}
-                      </p>
-                    </section>
+                      }
+                    >
+                      {selectedTable.description ? (
+                        <p className="text-[12px] text-foreground/70 leading-relaxed">{selectedTable.description}</p>
+                      ) : (
+                        <EmptyHint
+                          text={isSelectedTableGenerating ? "Analyzing this table…" : "Not generated"}
+                          sub={isSelectedTableGenerating ? "AI enrichment in progress." : "Generate AI Catalog to create it."}
+                        />
+                      )}
+                    </PanelSection>
 
                     {/* Business Purpose */}
-                    <section>
-                      <h3 className="text-[11px] font-semibold text-foreground/80 mb-1.5">Business Purpose</h3>
+                    <PanelSection icon={<Briefcase className="w-3.5 h-3.5" />} iconColor="text-sky-400/80" title="Business Purpose">
                       {selectedTable.business_purpose ? (
-                        <p className="text-[12px] text-foreground/60 leading-relaxed">{selectedTable.business_purpose}</p>
+                        <p className="text-[12px] text-foreground/70 leading-relaxed">{selectedTable.business_purpose}</p>
                       ) : (
-                        <div className="space-y-1.5">
-                          <div className="h-2.5 rounded bg-muted/35 w-full animate-pulse" />
-                          <div className="h-2.5 rounded bg-muted/25 w-4/5 animate-pulse" />
-                          <p className="text-[10px] text-muted-foreground/35 italic mt-1">Use Start Enriching to define business purpose.</p>
-                        </div>
+                        <EmptyHint
+                          text={isSelectedTableGenerating ? "Analyzing this table…" : "Not generated"}
+                          sub={isSelectedTableGenerating ? "AI enrichment in progress." : "Generate AI Catalog to define it."}
+                        />
                       )}
-                    </section>
+                    </PanelSection>
 
                     {/* Business Concepts */}
-                    <section>
-                      <h3 className="text-[11px] font-semibold text-foreground/80 mb-1.5">Business Concepts</h3>
+                    <PanelSection icon={<Brain className="w-3.5 h-3.5" />} iconColor="text-violet-400/80" title="Business Concepts">
                       {selectedTable.business_concepts && selectedTable.business_concepts.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5">
                           {selectedTable.business_concepts.map((concept, i) => {
@@ -950,153 +1949,119 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                               "bg-orange-500/10 text-orange-400 border-orange-500/20",
                             ];
                             return (
-                              <Badge key={concept} variant="outline" className={`text-[10px] px-2 py-0.5 rounded-md ${colors[i % colors.length]}`}>
+                              <Badge key={concept} variant="outline" className={`text-[10px] px-3 py-0.5 rounded-md transition-transform hover:-translate-y-0.5 ${colors[i % colors.length]}`}>
                                 {concept}
                               </Badge>
                             );
                           })}
                         </div>
                       ) : (
-                        <div className="flex flex-wrap gap-1.5">
-                          {[56, 48, 64, 52].map((w, i) => (
-                            <div key={i} className="h-5 rounded-md bg-muted/25 animate-pulse" style={{ width: `${w}px` }} />
-                          ))}
-                        </div>
+                        <EmptyHint text="Not generated" />
                       )}
-                    </section>
+                    </PanelSection>
 
                     {/* Common Business Questions */}
-                    <section>
-                      <h3 className="text-[11px] font-semibold text-foreground/80 mb-1.5">Common Business Questions</h3>
+                    <PanelSection icon={<ListChecks className="w-3.5 h-3.5" />} iconColor="text-emerald-400/80" title="Common Business Questions">
                       {selectedTable.common_questions && selectedTable.common_questions.length > 0 ? (
                         <ul className="space-y-1.5">
                           {selectedTable.common_questions.map((q) => (
-                            <li key={q} className="flex items-start gap-2 text-[11px] text-foreground/60 leading-relaxed">
-                              <span className="shrink-0 mt-1.5">•</span>
+                            <li key={q} className="flex items-start gap-2 text-[11px] text-foreground/70 leading-relaxed">
+                              <span className="shrink-0 mt-1.5 text-primary/60">•</span>
                               {q}
                             </li>
                           ))}
                         </ul>
                       ) : (
-                        <div className="space-y-2">
-                          {[90, 75, 82].map((w, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <span className="shrink-0 text-muted-foreground/30 text-[11px]">•</span>
-                              <div className="h-2.5 rounded bg-muted/25 animate-pulse" style={{ width: `${w}%` }} />
-                            </div>
-                          ))}
-                        </div>
+                        <EmptyHint text="Not generated" />
                       )}
-                    </section>
+                    </PanelSection>
 
-                    {/* ── Divider before metadata ── */}
-                    <hr className="border-border/40" />
+                    {/* AI Confidence */}
+                    {(() => {
+                      const confPct = toConfidencePct(selectedTable.ai_confidence);
+                      return (
+                        <PanelSection icon={<ShieldCheck className="w-3.5 h-3.5" />} iconColor="text-emerald-400/80" title="AI Confidence">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] text-muted-foreground/70">Overall confidence score</span>
+                            {confPct !== null ? (
+                              <span className="text-[15px] font-bold tabular-nums leading-none" style={{ color: confidenceTextHex(confPct) }}>{confPct}%</span>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground/40 italic">Not generated</span>
+                            )}
+                          </div>
+                          <div className="h-2 rounded-full bg-muted/40 overflow-hidden">
+                            {confPct !== null ? (
+                              <div
+                                className="h-full rounded-full transition-all duration-700 ease-out"
+                                style={{ width: `${confPct}%`, backgroundColor: confidenceBarHex(confPct), boxShadow: `0 0 8px ${confidenceBarHex(confPct)}88` }}
+                              />
+                            ) : (
+                              <div className="h-full rounded-full bg-muted/20" />
+                            )}
+                          </div>
+                          {confPct === null && (
+                            <p className="text-[9px] text-muted-foreground/35 italic mt-1.5">Confidence calculated after enrichment.</p>
+                          )}
+                        </PanelSection>
+                      );
+                    })()}
 
-                    {/* Metadata block */}
-                    <div className="space-y-2.5">
-                      {/* Domain */}
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] text-muted-foreground/70 shrink-0">Domain</span>
-                        {selectedTable.category ? (
-                          <span className="text-[12px] text-foreground/80 font-medium">{selectedTable.category}</span>
-                        ) : (
-                          <div className="h-2.5 w-16 rounded bg-muted/30 animate-pulse" />
-                        )}
+                    {/* Metadata */}
+                    <PanelSection icon={<Info className="w-3.5 h-3.5" />} iconColor="text-sky-400/80" title="Metadata">
+                      <div className="grid grid-cols-2 gap-2">
+                        <MetaCard icon={<Building2 className="w-2.5 h-2.5" />} iconColor="text-sky-400/70" label="Domain">
+                          {selectedTable.category ? selectedTable.category : <span className="text-muted-foreground/40 font-normal">—</span>}
+                        </MetaCard>
+                        <MetaCard icon={<User className="w-2.5 h-2.5" />} iconColor="text-violet-400/70" label="Owner">
+                          {selectedTable.owner ? selectedTable.owner : <span className="text-muted-foreground/40 font-normal">—</span>}
+                        </MetaCard>
+                        <MetaCard icon={<ShieldCheck className="w-2.5 h-2.5" />} iconColor="text-emerald-400/70" label="Data Steward">
+                          {selectedTable.data_steward
+                            ? <span className="text-primary/80">{selectedTable.data_steward}</span>
+                            : <span className="text-muted-foreground/40 font-normal">—</span>}
+                        </MetaCard>
+                        <MetaCard icon={<CalendarDays className="w-2.5 h-2.5" />} iconColor="text-amber-400/70" label="Created">
+                          {selectedTable.last_updated
+                            ? new Date(selectedTable.last_updated).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                            : <span className="text-muted-foreground/40 font-normal">—</span>}
+                        </MetaCard>
+                        <div className="col-span-2">
+                          <MetaCard icon={<Clock3 className="w-2.5 h-2.5" />} iconColor="text-sky-400/70" label="Last Updated">
+                            {selectedTable.last_updated
+                              ? <span>{relativeTime(selectedTable.last_updated)}{selectedTable.updated_by ? ` · ${selectedTable.updated_by}` : ""}</span>
+                              : <span className="text-muted-foreground/40 font-normal">—</span>}
+                          </MetaCard>
+                        </div>
                       </div>
 
                       {/* Tags */}
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="text-[11px] text-muted-foreground/70 shrink-0 mt-0.5">Tags</span>
+                      <div className="mt-3">
+                        <p className="flex items-center gap-1 text-[9px] font-medium text-muted-foreground/60 uppercase tracking-wide mb-1.5">
+                          <Tag className="w-2.5 h-2.5" /> Tags
+                        </p>
                         {selectedTable.tags && selectedTable.tags.length > 0 ? (
-                          <div className="flex flex-wrap gap-1 justify-end">
+                          <div className="flex flex-wrap gap-1.5">
                             {selectedTable.tags.map((tag) => (
-                              <Badge key={tag} variant="outline" className="text-[9px] px-1.5 py-0 h-[18px] leading-none rounded-full bg-muted/30 text-muted-foreground border-border/50">
+                              <span
+                                key={tag}
+                                className="text-[10px] rounded-full bg-muted/40 text-muted-foreground border border-border/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+                                style={{ padding: "4px 12px", display: "inline-flex", alignItems: "center" }}
+                              >
                                 {tag}
-                              </Badge>
+                              </span>
                             ))}
                           </div>
                         ) : (
-                          <div className="flex gap-1">
-                            {[40, 52, 44].map((w, i) => <div key={i} className="h-[18px] rounded-full bg-muted/25 animate-pulse" style={{ width: `${w}px` }} />)}
-                          </div>
+                          <span className="text-[10px] text-muted-foreground/40 italic">No tags yet.</span>
                         )}
                       </div>
-
-                      {/* Owner */}
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] text-muted-foreground/70 shrink-0">Owner</span>
-                        {selectedTable.owner ? (
-                          <span className="text-[12px] text-foreground/80">{selectedTable.owner}</span>
-                        ) : (
-                          <div className="h-2.5 w-20 rounded bg-muted/30 animate-pulse" />
-                        )}
-                      </div>
-
-                      {/* Data Steward */}
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] text-muted-foreground/70 shrink-0">Data Steward</span>
-                        {selectedTable.data_steward ? (
-                          <span className="text-[12px] text-primary/80 hover:text-primary cursor-pointer transition-colors">{selectedTable.data_steward}</span>
-                        ) : (
-                          <div className="h-2.5 w-20 rounded bg-muted/30 animate-pulse" />
-                        )}
-                      </div>
-
-                      {/* Created */}
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] text-muted-foreground/70 shrink-0">Created</span>
-                        {selectedTable.last_updated ? (
-                          <span className="text-[12px] text-foreground/70">
-                            {new Date(selectedTable.last_updated).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                          </span>
-                        ) : (
-                          <div className="h-2.5 w-20 rounded bg-muted/30 animate-pulse" />
-                        )}
-                      </div>
-
-                      {/* Last Updated */}
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] text-muted-foreground/70 shrink-0">Last Updated</span>
-                        {selectedTable.last_updated ? (
-                          <span className="text-[12px] text-foreground/70">
-                            {relativeTime(selectedTable.last_updated)}{selectedTable.updated_by ? ` by ${selectedTable.updated_by}` : ""}
-                          </span>
-                        ) : (
-                          <div className="h-2.5 w-24 rounded bg-muted/30 animate-pulse" />
-                        )}
-                      </div>
-
-                      {/* AI Confidence */}
-                      <div className="pt-1">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-[11px] text-muted-foreground/70">AI Confidence (Overall)</span>
-                          {typeof selectedTable.ai_confidence === "number" ? (
-                            <span className="text-[12px] font-semibold text-emerald-400 tabular-nums">{selectedTable.ai_confidence}%</span>
-                          ) : (
-                            <span className="text-[10px] text-muted-foreground/40 italic">–</span>
-                          )}
-                        </div>
-                        <div className="h-1.5 rounded-full bg-muted/40 overflow-hidden">
-                          {typeof selectedTable.ai_confidence === "number" ? (
-                            <div
-                              className={`h-full rounded-full transition-all duration-500 ${confidenceColor(selectedTable.ai_confidence)}`}
-                              style={{ width: `${selectedTable.ai_confidence}%` }}
-                            />
-                          ) : (
-                            <div className="h-full rounded-full bg-muted/40 animate-pulse w-3/4" />
-                          )}
-                        </div>
-                        {typeof selectedTable.ai_confidence !== "number" && (
-                          <p className="text-[9px] text-muted-foreground/35 italic mt-1">Confidence calculated after enrichment</p>
-                        )}
-                      </div>
-                    </div>
+                    </PanelSection>
                   </div>
                 )}
 
                 {/* ── Columns tab ── */}
                 {rightPanelTab === "columns" && (
-                  <div className="p-4">
+                  <div key={selectedTable.physical_name} className="p-3 animate-in fade-in duration-200">
                     {(selectedTable.columns ?? []).length === 0 ? (
                       <p className="text-[11px] text-muted-foreground text-center py-8">No column data available.</p>
                     ) : (
@@ -1108,14 +2073,24 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                               {col.business_definition && <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{col.business_definition}</p>}
                             </div>
                             <div className="shrink-0 flex flex-col items-end gap-1">
-                              {col.semantic_type && (
-                                <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 leading-none ${semanticTypeBg(col.semantic_type)}`}>
-                                  {col.semantic_type}
-                                </Badge>
-                              )}
-                              <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 leading-none ${statusBg(col.status)}`}>
-                                {statusLabel(col.status)}
-                              </Badge>
+                              {col.semantic_type && (() => {
+                                const tone = semanticTypeStyle(col.semantic_type);
+                                return (
+                                  <span
+                                    className="inline-flex items-center rounded-full text-[9px] font-medium border capitalize"
+                                    style={{
+                                      backgroundColor: tone.backgroundColor,
+                                      color: tone.color,
+                                      borderColor: tone.borderColor,
+                                      padding: "2px 10px",
+                                      height: 18,
+                                    }}
+                                  >
+                                    {col.semantic_type}
+                                  </span>
+                                );
+                              })()}
+                              <StatusBadge status={col.status} />
                             </div>
                           </div>
                         ))}
@@ -1126,17 +2101,55 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
 
                 {/* ── Relationships tab ── */}
                 {rightPanelTab === "relationships" && (
-                  <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
-                    <Link2 className="w-6 h-6 opacity-30" />
-                    <p className="text-[11px]">No relationships mapped yet.</p>
+                  <div key={selectedTable.physical_name} className="p-3 space-y-3 animate-in fade-in duration-200">
+                    {/* Statistic cards */}
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: "Outgoing", value: tableRelationships.outgoing.length, icon: <ArrowUpRight className="w-3.5 h-3.5" />, color: "text-sky-400", bg: "bg-sky-500/10" },
+                        { label: "Incoming", value: tableRelationships.incoming.length, icon: <ArrowDownLeft className="w-3.5 h-3.5" />, color: "text-violet-400", bg: "bg-violet-500/10" },
+                        { label: "Metrics", value: metricEntries.length, icon: <TrendingUp className="w-3.5 h-3.5" />, color: "text-emerald-400", bg: "bg-emerald-500/10" },
+                      ].map((s) => (
+                        <div key={s.label} className="rounded-xl border border-border/60 bg-card/60 p-2.5 text-center shadow-sm">
+                          <div className={`w-7 h-7 mx-auto rounded-lg flex items-center justify-center mb-1.5 ${s.bg} ${s.color}`}>{s.icon}</div>
+                          <p className={`text-[16px] font-bold leading-none tabular-nums ${s.color}`}>{s.value}</p>
+                          <p className="text-[9px] text-muted-foreground/70 mt-1 uppercase tracking-wide">{s.label}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {relCount === 0 ? (
+                      <EmptyHint text="No relationships mapped yet." sub="Relationships are inferred from foreign keys and the ontology graph." />
+                    ) : (
+                      <>
+                        {tableRelationships.outgoing.length > 0 && (
+                          <PanelSection icon={<ArrowUpRight className="w-3.5 h-3.5" />} iconColor="text-sky-400/80" title={`Outgoing (${tableRelationships.outgoing.length})`}>
+                            <div className="space-y-1">
+                              {tableRelationships.outgoing.map((r, i) => (
+                                <RelationshipRow key={`out-${i}`} dot="bg-sky-400" name={r.target} label={r.label} />
+                              ))}
+                            </div>
+                          </PanelSection>
+                        )}
+                        {tableRelationships.incoming.length > 0 && (
+                          <PanelSection icon={<ArrowDownLeft className="w-3.5 h-3.5" />} iconColor="text-violet-400/80" title={`Incoming (${tableRelationships.incoming.length})`}>
+                            <div className="space-y-1">
+                              {tableRelationships.incoming.map((r, i) => (
+                                <RelationshipRow key={`in-${i}`} dot="bg-violet-400" name={r.source} label={r.label} />
+                              ))}
+                            </div>
+                          </PanelSection>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
 
                 {/* ── History tab ── */}
                 {rightPanelTab === "history" && (
-                  <div className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
-                    <History className="w-6 h-6 opacity-30" />
-                    <p className="text-[11px]">No history available.</p>
+                  <div key={selectedTable.physical_name} className="p-3 animate-in fade-in duration-200">
+                    <PanelSection icon={<Clock3 className="w-3.5 h-3.5" />} iconColor="text-muted-foreground/70" title="Change History">
+                      <EmptyHint text="No history available." sub="Edits and approvals will appear here once you start reviewing." />
+                    </PanelSection>
                   </div>
                 )}
               </div>
@@ -1163,6 +2176,258 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
           )}
         </aside>
       </div>
+      )}
+
+      {/* ══════════════ BUSINESS CONTEXT BODY ══════════════ */}
+      {activeView === "business_context" && selectedDb && (
+        <div className="flex-1 min-h-0 overflow-y-auto bg-background">
+          <div className="max-w-5xl mx-auto px-6 py-6">
+
+            {/* Page intro */}
+            <div className="flex items-start justify-between gap-4 mb-5">
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+                  <Briefcase className="w-4 h-4 text-primary" />
+                  Business Context
+                </h2>
+                <p className="text-[12px] text-muted-foreground mt-1 leading-relaxed max-w-2xl">
+                  Metrics, reporting rules, and business terms captured through
+                  <span className="text-foreground/80 font-medium"> Start Enriching</span>. Whatever the
+                  assistant captures during a chat appears here once you apply it.
+                </p>
+              </div>
+              <GradientButton onClick={handleStartEnriching}
+                disabled={isEnriching || ontologyLoading || !hasCatalog || isPbitUploading}>
+                <span className="flex items-center gap-1.5 text-[11px]">
+                  <Sparkles className="w-3 h-3" />
+                  {isEnriching ? "Preparing…" : "Start Enriching"}
+                </span>
+              </GradientButton>
+            </div>
+
+            {/* Loading */}
+            {ontologyLoading && (
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-20 rounded-lg border border-border/40 bg-card/60 animate-pulse" />
+                ))}
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!ontologyLoading && !hasBusinessContext && (
+              <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
+                <div className="w-12 h-12 rounded-xl bg-muted/30 flex items-center justify-center">
+                  <Briefcase className="w-6 h-6 text-muted-foreground/40" />
+                </div>
+                <p className="text-sm font-medium text-foreground">No business context captured yet</p>
+                <p className="text-[12px] text-muted-foreground max-w-md leading-relaxed">
+                  Use <span className="text-foreground/80 font-medium">Start Enriching</span> to chat with the
+                  assistant about your metrics, reporting rules, and business terms. Once you apply the
+                  enrichment, everything captured will show up here.
+                </p>
+                <GradientButton onClick={handleStartEnriching}
+                  disabled={isEnriching || ontologyLoading || !hasCatalog || isPbitUploading}>
+                  <span className="flex items-center gap-1.5 text-[11px]">
+                    <Sparkles className="w-3 h-3" />
+                    {isEnriching ? "Preparing…" : "Start Enriching"}
+                  </span>
+                </GradientButton>
+              </div>
+            )}
+
+            {/* Content */}
+            {!ontologyLoading && hasBusinessContext && (
+              <div className="space-y-6">
+
+                {/* ── Metrics ── */}
+                {metricEntries.length > 0 && (
+                  <section>
+                    <div className="flex items-center gap-2 mb-3">
+                      <TrendingUp className="w-4 h-4 text-emerald-400" />
+                      <h3 className="text-[13px] font-semibold text-foreground">Metrics</h3>
+                      <Badge variant="outline" className="text-[10px] px-3 py-0 h-[20px] rounded-full bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                        {metricEntries.length}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {metricEntries.map(([name, val]) => {
+                        const description = typeof val === "object" && val ? val.description : typeof val === "string" ? val : undefined;
+                        const formula = typeof val === "object" && val ? val.formula : undefined;
+                        const status = typeof val === "object" && val ? val.status : undefined;
+                        return (
+                          <div key={name} className="rounded-lg border border-border/60 bg-card/70 p-3.5 shadow-sm">
+                            <div className="flex items-start justify-between gap-2 mb-1">
+                              <p className="text-[13px] font-semibold text-foreground leading-tight">{name}</p>
+                              {status && (
+                                <StatusBadge status={status} />
+                              )}
+                            </div>
+                            {description && (
+                              <p className="text-[11px] text-muted-foreground leading-relaxed">{description}</p>
+                            )}
+                            {formula && (
+                              <code className="block text-[10px] text-emerald-400 font-mono mt-2 break-all bg-emerald-500/5 border border-emerald-500/15 rounded px-2 py-1.5">
+                                {formula}
+                              </code>
+                            )}
+                            {!description && !formula && (
+                              <p className="text-[11px] text-muted-foreground/50 italic">Awaiting definition — continue enriching.</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
+
+                {/* ── Reporting Rules ── */}
+                {ruleKeys.length > 0 && (
+                  <section>
+                    <div className="flex items-center gap-2 mb-3">
+                      <ListChecks className="w-4 h-4 text-sky-400" />
+                      <h3 className="text-[13px] font-semibold text-foreground">Reporting Rules</h3>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-card/70 divide-y divide-border/40 shadow-sm">
+                      {businessContext.rules.default_time_granularity && (
+                        <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                          <span className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                            <CalendarClock className="w-3.5 h-3.5 text-sky-400/70" /> Default Time Granularity
+                          </span>
+                          <span className="text-[12px] font-semibold text-sky-300 capitalize">
+                            {String(businessContext.rules.default_time_granularity)}
+                          </span>
+                        </div>
+                      )}
+                      {businessContext.rules.default_time_dimension && (
+                        <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                          <span className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                            <CalendarClock className="w-3.5 h-3.5 text-sky-400/70" /> Default Date Field
+                          </span>
+                          <code className="text-[11px] font-mono text-sky-300">
+                            {String(businessContext.rules.default_time_dimension)}
+                          </code>
+                        </div>
+                      )}
+                      {Array.isArray(businessContext.rules.status_success_values) && businessContext.rules.status_success_values.length > 0 && (
+                        <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                          <span className="flex items-center gap-2 text-[12px] text-muted-foreground shrink-0">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400/70" /> Success Values
+                          </span>
+                          <div className="flex flex-wrap gap-1 justify-end">
+                            {businessContext.rules.status_success_values.map((v: string) => (
+                              <span key={v} className="text-[10px] rounded bg-emerald-400/10 text-emerald-300 border border-emerald-400/20" style={{ padding: "4px 12px", display: "inline-flex" }}>{v}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {businessContext.rules.default_filters && typeof businessContext.rules.default_filters === "object" && Object.keys(businessContext.rules.default_filters).length > 0 && (
+                        <div className="flex items-start justify-between gap-3 px-4 py-2.5">
+                          <span className="flex items-center gap-2 text-[12px] text-muted-foreground shrink-0">
+                            <Filter className="w-3.5 h-3.5 text-violet-400/70" /> Default Filters
+                          </span>
+                          <div className="flex flex-wrap gap-1 justify-end">
+                            {Object.entries(businessContext.rules.default_filters).map(([k, v]) => (
+                              <code key={k} className="text-[10px] font-mono rounded bg-violet-500/10 text-violet-300 border border-violet-500/20" style={{ padding: "4px 12px", display: "inline-flex" }}>
+                                {k} = {String(v)}
+                              </code>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* Any other custom rule keys */}
+                      {ruleKeys
+                        .filter((k) => !["default_time_granularity", "default_time_dimension", "status_success_values", "default_filters"].includes(k))
+                        .map((k) => (
+                          <div key={k} className="flex items-start justify-between gap-3 px-4 py-2.5">
+                            <span className="text-[12px] text-muted-foreground capitalize">{k.replace(/_/g, " ")}</span>
+                            <code className="text-[11px] font-mono text-foreground/80 text-right break-all">
+                              {typeof businessContext.rules[k] === "object" ? JSON.stringify(businessContext.rules[k]) : String(businessContext.rules[k])}
+                            </code>
+                          </div>
+                        ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* ── Business Terms / Aliases ── */}
+                {businessContext.aliases.length > 0 && (
+                  <section>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Tag className="w-4 h-4 text-violet-400" />
+                      <h3 className="text-[13px] font-semibold text-foreground">Business Terms</h3>
+                      <Badge variant="outline" className="text-[10px] px-3 py-0 h-[20px] rounded-full bg-violet-500/10 text-violet-400 border-violet-500/20">
+                        {businessContext.aliases.length}
+                      </Badge>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-card/70 divide-y divide-border/40 shadow-sm">
+                      {businessContext.aliases.map((a: any, i: number) => (
+                        <div key={`${a.term}-${i}`} className="flex items-center gap-2 px-4 py-2.5">
+                          <span className="text-[12px] font-medium text-violet-300">"{a.term}"</span>
+                          <span className="text-[11px] text-muted-foreground">maps to</span>
+                          <code className="text-[11px] font-mono text-foreground">{a.maps_to}</code>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ WELCOME / CHOOSE DATASOURCE DIALOG ══════════════ */}
+      <Dialog open={showWelcome} onOpenChange={setShowWelcome}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="mx-auto mb-1 w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
+              <Database className="w-7 h-7 text-primary" />
+            </div>
+            <DialogTitle className="text-center">Welcome to Data Ontology Explorer</DialogTitle>
+            <DialogDescription className="text-center">
+              Choose an existing datasource connection to explore and enrich its business ontology.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2 space-y-2">
+            <label className="text-[12px] font-medium text-foreground">Datasource connection</label>
+            <Select value={pendingDbId} onValueChange={setPendingDbId}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a datasource" />
+              </SelectTrigger>
+              <SelectContent>
+                {databases.map((db) => (
+                  <SelectItem key={db.id} value={db.id}>
+                    <span className="flex items-center gap-2">
+                      <Database className="w-4 h-4 text-primary/70 shrink-0" />
+                      <span className="font-medium">{db.name}</span>
+                      <span className="text-muted-foreground text-[11px]">{dbTypeLabel(db.type)}</span>
+                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <span className={`w-1.5 h-1.5 rounded-full ${statusDotColor(db.status)}`} />
+                        {statusText(db.status)}
+                      </span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {databases.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                No database connections found. Connect a database from the Databases tab first.
+              </p>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={handleWelcomeCancel}>Cancel</Button>
+            <Button onClick={handleWelcomeContinue} disabled={!pendingDbId} className="gap-1.5">
+              Continue
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ══════════════ ENRICHMENT CHAT DIALOG ══════════════ */}
       <Dialog open={enrichChatOpen} onOpenChange={setEnrichChatOpen}>

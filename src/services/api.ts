@@ -1909,6 +1909,7 @@ export interface EnrichmentChatPayload {
   assistant_message: string;
   extracted_updates: Record<string, any>;
   chat_history: Array<{ role: string; content: string }>;
+  needs_clarification?: boolean;
 }
 
 export interface DatabaseSchema {
@@ -2315,6 +2316,57 @@ export const getLatestOntology = async (
     return {
       success: false,
       error: { code: "GET_LATEST_ONTOLOGY_FAILED", message: error.message || "Failed to fetch latest ontology" },
+    };
+  }
+};
+
+export interface CatalogJobStatus {
+  status: "idle" | "running" | "completed" | "error";
+  total_tables: number;
+  completed_tables: number;
+  current_stage: string | null;
+  per_table: Record<string, string>;
+  started_at: string | null;
+  completed_at: string | null;
+  avg_confidence: number | null;
+  error: string | null;
+}
+
+export interface CatalogStatusPayload extends OntologyVersionPayload {
+  job: CatalogJobStatus;
+}
+
+export const generateAiCatalog = async (
+  connectionId: string
+): Promise<ApiResponse<CatalogStatusPayload>> => {
+  try {
+    const response = await apiRequest<CatalogStatusPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/catalog/generate`,
+      { method: "POST" },
+      120000
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GENERATE_AI_CATALOG_FAILED", message: error.message || "Failed to start AI catalog generation" },
+    };
+  }
+};
+
+export const getAiCatalogStatus = async (
+  connectionId: string
+): Promise<ApiResponse<CatalogStatusPayload>> => {
+  try {
+    const response = await apiRequest<CatalogStatusPayload>(
+      `/api/v1/backend/connections/${connectionId}/ontology/catalog/status`,
+      { method: "GET" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GET_AI_CATALOG_STATUS_FAILED", message: error.message || "Failed to fetch AI catalog status" },
     };
   }
 };

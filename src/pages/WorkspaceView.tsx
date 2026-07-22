@@ -399,8 +399,10 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
 
   return (
     <>
-      {/* Full Width Content - No Sidebar */}
-      <div className="h-full overflow-auto bg-background">
+      {/* Full Width Content. Catalog Explorer needs overflow-hidden so its fixed
+          3-column grid cannot introduce horizontal scroll that visually hides
+          the center table list. Other tabs keep overflow-auto for page scroll. */}
+      <div className={`h-full min-h-0 min-w-0 bg-background ${activeTab === "ontology" ? "overflow-hidden" : "overflow-auto"}`}>
         {renderContent()}
       </div>
 
