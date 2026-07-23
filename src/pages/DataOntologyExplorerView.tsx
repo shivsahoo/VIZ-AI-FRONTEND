@@ -114,6 +114,7 @@ interface OntologyTable {
   status?: string;
   is_ai_generated?: boolean;
   columns?: OntologyColumn[];
+  column_count?: number;
   last_updated?: string;
   updated_by?: string;
   owner?: string;
@@ -528,14 +529,18 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
     common_questions: summary.common_questions ?? undefined,
     last_updated: summary.last_updated ?? undefined,
     tags: summary.tags ?? undefined,
+    column_count: summary.column_count ?? undefined,
     columns: columnsByTable[summary.physical_name] ?? [],
   }));
 
   // ─── Derived stats ──────────────────────────────────────────────────────────
   const stats = {
     tables: ontologyTables.length,
-    columns: ontologyTables.reduce((acc, t) => acc + (t.columns?.length ?? 0), 0),
-    pending: ontologyTables.filter((t) => ["PENDING", "PENDING_REVIEW"].includes((t.status || "").toUpperCase())).length,
+    columns: ontologyTables.reduce(
+      (acc, t) => acc + (t.columns?.length || t.column_count || 0),
+      0
+    ),
+    pending: ontologyTables.filter((t) => ["PENDING", "PENDING_REVIEW", "NEEDS_REVIEW"].includes((t.status || "").toUpperCase())).length,
     approved: ontologyTables.filter((t) => (t.status || "").toUpperCase() === "APPROVED").length,
     rejected: ontologyTables.filter((t) => (t.status || "").toUpperCase() === "REJECTED").length,
   };
@@ -799,6 +804,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
     if (!selectedDb) return;
     setOntologyError(null);
     try {
+      // Doc flow: POST /sync → LLM enrich-schema (bulk draft metadata)
       const res = await syncOntologyDatasource(selectedDb.id);
       if (res.success) {
         setSyncJob({
@@ -1187,11 +1193,16 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
             Download RDF/OWL
           </Button>
           */}
-          {/* Single primary CTA — always "Start Enriching", regardless of whether a
-              catalog already exists. No separate "Regenerate" button. */}
+          {/* Primary CTA: generate catalog when missing; enrich via chat when catalog exists */}
           <GradientButton
-            onClick={handleGenerateCatalog}
-            disabled={syncJob?.status === "running" || ontologyLoading || !selectedDb || isPbitUploading}
+            onClick={hasCatalog ? handleStartEnriching : handleGenerateCatalog}
+            disabled={
+              syncJob?.status === "running" ||
+              ontologyLoading ||
+              !selectedDb ||
+              isPbitUploading ||
+              (hasCatalog && isEnriching)
+            }
             className="rounded-full shadow-none justify-center text-white"
             style={{
               backgroundImage: "linear-gradient(90deg, #6366F1 0%, #0E9AB8 100%)",
@@ -1211,10 +1222,15 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                   <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                   <span className="truncate">Generating… ({syncJob.completed_tables}/{syncJob.total_tables})</span>
                 </>
+              ) : hasCatalog ? (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{isEnriching ? "Preparing…" : "Start Enriching"}</span>
+                </>
               ) : (
                 <>
                   <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">Start Enriching</span>
+                  <span className="truncate">Generate AI Catalog</span>
                 </>
               )}
             </span>
@@ -1416,7 +1432,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
 
             {/* AI Catalog summary — centered, branded gradient + colored metrics */}
             {syncJob?.status !== "running" && hasCatalog ? (
-              <div className="flex items-center justify-start gap-3 h-8 px-4 border-t border-white/[0.05] text-[11px] font-normal overflow-x-auto whitespace-nowrap"
+              <div className="flex items-center justify-start gap-3 min-h-11 px-4 py-2.5 border-t border-white/[0.05] text-[11px] font-normal overflow-x-auto whitespace-nowrap"
                 style={{ background: "linear-gradient(90deg, rgba(91,103,241,0.07) 0%, transparent 35%, transparent 65%, rgba(6,182,212,0.06) 100%)" }}
               >
                 <span className="flex items-center gap-1.5 shrink-0">
@@ -1474,6 +1490,23 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                     </span>
                   </>
                 )}
+
+                <div className="flex-1 min-w-2" />
+
+                <button
+                  type="button"
+                  onClick={handleGenerateCatalog}
+                  disabled={syncJob?.status === "running" || ontologyLoading || !selectedDb || isPbitUploading}
+                  title="Regenerate AI Catalog for this datasource"
+                  className="group/regen shrink-0 inline-flex items-center gap-1.5 rounded-full text-[10.5px] font-medium text-white transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none hover:brightness-110 hover:shadow-[0_0_12px_-2px_rgba(99,102,241,0.55)] active:scale-[0.98]"
+                  style={{
+                    backgroundImage: "linear-gradient(90deg, #6366F1 0%, #0E9AB8 100%)",
+                    padding: 8,
+                  }}
+                >
+                  <RefreshCw className="w-3 h-3 shrink-0 transition-transform duration-300 group-hover/regen:rotate-180" strokeWidth={2.25} />
+                  Regenerate
+                </button>
               </div>
             ) : null}
           </div>
@@ -1567,29 +1600,60 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
             {/* No AI Catalog generated yet for this datasource — single onboarding CTA */}
             {!ontologyLoading && !ontologyError && !hasCatalog && syncJob?.status !== "running" && (
               <div className="flex flex-col items-center justify-center py-20 gap-4 text-center max-w-md mx-auto">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/10 border border-primary/20 flex items-center justify-center">
-                  <Sparkles className="w-7 h-7 text-primary" />
+                <div className="w-12 h-12 rounded-xl gradient-primary flex items-center justify-center shadow-lg animate-pulse-glow">
+                  <Sparkles className="w-6 h-6 text-white" />
                 </div>
                 <div className="space-y-1.5">
-                  <p className="text-[15px] font-semibold text-foreground">✨ AI Catalog</p>
+                  <p className="text-[15px] font-semibold text-foreground">AI Catalog</p>
                   <p className="text-[12px] text-muted-foreground leading-relaxed">
                     Generate AI descriptions, relationships, business concepts, categories and semantic
                     metadata for every table.
                   </p>
                 </div>
                 {schemaEstimate && (
-                  <div className="w-full rounded-lg border border-border/50 bg-muted/15 px-3.5 py-2.5 text-left">
-                    <p className="text-[9.5px] font-semibold text-muted-foreground/70 uppercase tracking-wide mb-1.5">Estimated time</p>
-                    <ul className="space-y-0.5 text-[11.5px] text-foreground/75">
-                      <li>• {schemaEstimate.tables} Tables</li>
-                      <li>• {schemaEstimate.columns} Columns</li>
-                      <li>• ~{schemaEstimate.seconds}s</li>
-                    </ul>
+                  <div className="w-full rounded-xl border border-white/[0.10] bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4">
+                    <div className="flex items-center justify-center gap-1.5 mb-3">
+                      <Clock3 className="w-3 h-3 text-muted-foreground/70" strokeWidth={2} />
+                      <p className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-[0.08em]">
+                        Estimated time
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border border-white/[0.07] bg-black/20 px-2.5 py-2.5 text-center">
+                        <p className="text-[15px] font-semibold text-foreground tabular-nums leading-none">
+                          {schemaEstimate.tables}
+                        </p>
+                        <p className="mt-1.5 text-[10px] text-muted-foreground/70 leading-none">Tables</p>
+                      </div>
+                      <div className="rounded-lg border border-white/[0.07] bg-black/20 px-2.5 py-2.5 text-center">
+                        <p className="text-[15px] font-semibold text-foreground tabular-nums leading-none">
+                          {schemaEstimate.columns}
+                        </p>
+                        <p className="mt-1.5 text-[10px] text-muted-foreground/70 leading-none">Columns</p>
+                      </div>
+                      <div className="rounded-lg border border-primary/25 bg-primary/[0.08] px-2.5 py-2.5 text-center">
+                        <p className="text-[15px] font-semibold text-primary tabular-nums leading-none">
+                          ~{schemaEstimate.seconds}s
+                        </p>
+                        <p className="mt-1.5 text-[10px] text-muted-foreground/70 leading-none">Duration</p>
+                      </div>
+                    </div>
                   </div>
                 )}
-                <GradientButton onClick={handleGenerateCatalog} disabled={ontologyLoading || !selectedDb}>
-                  <span className="flex items-center gap-1.5 text-[11px]">
-                    <Sparkles className="w-3 h-3" />
+                <GradientButton
+                  onClick={handleGenerateCatalog}
+                  disabled={ontologyLoading || !selectedDb}
+                  className="rounded-full shadow-none justify-center text-white"
+                  style={{
+                    backgroundImage: "linear-gradient(90deg, #6366F1 0%, #0E9AB8 100%)",
+                    height: 36,
+                    minWidth: 172,
+                    paddingLeft: 16,
+                    paddingRight: 16,
+                  }}
+                >
+                  <span className="flex items-center justify-center gap-1.5 text-[11px]">
+                    <Sparkles className="w-3.5 h-3.5 shrink-0" />
                     Generate AI Catalog
                   </span>
                 </GradientButton>
@@ -1608,7 +1672,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               const isExpanded = expandedTables.has(table.physical_name);
               const isSelected = selectedTableName === table.physical_name;
               const isFav = favorites.has(table.physical_name);
-              const colCount = table.columns?.length ?? 0;
+              const colCount = table.columns?.length || table.column_count || 0;
               const relCount = relCountByTable[table.physical_name] ?? 0;
               const timeAgo = relativeTime(table.last_updated);
               const confPct = toConfidencePct(table.ai_confidence);
@@ -2013,7 +2077,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               <div className="flex border-b border-border shrink-0 bg-card/30 px-1 pt-1 overflow-x-auto">
                 {[
                   { id: "overview" as const, label: "Overview" },
-                  { id: "columns" as const, label: `Columns (${selectedTable.columns?.length ?? 0})` },
+                  { id: "columns" as const, label: `Columns (${selectedTable.columns?.length || selectedTable.column_count || 0})` },
                   { id: "relationships" as const, label: `Relationships (${relCount})` },
                   { id: "history" as const, label: "History" },
                 ].map((tab) => (
@@ -2063,7 +2127,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                       ) : (
                         <EmptyHint
                           text={isSelectedTableGenerating ? "Analyzing this table…" : "Not generated"}
-                          sub={isSelectedTableGenerating ? "AI enrichment in progress." : "Generate AI Catalog to create it."}
+                          sub={isSelectedTableGenerating ? "AI enrichment in progress." : "Run Generate / Regenerate to create draft metadata."}
                         />
                       )}
                     </PanelSection>
@@ -2075,7 +2139,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                       ) : (
                         <EmptyHint
                           text={isSelectedTableGenerating ? "Analyzing this table…" : "Not generated"}
-                          sub={isSelectedTableGenerating ? "AI enrichment in progress." : "Generate AI Catalog to define it."}
+                          sub={isSelectedTableGenerating ? "AI enrichment in progress." : "Run Generate / Regenerate to create it."}
                         />
                       )}
                     </PanelSection>
@@ -2099,7 +2163,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                           })}
                         </div>
                       ) : (
-                        <EmptyHint text="Not generated" />
+                        <EmptyHint text="Not generated" sub="Run Generate / Regenerate to enrich this entity." />
                       )}
                     </PanelSection>
 
@@ -2115,7 +2179,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                           ))}
                         </ul>
                       ) : (
-                        <EmptyHint text="Not generated" />
+                        <EmptyHint text="Not generated" sub="Run Generate / Regenerate to enrich this entity." />
                       )}
                     </PanelSection>
 
