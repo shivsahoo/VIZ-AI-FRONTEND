@@ -21,7 +21,6 @@ import {
   History,
   Eye,
   Table2,
-  MoreHorizontal,
   Briefcase,
   Filter,
   ListChecks,
@@ -65,8 +64,17 @@ import {
 import { toast } from "sonner";
 import {
   getDatabases,
-  getAiCatalogStatus,
-  generateAiCatalog,
+  getLatestOntology,
+  syncOntologyDatasource,
+  getOntologySyncStatus,
+  getOntologyCategories,
+  getOntologyTables,
+  getOntologyTableColumns,
+  generateOntologyTableDescription,
+  generateOntologyColumnDescription,
+  updateOntologyTable,
+  updateOntologyColumn,
+  getOntologyBusinessMetrics,
   getDatabaseDSGraph,
   downloadLatestOntologyTTL,
   startOntologyEnrichment,
@@ -74,7 +82,9 @@ import {
   applyOntologyEnrichment,
   uploadPbitFile,
   type OntologyVersionPayload,
-  type CatalogJobStatus,
+  type OntologySyncStatus,
+  type OntologyTableSummary,
+  type OntologyBusinessMetric,
 } from "../services/api";
 
 // ─── Local types ────────────────────────────────────────────────────────────
@@ -459,13 +469,19 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
   const [showWelcome, setShowWelcome] = useState(false);
   const [pendingDbId, setPendingDbId] = useState<string>("");
 
-  // ── Ontology data ──
-  const [ontology, setOntology] = useState<OntologyVersionPayload | null>(null);
+  // ── Ontology data (doc APIs + graph context for relationships) ──
+  const [ontologyGraph, setOntologyGraph] = useState<OntologyVersionPayload | null>(null);
+  const [tableSummaries, setTableSummaries] = useState<OntologyTableSummary[]>([]);
+  const [columnsByTable, setColumnsByTable] = useState<Record<string, OntologyColumn[]>>({});
+  const [categories, setCategories] = useState<string[]>([]);
+  const [businessMetrics, setBusinessMetrics] = useState<OntologyBusinessMetric[]>([]);
   const [ontologyLoading, setOntologyLoading] = useState(false);
   const [ontologyError, setOntologyError] = useState<string | null>(null);
 
-  // ── AI Catalog generation job (datasource-level, polled while running) ──
-  const [catalogJob, setCatalogJob] = useState<CatalogJobStatus | null>(null);
+  // ── Ontology sync job (POST /sync + poll /sync/status) ──
+  const [syncJob, setSyncJob] = useState<OntologySyncStatus | null>(null);
+  const [generatingColumn, setGeneratingColumn] = useState<string | null>(null);
+  const [generatingTable, setGeneratingTable] = useState<string | null>(null);
 
   // ── Raw schema preview (table/column counts from the actual DB schema graph),
   // used only to show a real "estimated time" on the pre-generation onboarding
@@ -499,21 +515,19 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  // ─── Parse tables from ontology (strictly backend data — no synthesized
-  // placeholder rows; the table list is only shown once generation completes,
-  // see the "generating" panel in the render below) ──────────────────────────
-  const ontologyTables: OntologyTable[] = (() => {
-    if (!ontology) return [];
-    const raw = ontology.ontology ?? {};
-    if (Array.isArray(raw.tables)) return raw.tables as OntologyTable[];
-    return (ontology.graph?.nodes ?? []).map((n) => ({
-      physical_name: nodePhysicalName(n),
-      category: n.meta?.category as string | undefined,
-      description: n.meta?.description as string | undefined,
-      status: n.meta?.status as string | undefined,
-      columns: [],
-    }));
-  })();
+  // ─── Parse tables from doc API summaries + loaded columns ─────────────────
+  const ontologyTables: OntologyTable[] = tableSummaries.map((summary) => ({
+    physical_name: summary.physical_name,
+    category: summary.category,
+    description: summary.description ?? undefined,
+    status: summary.status,
+    is_ai_generated: summary.is_ai_generated,
+    confidence: summary.confidence ?? undefined,
+    business_purpose: summary.business_purpose ?? undefined,
+    last_updated: summary.last_updated ?? undefined,
+    tags: summary.tags ?? undefined,
+    columns: columnsByTable[summary.physical_name] ?? [],
+  }));
 
   // ─── Derived stats ──────────────────────────────────────────────────────────
   const stats = {
@@ -524,31 +538,28 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
     rejected: ontologyTables.filter((t) => (t.status || "").toUpperCase() === "REJECTED").length,
   };
 
-  // ─── AI Catalog generation summary (datasource-level) ───────────────────────
-  const catalogMeta = ((ontology?.ontology as any)?.metadata ?? {}) as Record<string, any>;
-
-  // Real (non-fabricated) estimate for the onboarding card, from the connection's
-  // actual schema graph. Tables are enriched sequentially on the backend, so the
-  // time estimate scales with table count based on typical per-table latency.
+  // ─── Ontology sync summary ─────────────────────────────────────────────────
   const schemaEstimate = schemaPreview
     ? { tables: schemaPreview.tables, columns: schemaPreview.columns, seconds: Math.max(5, Math.round(schemaPreview.tables * 4)) }
     : null;
-  const catalogTotalRelationships = ontology?.graph?.edges?.length ?? 0;
-  const catalogAvgConfidencePct = toConfidencePct(catalogJob?.avg_confidence ?? catalogMeta.catalog_avg_confidence);
-  const catalogGeneratedAt: string | undefined = catalogJob?.completed_at ?? catalogMeta.catalog_generated_at ?? undefined;
+  const catalogTotalRelationships = ontologyGraph?.graph?.edges?.length ?? 0;
+  const catalogAvgConfidencePct = toConfidencePct(
+    tableSummaries.length
+      ? tableSummaries.reduce((acc, t) => acc + (t.confidence ?? 0), 0) / tableSummaries.length
+      : null
+  );
+  const catalogGeneratedAt: string | undefined = syncJob?.completed_at ?? undefined;
 
-  // A raw/bootstrapped schema (tables pulled straight from the DB, never AI
-  // enriched) must NOT be treated as a generated catalog — otherwise the table
-  // list would render dozens of "Not generated" cards instead of the onboarding
-  // panel. Only count it as "has catalog" once AI enrichment has actually run.
-  const hasCatalog = Boolean(catalogGeneratedAt) || ontologyTables.some((t) => t.is_ai_generated);
+  const hasCatalog =
+    syncJob?.status === "completed" ||
+    ontologyTables.some((t) => t.is_ai_generated || !!t.description);
 
   // Per-table relationship counts, derived once from the graph edges (mirrors
   // the selected-table relationship logic below, but for every visible card).
   const relCountByTable: Record<string, number> = (() => {
     const counts: Record<string, number> = {};
-    const nodes = ontology?.graph?.nodes ?? [];
-    const edges = ontology?.graph?.edges ?? [];
+    const nodes = ontologyGraph?.graph?.nodes ?? [];
+    const edges = ontologyGraph?.graph?.edges ?? [];
     const idToTable = new Map<string, string>();
     nodes.forEach((n) => idToTable.set(n.id, nodePhysicalName(n)));
     edges.forEach((e) => {
@@ -560,15 +571,16 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
     return counts;
   })();
 
-  // AI categories: only the real `category` values the backend has generated so
-  // far. Tables without a category yet are simply left out — never invented.
-  const aiCategories = Array.from(
-    new Set(
-      ontologyTables
-        .map((t) => resolveCategory(t))
-        .filter((c): c is string => !!c)
-    )
-  ).sort();
+  // Categories from GET /categories (doc API)
+  const aiCategories = categories.length > 0
+    ? categories
+    : Array.from(
+        new Set(
+          ontologyTables
+            .map((t) => resolveCategory(t))
+            .filter((c): c is string => !!c)
+        )
+      ).sort();
 
   // ─── Filtered + sorted tables ──────────────────────────────────────────────
   const filteredTables = (() => {
@@ -599,15 +611,14 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
   })();
 
   const selectedTable = ontologyTables.find((t) => t.physical_name === selectedTableName) ?? null;
-  const selectedTableGenStatus = selectedTable ? catalogJob?.per_table?.[selectedTable.physical_name] : undefined;
-  const isSelectedTableGenerating = selectedTableGenStatus === "queued" || selectedTableGenStatus === "generating";
+  const isSelectedTableGenerating = syncJob?.status === "running";
 
   // ─── Relationships for the selected table (derived from the ontology graph) ──
   const tableRelationships = (() => {
     const empty = { outgoing: [] as Array<{ label: string; target: string }>, incoming: [] as Array<{ label: string; source: string }> };
-    if (!selectedTable || !ontology?.graph) return empty;
-    const nodes = ontology.graph.nodes ?? [];
-    const edges = ontology.graph.edges ?? [];
+    if (!selectedTable || !ontologyGraph?.graph) return empty;
+    const nodes = ontologyGraph.graph.nodes ?? [];
+    const edges = ontologyGraph.graph.edges ?? [];
     const idToTable = new Map<string, string>();
     nodes.forEach((n) => idToTable.set(n.id, nodePhysicalName(n)));
     const selfNode = nodes.find((n) => nodePhysicalName(n) === selectedTable.physical_name);
@@ -627,11 +638,15 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
   // enrichment chatbot captured during the current session (so it shows up the
   // moment the user submits, even before a fresh ontology fetch).
   const businessContext = (() => {
-    const source = (ontology?.ontology ?? {}) as Record<string, any>;
+    const source = (ontologyGraph?.ontology ?? {}) as Record<string, any>;
     const asObject = (v: any) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
     const asArray = (v: any) => (Array.isArray(v) ? v : []);
 
+    const metricsFromApi = Object.fromEntries(
+      businessMetrics.map((m) => [m.name, { formula: m.formula, description: m.description, source: m.source, status: m.status }])
+    );
     const metrics: Record<string, any> = {
+      ...metricsFromApi,
       ...asObject(enrichmentUpdates.metrics),
       ...asObject(source.metrics),
     };
@@ -701,37 +716,69 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
       .finally(() => setDbsLoading(false));
   }, [projectId]);
 
-  // ─── Load ontology + AI Catalog job status for a datasource ─────────────────
-  // getAiCatalogStatus returns the ontology/graph plus `job` — the live/last-known
-  // catalog generation job. There is no more
-  // 404-message sniffing: "no catalog yet" is simply job.status === "idle" with
-  // no ontology_version_id. If a job is still running (e.g. the user navigated
-  // away and back), the polling effect below picks it back up automatically.
+  const loadTableColumns = useCallback(async (dbId: string, tableName: string) => {
+    const res = await getOntologyTableColumns(dbId, tableName);
+    if (res.success && res.data) {
+      setColumnsByTable((prev) => ({
+        ...prev,
+        [tableName]: res.data!.columns.map((c) => ({
+          physical_name: c.physical_name,
+          semantic_type: c.semantic_type,
+          business_definition: c.business_definition,
+          status: c.status,
+          confidence: c.confidence ?? undefined,
+          data_type: c.data_type ?? undefined,
+        })),
+      }));
+    }
+  }, []);
+
+  const refreshExplorerData = useCallback(async (db: DatabaseConnection) => {
+    const [tablesRes, categoriesRes, syncRes, metricsRes, graphRes] = await Promise.all([
+      getOntologyTables(db.id),
+      getOntologyCategories(db.id),
+      getOntologySyncStatus(db.id),
+      getOntologyBusinessMetrics(db.id),
+      getLatestOntology(db.id),
+    ]);
+
+    if (tablesRes.success && tablesRes.data) {
+      setTableSummaries(tablesRes.data.tables);
+    }
+    if (categoriesRes.success && categoriesRes.data) {
+      setCategories(categoriesRes.data.categories);
+    }
+    if (syncRes.success && syncRes.data) {
+      setSyncJob(syncRes.data);
+    }
+    if (metricsRes.success && metricsRes.data) {
+      setBusinessMetrics(metricsRes.data.metrics);
+    }
+    if (graphRes.success && graphRes.data) {
+      setOntologyGraph(graphRes.data);
+    }
+  }, []);
+
+  // ─── Load ontology explorer data for a datasource (doc APIs) ───────────────
   const loadOntology = useCallback(async (db: DatabaseConnection) => {
     setOntologyLoading(true);
     setOntologyError(null);
-    setOntology(null);
-    setCatalogJob(null);
+    setOntologyGraph(null);
+    setTableSummaries([]);
+    setColumnsByTable({});
+    setCategories([]);
+    setBusinessMetrics([]);
+    setSyncJob(null);
     setSchemaPreview(null);
     setSelectedTableName(null);
     setExpandedTables(new Set());
     try {
-      const res = await getAiCatalogStatus(db.id);
-      if (res.success && res.data) {
-        const { job, ...ontologyPayload } = res.data;
-        setOntology(ontologyPayload);
-        setCatalogJob(job ?? null);
-      } else {
-        setOntologyError(res.error?.message || "Unable to load ontology");
-      }
+      await refreshExplorerData(db);
     } catch (err: any) {
       setOntologyError(err.message || "Unable to load ontology");
     } finally {
       setOntologyLoading(false);
     }
-    // Real schema stats (table/column counts) for the pre-generation onboarding
-    // card's "estimated time" — sourced from the connection's actual schema
-    // graph, not fabricated.
     try {
       const dsRes = await getDatabaseDSGraph(db.id);
       if (dsRes.success && dsRes.data) {
@@ -742,58 +789,131 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
         });
       }
     } catch {
-      // Non-critical — the onboarding card just omits the estimate if unavailable.
+      // Non-critical
     }
-  }, []);
+  }, [refreshExplorerData]);
 
-  // ─── Generate (or regenerate) the AI Catalog for the whole datasource ───────
-  // Bootstraps a base ontology internally if one doesn't exist yet, then kicks
-  // off a background job that enriches every table. Returns the initial job
-  // snapshot immediately; the polling effect below takes it from there.
   const handleGenerateCatalog = async () => {
     if (!selectedDb) return;
     setOntologyError(null);
     try {
-      const res = await generateAiCatalog(selectedDb.id);
-      if (res.success && res.data) {
-        const { job, ...ontologyPayload } = res.data;
-        setOntology(ontologyPayload);
-        setCatalogJob(job ?? null);
+      const res = await syncOntologyDatasource(selectedDb.id);
+      if (res.success) {
+        setSyncJob({
+          status: "running",
+          total_tables: schemaPreview?.tables ?? 0,
+          completed_tables: 0,
+          started_at: new Date().toISOString(),
+        });
+        toast.message("Ontology sync started");
       } else {
-        toast.error(res.error?.message || "Unable to start AI Catalog generation");
+        toast.error(res.error?.message || "Unable to start ontology sync");
       }
     } catch (err: any) {
-      toast.error(err.message || "Unable to start AI Catalog generation");
+      toast.error(err.message || "Unable to start ontology sync");
     }
   };
 
-  // ─── Poll AI Catalog job status while it's running ──────────────────────────
-  // The table list stays hidden (behind a progress panel) for the whole run, so
-  // this simply refreshes `ontology` + `catalogJob` from the freshest backend
-  // response every tick — every downstream value (table list, selected table,
-  // right panel, summary strip) is derived directly from this state, so nothing
-  // is ever left stale or reused from a previous response.
+  const handleGenerateTableDescription = async (tableName: string) => {
+    if (!selectedDb) return;
+    setGeneratingTable(tableName);
+    try {
+      const res = await generateOntologyTableDescription(selectedDb.id, tableName);
+      if (res.success) {
+        await refreshExplorerData(selectedDb);
+        await loadTableColumns(selectedDb.id, tableName);
+        toast.success("Table description generated");
+      } else {
+        toast.error(res.error?.message || "Failed to generate table description");
+      }
+    } finally {
+      setGeneratingTable(null);
+    }
+  };
+
+  const handleGenerateColumnDescription = async (tableName: string, columnName: string) => {
+    if (!selectedDb) return;
+    setGeneratingColumn(`${tableName}:${columnName}`);
+    try {
+      const res = await generateOntologyColumnDescription(selectedDb.id, tableName, columnName);
+      if (res.success) {
+        await loadTableColumns(selectedDb.id, tableName);
+        toast.success("Column description generated");
+      } else {
+        toast.error(res.error?.message || "Failed to generate column description");
+      }
+    } finally {
+      setGeneratingColumn(null);
+    }
+  };
+
+  const handleApproveTable = async (table: OntologyTable) => {
+    if (!selectedDb) return;
+    const res = await updateOntologyTable(selectedDb.id, table.physical_name, {
+      description: table.description || "",
+      category: table.category || "Unknown",
+      status: "APPROVED",
+    });
+    if (res.success) {
+      await refreshExplorerData(selectedDb);
+      toast.success("Table approved");
+    } else {
+      toast.error(res.error?.message || "Failed to update table");
+    }
+  };
+
+  const handleApproveColumn = async (tableName: string, col: OntologyColumn) => {
+    if (!selectedDb) return;
+    const res = await updateOntologyColumn(selectedDb.id, tableName, col.physical_name, {
+      business_definition: col.business_definition || "",
+      semantic_type: col.semantic_type || "Unknown",
+      status: "APPROVED",
+    });
+    if (res.success) {
+      await loadTableColumns(selectedDb.id, tableName);
+      toast.success("Column approved");
+    } else {
+      toast.error(res.error?.message || "Failed to update column");
+    }
+  };
+
+  const toggleTableExpanded = async (tableName: string) => {
+    setExpandedTables((prev) => {
+      const next = new Set(prev);
+      if (next.has(tableName)) next.delete(tableName);
+      else next.add(tableName);
+      return next;
+    });
+    if (selectedDb && !columnsByTable[tableName]) {
+      await loadTableColumns(selectedDb.id, tableName);
+    }
+  };
+
+  // ─── Poll sync status while running (doc: every ~5s) ───────────────────────
   useEffect(() => {
-    if (!selectedDb || catalogJob?.status !== "running") return;
+    if (!selectedDb || syncJob?.status !== "running") return;
     const connectionId = selectedDb.id;
     const interval = setInterval(async () => {
       try {
-        const res = await getAiCatalogStatus(connectionId);
-        if (!res.success || !res.data) return;
-        const { job, ...ontologyPayload } = res.data;
-        setOntology(ontologyPayload);
-        setCatalogJob(job ?? null);
-        if (job?.status === "completed") {
-          toast.success("AI Catalog generated successfully");
-        } else if (job?.status === "error") {
-          toast.error(job.error || "AI Catalog generation failed");
+        const syncRes = await getOntologySyncStatus(connectionId);
+        if (!syncRes.success || !syncRes.data) return;
+        setSyncJob(syncRes.data);
+        if (syncRes.data.status === "completed") {
+          await refreshExplorerData({ id: connectionId, name: selectedDb.name, type: selectedDb.type });
+          toast.success("Ontology sync completed");
+        } else if (syncRes.data.status === "error") {
+          toast.error(syncRes.data.error || "Ontology sync failed");
+        } else {
+          await getOntologyTables(connectionId).then((res) => {
+            if (res.success && res.data) setTableSummaries(res.data.tables);
+          });
         }
       } catch {
-        // Transient poll failure — try again on the next tick.
+        // retry next tick
       }
-    }, 2500);
+    }, 5000);
     return () => clearInterval(interval);
-  }, [selectedDb, catalogJob?.status]);
+  }, [selectedDb, syncJob?.status, refreshExplorerData]);
 
   useEffect(() => {
     if (selectedDb) {
@@ -804,6 +924,12 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
       loadOntology(selectedDb);
     }
   }, [selectedDb, loadOntology, projectId]);
+
+  useEffect(() => {
+    if (selectedDb && selectedTableName && !columnsByTable[selectedTableName]) {
+      loadTableColumns(selectedDb.id, selectedTableName);
+    }
+  }, [selectedDb, selectedTableName, columnsByTable, loadTableColumns]);
 
   // ─── Datasource selection handlers ──────────────────────────────────────────
   const openWelcome = () => {
@@ -888,7 +1014,8 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
     try {
       const res = await applyOntologyEnrichment(selectedDb.id, enrichmentSessionId, []);
       if (!res.success || !res.data) { toast.error(res.error?.message || "Unable to apply enrichment"); return; }
-      setOntology(res.data);
+      setOntologyGraph(res.data);
+      await refreshExplorerData(selectedDb);
       setEnrichChatOpen(false);
       setActiveView("business_context");
       const metricWarnings = (res.data as any)?.metric_warnings as Array<{ metric_name: string; missing_columns: string[]; formula: string }> | undefined;
@@ -925,19 +1052,12 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
       const res = await uploadPbitFile(selectedDb.id, file);
       if (!res.success || !res.data) { toast.error(res.error?.message || "Failed to import .pbit file"); return; }
       toast.success("Business metrics imported successfully.");
-      const refreshed = await getAiCatalogStatus(selectedDb.id);
-      if (refreshed.success && refreshed.data) {
-        const { job, ...ontologyPayload } = refreshed.data;
-        setOntology(ontologyPayload);
-        setCatalogJob(job ?? null);
-      }
+      await refreshExplorerData(selectedDb);
     } catch (err: any) { toast.error(err.message || "Failed to import .pbit file"); }
     finally { setIsPbitUploading(false); }
   };
 
-  const toggleExpanded = (name: string) => {
-    setExpandedTables((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
-  };
+  const toggleExpanded = toggleTableExpanded;
   const toggleFavorite = (name: string) => {
     setFavorites((prev) => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
   };
@@ -1069,7 +1189,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               catalog already exists. No separate "Regenerate" button. */}
           <GradientButton
             onClick={handleGenerateCatalog}
-            disabled={catalogJob?.status === "running" || ontologyLoading || !selectedDb || isPbitUploading}
+            disabled={syncJob?.status === "running" || ontologyLoading || !selectedDb || isPbitUploading}
             className="rounded-full shadow-none justify-center text-white"
             style={{
               backgroundImage: "linear-gradient(90deg, #6366F1 0%, #0E9AB8 100%)",
@@ -1084,10 +1204,10 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
             }}
           >
             <span className="flex items-center justify-center gap-1.5 text-[11px] w-full">
-              {catalogJob?.status === "running" ? (
+              {syncJob?.status === "running" ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                  <span className="truncate">Generating… ({catalogJob.completed_tables}/{catalogJob.total_tables})</span>
+                  <span className="truncate">Generating… ({syncJob.completed_tables}/{syncJob.total_tables})</span>
                 </>
               ) : (
                 <>
@@ -1293,7 +1413,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
             </div>
 
             {/* AI Catalog summary — centered, branded gradient + colored metrics */}
-            {catalogJob?.status !== "running" && hasCatalog ? (
+            {syncJob?.status !== "running" && hasCatalog ? (
               <div className="flex items-center justify-start gap-3 h-8 px-4 border-t border-white/[0.05] text-[11px] font-normal overflow-x-auto whitespace-nowrap"
                 style={{ background: "linear-gradient(90deg, rgba(91,103,241,0.07) 0%, transparent 35%, transparent 65%, rgba(6,182,212,0.06) 100%)" }}
               >
@@ -1302,7 +1422,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                     <Wand2 className="w-3 h-3 text-white" strokeWidth={1.75} />
                   </span>
                   <span className="font-normal tracking-wide text-foreground/80">
-                    {catalogJob?.status === "error" ? "AI Catalog Partial" : "AI Catalog Generated"}
+                    {syncJob?.status === "error" ? "AI Catalog Partial" : "AI Catalog Generated"}
                   </span>
                 </span>
 
@@ -1357,7 +1477,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
           </div>
 
           {/* ── Center sub-toolbar: search + sort ── */}
-          {!ontologyLoading && !ontologyError && catalogJob?.status !== "running" && hasCatalog && (
+          {!ontologyLoading && !ontologyError && syncJob?.status !== "running" && hasCatalog && (
             <div className="shrink-0 flex items-center gap-3 px-3 py-2 border-b border-border bg-card/15">
               <div className="relative flex-1 max-w-sm group">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/70 group-focus-within:text-primary transition-colors pointer-events-none" />
@@ -1414,7 +1534,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
             {/* Generation in progress — table list stays hidden the whole run so we
                 never show a wall of half-empty "Not yet analyzed" cards; instead a
                 single progress panel takes over until every table is done. */}
-            {!ontologyLoading && !ontologyError && catalogJob?.status === "running" && (
+            {!ontologyLoading && !ontologyError && syncJob?.status === "running" && (
               <div className="flex flex-col items-center justify-center py-20 gap-5 text-center max-w-md mx-auto">
                 <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/10 border border-primary/20 flex items-center justify-center">
                   <Loader2 className="w-7 h-7 text-primary animate-spin" />
@@ -1422,18 +1542,18 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                 <div className="space-y-1.5">
                   <p className="text-[15px] font-semibold text-foreground">Generating your AI Catalog…</p>
                   <p className="text-[12px] text-muted-foreground leading-relaxed">
-                    {catalogJob.current_stage || "Analyzing your schema and enriching every table…"}
+                    {"Analyzing your schema and enriching every table…"}
                   </p>
                 </div>
                 <div className="w-full space-y-1.5">
                   <div className="h-2 rounded-full bg-muted/40 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-all duration-500 ease-out"
-                      style={{ width: `${Math.min(100, Math.round((catalogJob.completed_tables / Math.max(catalogJob.total_tables, 1)) * 100))}%` }}
+                      style={{ width: `${Math.min(100, Math.round((syncJob.completed_tables / Math.max(syncJob.total_tables, 1)) * 100))}%` }}
                     />
                   </div>
                   <p className="text-[10.5px] text-muted-foreground/70 tabular-nums">
-                    {catalogJob.completed_tables} / {catalogJob.total_tables} tables enriched
+                    {syncJob.completed_tables} / {syncJob.total_tables} tables enriched
                   </p>
                 </div>
                 <p className="text-[10px] text-muted-foreground/50">
@@ -1443,7 +1563,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
             )}
 
             {/* No AI Catalog generated yet for this datasource — single onboarding CTA */}
-            {!ontologyLoading && !ontologyError && !hasCatalog && catalogJob?.status !== "running" && (
+            {!ontologyLoading && !ontologyError && !hasCatalog && syncJob?.status !== "running" && (
               <div className="flex flex-col items-center justify-center py-20 gap-4 text-center max-w-md mx-auto">
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/10 border border-primary/20 flex items-center justify-center">
                   <Sparkles className="w-7 h-7 text-primary" />
@@ -1474,7 +1594,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               </div>
             )}
 
-            {!ontologyLoading && !ontologyError && catalogJob?.status !== "running" && filteredTables.length === 0 && hasCatalog && (
+            {!ontologyLoading && !ontologyError && syncJob?.status !== "running" && filteredTables.length === 0 && hasCatalog && (
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
                 <BookOpen className="w-8 h-8 opacity-30" />
                 <p className="text-sm font-medium">No tables match your filters.</p>
@@ -1482,7 +1602,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               </div>
             )}
 
-            {!ontologyLoading && !ontologyError && catalogJob?.status !== "running" && hasCatalog && filteredTables.map((table) => {
+            {!ontologyLoading && !ontologyError && syncJob?.status !== "running" && hasCatalog && filteredTables.map((table) => {
               const isExpanded = expandedTables.has(table.physical_name);
               const isSelected = selectedTableName === table.physical_name;
               const isFav = favorites.has(table.physical_name);
@@ -1794,16 +1914,37 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                                       <StatusBadge status={col.status} />
                                     </td>
                                     <td className="px-4 py-3.5 align-middle whitespace-nowrap" style={{ fontSize: 14 }}>
-                                      <button
-                                        className="w-8 h-8 rounded-md flex items-center justify-center transition-colors duration-150"
-                                        style={{ color: "rgba(255,255,255,0.35)" }}
-                                        title="More actions"
-                                        onClick={(e) => e.stopPropagation()}
-                                        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.9)"; e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)"; }}
-                                        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.35)"; e.currentTarget.style.backgroundColor = "transparent"; }}
-                                      >
-                                        <MoreHorizontal className="w-4 h-4" />
-                                      </button>
+                                      <div className="flex items-center gap-1">
+                                        <button
+                                          className="w-8 h-8 rounded-md flex items-center justify-center transition-colors duration-150"
+                                          style={{ color: "rgba(255,255,255,0.35)" }}
+                                          title="Regenerate description"
+                                          disabled={generatingColumn === `${table.physical_name}:${col.physical_name}`}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleGenerateColumnDescription(table.physical_name, col.physical_name);
+                                          }}
+                                          onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.9)"; e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)"; }}
+                                          onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.35)"; e.currentTarget.style.backgroundColor = "transparent"; }}
+                                        >
+                                          {generatingColumn === `${table.physical_name}:${col.physical_name}`
+                                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                                            : <Wand2 className="w-4 h-4" />}
+                                        </button>
+                                        <button
+                                          className="w-8 h-8 rounded-md flex items-center justify-center transition-colors duration-150"
+                                          style={{ color: "rgba(255,255,255,0.35)" }}
+                                          title="Approve column"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleApproveColumn(table.physical_name, col);
+                                          }}
+                                          onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.9)"; e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)"; }}
+                                          onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.35)"; e.currentTarget.style.backgroundColor = "transparent"; }}
+                                        >
+                                          <CheckCircle2 className="w-4 h-4" />
+                                        </button>
+                                      </div>
                                     </td>
                                   </tr>
                                 );

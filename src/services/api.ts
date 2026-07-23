@@ -2371,6 +2371,249 @@ export const getAiCatalogStatus = async (
   }
 };
 
+// ─── Data Ontology Explorer APIs (implementation plan) ───────────────────────
+
+export interface OntologySyncStatus {
+  status: "idle" | "running" | "completed" | "error";
+  total_tables: number;
+  completed_tables: number;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error?: string | null;
+}
+
+export interface OntologyTableSummary {
+  physical_name: string;
+  category: string;
+  status: string;
+  is_ai_generated: boolean;
+  confidence?: number | null;
+  description?: string | null;
+  business_purpose?: string | null;
+  last_updated?: string | null;
+  column_count?: number | null;
+  tags?: string[] | null;
+}
+
+export interface OntologyColumnSummary {
+  physical_name: string;
+  semantic_type: string;
+  business_definition: string;
+  status: string;
+  confidence?: number | null;
+  data_type?: string | null;
+}
+
+export interface OntologyBusinessMetric {
+  name: string;
+  formula: string;
+  description?: string;
+  source?: string;
+  status?: string;
+}
+
+export const syncOntologyDatasource = async (
+  datasourceId: string
+): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{ message: string }>(
+      `/api/v1/ontology/datasources/${datasourceId}/sync`,
+      { method: "POST" },
+      120000
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "SYNC_ONTOLOGY_FAILED", message: error.message || "Failed to start ontology sync" },
+    };
+  }
+};
+
+export const getOntologySyncStatus = async (
+  datasourceId: string
+): Promise<ApiResponse<OntologySyncStatus>> => {
+  try {
+    const response = await apiRequest<OntologySyncStatus>(
+      `/api/v1/ontology/datasources/${datasourceId}/sync/status`,
+      { method: "GET" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GET_SYNC_STATUS_FAILED", message: error.message || "Failed to fetch sync status" },
+    };
+  }
+};
+
+export const getOntologyCategories = async (
+  datasourceId: string
+): Promise<ApiResponse<{ categories: string[] }>> => {
+  try {
+    const response = await apiRequest<{ categories: string[] }>(
+      `/api/v1/ontology/datasources/${datasourceId}/categories`,
+      { method: "GET" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GET_ONTOLOGY_CATEGORIES_FAILED", message: error.message || "Failed to fetch categories" },
+    };
+  }
+};
+
+export const getOntologyTables = async (
+  datasourceId: string,
+  category?: string
+): Promise<ApiResponse<{ tables: OntologyTableSummary[] }>> => {
+  try {
+    const query = category ? `?category=${encodeURIComponent(category)}` : "";
+    const response = await apiRequest<{ tables: OntologyTableSummary[] }>(
+      `/api/v1/ontology/datasources/${datasourceId}/tables${query}`,
+      { method: "GET" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GET_ONTOLOGY_TABLES_FAILED", message: error.message || "Failed to fetch ontology tables" },
+    };
+  }
+};
+
+export const getOntologyTableColumns = async (
+  datasourceId: string,
+  tableName: string
+): Promise<ApiResponse<{ columns: OntologyColumnSummary[] }>> => {
+  try {
+    const response = await apiRequest<{ columns: OntologyColumnSummary[] }>(
+      `/api/v1/ontology/tables/${encodeURIComponent(tableName)}/columns?datasource_id=${encodeURIComponent(datasourceId)}`,
+      { method: "GET" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GET_ONTOLOGY_COLUMNS_FAILED", message: error.message || "Failed to fetch table columns" },
+    };
+  }
+};
+
+export const generateOntologyTableDescription = async (
+  datasourceId: string,
+  tableName: string
+): Promise<ApiResponse<{ description?: string; category?: string; confidence?: number }>> => {
+  try {
+    const response = await apiRequest<{ description?: string; category?: string; confidence?: number }>(
+      `/api/v1/ontology/tables/${encodeURIComponent(tableName)}/generate-description?datasource_id=${encodeURIComponent(datasourceId)}`,
+      { method: "POST" },
+      120000
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GENERATE_TABLE_DESCRIPTION_FAILED", message: error.message || "Failed to generate table description" },
+    };
+  }
+};
+
+export const generateOntologyColumnDescription = async (
+  datasourceId: string,
+  tableName: string,
+  columnName: string
+): Promise<ApiResponse<{ business_definition?: string; semantic_type?: string; confidence?: number }>> => {
+  try {
+    const response = await apiRequest<{ business_definition?: string; semantic_type?: string; confidence?: number }>(
+      `/api/v1/ontology/columns/${encodeURIComponent(tableName)}/${encodeURIComponent(columnName)}/generate-description?datasource_id=${encodeURIComponent(datasourceId)}`,
+      { method: "POST" },
+      120000
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GENERATE_COLUMN_DESCRIPTION_FAILED", message: error.message || "Failed to generate column description" },
+    };
+  }
+};
+
+export const updateOntologyTable = async (
+  datasourceId: string,
+  tableName: string,
+  payload: { description: string; category: string; status: string }
+): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{ message: string }>(
+      `/api/v1/ontology/tables/${encodeURIComponent(tableName)}?datasource_id=${encodeURIComponent(datasourceId)}`,
+      { method: "PUT", body: JSON.stringify(payload) }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "UPDATE_ONTOLOGY_TABLE_FAILED", message: error.message || "Failed to update table" },
+    };
+  }
+};
+
+export const updateOntologyColumn = async (
+  datasourceId: string,
+  tableName: string,
+  columnName: string,
+  payload: { business_definition: string; semantic_type: string; status: string }
+): Promise<ApiResponse<{ message: string }>> => {
+  try {
+    const response = await apiRequest<{ message: string }>(
+      `/api/v1/ontology/columns/${encodeURIComponent(tableName)}/${encodeURIComponent(columnName)}?datasource_id=${encodeURIComponent(datasourceId)}`,
+      { method: "PUT", body: JSON.stringify(payload) }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "UPDATE_ONTOLOGY_COLUMN_FAILED", message: error.message || "Failed to update column" },
+    };
+  }
+};
+
+export const getOntologyBusinessMetrics = async (
+  datasourceId: string
+): Promise<ApiResponse<{ metrics: OntologyBusinessMetric[] }>> => {
+  try {
+    const response = await apiRequest<{ metrics: OntologyBusinessMetric[] }>(
+      `/api/v1/ontology/datasources/${datasourceId}/business-metrics`,
+      { method: "GET" }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "GET_BUSINESS_METRICS_FAILED", message: error.message || "Failed to fetch business metrics" },
+    };
+  }
+};
+
+export const addOntologyBusinessMetric = async (
+  datasourceId: string,
+  metric: OntologyBusinessMetric
+): Promise<ApiResponse<OntologyBusinessMetric>> => {
+  try {
+    const response = await apiRequest<OntologyBusinessMetric>(
+      `/api/v1/ontology/datasources/${datasourceId}/business-metrics`,
+      { method: "POST", body: JSON.stringify(metric) }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: { code: "ADD_BUSINESS_METRIC_FAILED", message: error.message || "Failed to add business metric" },
+    };
+  }
+};
+
 export const downloadLatestOntologyTTL = async (connectionId: string): Promise<ApiResponse<string>> => {
   try {
     const token = localStorage.getItem('vizai_access_token');
