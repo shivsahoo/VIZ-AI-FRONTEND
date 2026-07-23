@@ -929,14 +929,7 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
                 </p>
               </div>
 
-              {dsGraphTab === "datasource" ? (
-                <GradientButton
-                  onClick={() => selectedDatabase && handleEnrichDatasource(selectedDatabase)}
-                  data-tour-target="enrich-datasource-btn"
-                >
-                  Enrich Datasource
-                </GradientButton>
-              ) : (
+              {dsGraphTab === "knowledge" && (
                 <GradientButton onClick={() => kgViewerRef.current?.triggerUpload()}>
                   <Upload className="w-4 h-4 mr-2" />
                   Upload Document
