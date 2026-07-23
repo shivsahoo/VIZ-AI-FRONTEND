@@ -7,6 +7,7 @@ import { ChartsView } from "./ChartsView";
 import { InsightsView } from "./InsightsView";
 import { UsersView } from "./UsersView";
 import { ObservabilityView } from "./ObservabilityView";
+import { DataOntologyExplorerView } from "./DataOntologyExplorerView";
 import { DashboardDetailView } from "./DashboardDetailView";
 import { DashboardTypeSelectionModal } from "../components/features/dashboards/DashboardTypeSelectionModal";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "../components/ui/dialog";
@@ -384,6 +385,8 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
         return <UsersView projectId={projectId} />;
       case 'observability':
         return <ObservabilityView projectId={projectId} />;
+      case 'ontology':
+        return <DataOntologyExplorerView projectId={projectId} />;
       default:
         return (
           <HomeDashboardView 
@@ -396,8 +399,10 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
 
   return (
     <>
-      {/* Full Width Content - No Sidebar */}
-      <div className="h-full overflow-auto bg-background">
+      {/* Full Width Content. Catalog Explorer needs overflow-hidden so its fixed
+          3-column grid cannot introduce horizontal scroll that visually hides
+          the center table list. Other tabs keep overflow-auto for page scroll. */}
+      <div className={`h-full min-h-0 min-w-0 bg-background ${activeTab === "ontology" ? "overflow-hidden" : "overflow-auto"}`}>
         {renderContent()}
       </div>
 

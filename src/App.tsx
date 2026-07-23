@@ -557,12 +557,12 @@ export default function App() {
           )}
           
           {/* Content */}
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 min-w-0 overflow-auto">
             {renderView()}
           </main>
 
           {/* AI Assistant Panel - Only visible when in workspace (except Databases and Team pages) */}
-          {isInWorkspace && workspaceTab !== 'databases' && workspaceTab !== 'team' && workspaceTab !== 'observability' && (
+          {isInWorkspace && workspaceTab !== 'databases' && workspaceTab !== 'team' && workspaceTab !== 'observability' && workspaceTab !== 'ontology' && (
                     <AIAssistant
           isOpen={isAIAssistantOpen}
           onOpenChange={(open) => {
