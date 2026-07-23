@@ -16,6 +16,7 @@ import {
   Loader2,
   Columns3,
   Pencil,
+  Check,
   Sparkles,
   Wand2,
   History,
@@ -392,8 +393,14 @@ function PanelSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border/60 bg-card/60 p-3.5 shadow-sm transition-colors">
-      <div className="flex items-center justify-between gap-2 mb-2.5">
+    <section
+      className="rounded-xl bg-card/70 p-4 shadow-sm transition-colors"
+      style={{
+        border: "1px solid rgba(255,255,255,0.22)",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+      }}
+    >
+      <div className="flex items-center justify-between gap-2 mb-3">
         <h3 className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground/80">
           <span className={iconColor ?? "text-muted-foreground/70"}>{icon}</span>
           {title}
@@ -498,6 +505,9 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [rightPanelTab, setRightPanelTab] = useState<"overview" | "columns" | "relationships" | "history">("overview");
   const [sortOrder, setSortOrder] = useState<"recently_updated" | "name_az" | "status">("recently_updated");
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [savingDescription, setSavingDescription] = useState(false);
 
   // ── Top-level view (Catalog Explorer vs Business Context) ──
   const [activeView, setActiveView] = useState<"catalog" | "business_context">("catalog");
@@ -870,6 +880,38 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
     }
   };
 
+  const startEditDescription = () => {
+    if (!selectedTable) return;
+    setDescriptionDraft(selectedTable.description || "");
+    setEditingDescription(true);
+  };
+
+  const cancelEditDescription = () => {
+    setEditingDescription(false);
+    setDescriptionDraft("");
+  };
+
+  const saveEditDescription = async () => {
+    if (!selectedDb || !selectedTable) return;
+    setSavingDescription(true);
+    try {
+      const res = await updateOntologyTable(selectedDb.id, selectedTable.physical_name, {
+        description: descriptionDraft.trim(),
+        category: selectedTable.category || "Unknown",
+        status: selectedTable.status || "PENDING",
+      });
+      if (res.success) {
+        await refreshExplorerData(selectedDb);
+        setEditingDescription(false);
+        toast.success("Description updated");
+      } else {
+        toast.error(res.error?.message || "Failed to update description");
+      }
+    } finally {
+      setSavingDescription(false);
+    }
+  };
+
   const handleApproveColumn = async (tableName: string, col: OntologyColumn) => {
     if (!selectedDb) return;
     const res = await updateOntologyColumn(selectedDb.id, tableName, col.physical_name, {
@@ -932,6 +974,13 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
       loadOntology(selectedDb);
     }
   }, [selectedDb, loadOntology, projectId]);
+
+  // Reset description editor when switching tables
+  useEffect(() => {
+    setEditingDescription(false);
+    setDescriptionDraft("");
+    setSavingDescription(false);
+  }, [selectedTableName]);
 
   useEffect(() => {
     if (selectedDb && selectedTableName && !columnsByTable[selectedTableName]) {
@@ -2100,7 +2149,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
 
                 {/* ── Overview tab ── */}
                 {rightPanelTab === "overview" && (
-                  <div key={selectedTable.physical_name} className="p-3 space-y-3 animate-in fade-in duration-200">
+                  <div key={selectedTable.physical_name} className="p-4 space-y-4 animate-in fade-in duration-200">
 
                     {isSelectedTableGenerating && (
                       <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/20 bg-primary/[0.06] text-[11px] text-foreground/80">
@@ -2114,15 +2163,58 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                     {/* AI Generated Description */}
                     <PanelSection
                       icon={<FileText className="w-3.5 h-3.5" />}
-                      iconColor="text-primary/70"
+                      iconColor="text-white"
                       title="AI Generated Description"
                       action={
-                        <button className="flex items-center gap-1 text-[10px] text-primary/60 hover:text-primary transition-colors">
-                          <Pencil className="w-2.5 h-2.5" /> Edit
-                        </button>
+                        editingDescription ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={cancelEditDescription}
+                              disabled={savingDescription}
+                              className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-white/[0.06] transition-colors disabled:opacity-50"
+                              title="Cancel"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={saveEditDescription}
+                              disabled={savingDescription}
+                              className="w-7 h-7 rounded-md flex items-center justify-center text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
+                              title="Save"
+                            >
+                              {savingDescription ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Check className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={startEditDescription}
+                            className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground/70 hover:text-white hover:bg-white/[0.06] transition-colors"
+                            title="Edit description"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )
                       }
                     >
-                      {selectedTable.description ? (
+                      {editingDescription ? (
+                        <textarea
+                          value={descriptionDraft}
+                          onChange={(e) => setDescriptionDraft(e.target.value)}
+                          rows={4}
+                          autoFocus
+                          disabled={savingDescription}
+                          className="w-full resize-y min-h-[88px] rounded-lg bg-black/30 px-3 py-2 text-[12px] text-foreground/85 leading-relaxed outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
+                          style={{ border: "1px solid rgba(255,255,255,0.18)" }}
+                          placeholder="Enter a business description for this table…"
+                        />
+                      ) : selectedTable.description ? (
                         <p className="text-[12px] text-foreground/70 leading-relaxed">{selectedTable.description}</p>
                       ) : (
                         <EmptyHint
@@ -2268,39 +2360,71 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
 
                 {/* ── Columns tab ── */}
                 {rightPanelTab === "columns" && (
-                  <div key={selectedTable.physical_name} className="p-3 animate-in fade-in duration-200">
+                  <div key={selectedTable.physical_name} className="p-4 animate-in fade-in duration-200">
                     {(selectedTable.columns ?? []).length === 0 ? (
                       <p className="text-[11px] text-muted-foreground text-center py-8">No column data available.</p>
                     ) : (
-                      <div className="space-y-1.5">
-                        {(selectedTable.columns ?? []).map((col) => (
-                          <div key={col.physical_name} className="flex items-start justify-between gap-2 p-2 rounded-md border border-border/50 bg-muted/10 hover:bg-muted/20 transition-colors">
-                            <div className="min-w-0">
-                              <p className="text-[11px] font-mono text-foreground truncate">{col.physical_name}</p>
-                              {col.business_definition && <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{col.business_definition}</p>}
-                            </div>
-                            <div className="shrink-0 flex flex-col items-end gap-1">
-                              {col.semantic_type && (() => {
-                                const tone = semanticTypeStyle(col.semantic_type);
-                                return (
+                      <div className="space-y-2.5">
+                        {(selectedTable.columns ?? []).map((col) => {
+                          const typeTone = col.semantic_type ? semanticTypeStyle(col.semantic_type) : null;
+                          const statusTone = statusStyle(col.status);
+                          const statusKey = (col.status || "").toUpperCase();
+                          const StatusIcon =
+                            statusKey === "APPROVED" || statusKey === "COMPLETED" ? CheckCircle2
+                            : statusKey === "REJECTED" ? XCircle
+                            : statusKey === "PENDING" || statusKey === "PENDING_REVIEW" || statusKey === "NEEDS_REVIEW" ? Clock
+                            : Sparkles;
+                          return (
+                            <div
+                              key={col.physical_name}
+                              className="flex items-start justify-between gap-3 p-3 rounded-xl bg-card/70 transition-colors hover:bg-card/90"
+                              style={{
+                                border: "1px solid rgba(255,255,255,0.22)",
+                                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+                              }}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[12px] font-mono font-medium text-foreground truncate">{col.physical_name}</p>
+                                {col.business_definition && (
+                                  <p className="text-[11px] text-muted-foreground/80 mt-1 leading-relaxed line-clamp-2">
+                                    {col.business_definition}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="shrink-0 flex flex-col items-end gap-1.5 pt-0.5">
+                                {typeTone && (
                                   <span
-                                    className="inline-flex items-center rounded-full text-[9px] font-medium border capitalize"
+                                    className="inline-flex items-center rounded-full font-medium border capitalize leading-none"
                                     style={{
-                                      backgroundColor: tone.backgroundColor,
-                                      color: tone.color,
-                                      borderColor: tone.borderColor,
-                                      padding: "2px 10px",
-                                      height: 18,
+                                      backgroundColor: typeTone.backgroundColor,
+                                      color: typeTone.color,
+                                      borderColor: typeTone.borderColor,
+                                      borderWidth: 1,
+                                      borderStyle: "solid",
+                                      padding: "5px 10px",
+                                      fontSize: 11,
                                     }}
                                   >
                                     {col.semantic_type}
                                   </span>
-                                );
-                              })()}
-                              <StatusBadge status={col.status} />
+                                )}
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-full font-medium leading-none"
+                                  style={{
+                                    backgroundColor: statusTone.backgroundColor,
+                                    color: statusTone.color,
+                                    border: `1px solid ${statusTone.borderColor}`,
+                                    padding: "5px 10px",
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  <StatusIcon className="w-3 h-3 shrink-0" strokeWidth={2} style={{ color: statusTone.color }} />
+                                  {statusLabel(col.status)}
+                                </span>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -2361,7 +2485,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                 )}
               </div>
 
-              {/* Footer */}
+              {/* Footer — View Technical Details temporarily hidden
               <div className="p-3 border-t border-border shrink-0">
                 <Button variant="outline" size="sm" className="w-full text-[11px] gap-1.5 h-8"
                   onClick={() => { if (!expandedTables.has(selectedTable.physical_name)) toggleExpanded(selectedTable.physical_name); }}>
@@ -2369,6 +2493,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                   View Technical Details
                 </Button>
               </div>
+              */}
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center text-muted-foreground">
