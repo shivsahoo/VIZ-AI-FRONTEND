@@ -2395,6 +2395,8 @@ export interface OntologyTableSummary {
   confidence?: number | null;
   description?: string | null;
   business_purpose?: string | null;
+  business_concepts?: string[] | null;
+  common_questions?: string[] | null;
   last_updated?: string | null;
   column_count?: number | null;
   tags?: string[] | null;
