@@ -161,10 +161,10 @@ type BadgeTone = { backgroundColor: string; color: string; borderColor: string }
 
 function statusStyle(status?: string): BadgeTone {
   const s = (status || "").toUpperCase();
-  if (s === "APPROVED" || s === "COMPLETED") {
+  if (s === "APPROVED") {
     return { backgroundColor: "rgba(16,185,129,0.22)", color: "#6EE7B7", borderColor: "rgba(52,211,153,0.55)" };
   }
-  if (s === "PENDING" || s === "PENDING_REVIEW" || s === "NEEDS_REVIEW") {
+  if (s === "PENDING" || s === "PENDING_REVIEW" || s === "NEEDS_REVIEW" || s === "COMPLETED") {
     return { backgroundColor: "rgba(245,158,11,0.22)", color: "#FCD34D", borderColor: "rgba(251,191,36,0.55)" };
   }
   if (s === "REJECTED") {
@@ -186,10 +186,9 @@ function statusStyle(status?: string): BadgeTone {
 function statusLabel(status?: string) {
   const s = (status || "").toUpperCase();
   if (s === "APPROVED") return "Approved";
-  if (s === "PENDING" || s === "PENDING_REVIEW") return "Pending Review";
+  if (s === "PENDING" || s === "PENDING_REVIEW" || s === "COMPLETED") return "Pending Review";
   if (s === "REJECTED") return "Rejected";
   if (s === "NEEDS_REVIEW") return "Needs Review";
-  if (s === "COMPLETED") return "Completed";
   if (s === "GENERATING") return "Generating…";
   if (s === "QUEUED") return "Queued";
   if (s === "HUMAN_EDITED" || s === "HUMAN EDITED") return "Human Edited";
@@ -200,9 +199,9 @@ function StatusBadge({ status, className = "" }: { status?: string; className?: 
   const s = (status || "").toUpperCase();
   const tone = statusStyle(status);
   const Icon =
-    s === "APPROVED" || s === "COMPLETED" ? CheckCircle2
+    s === "APPROVED" ? CheckCircle2
     : s === "REJECTED" ? XCircle
-    : s === "PENDING" || s === "PENDING_REVIEW" || s === "NEEDS_REVIEW" ? Clock
+    : s === "PENDING" || s === "PENDING_REVIEW" || s === "NEEDS_REVIEW" || s === "COMPLETED" ? Clock
     : s === "HUMAN_EDITED" || s === "HUMAN EDITED" ? Pencil
     : s === "GENERATING" ? Loader2
     : Sparkles;
@@ -550,7 +549,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
       (acc, t) => acc + (t.columns?.length || t.column_count || 0),
       0
     ),
-    pending: ontologyTables.filter((t) => ["PENDING", "PENDING_REVIEW", "NEEDS_REVIEW"].includes((t.status || "").toUpperCase())).length,
+    pending: ontologyTables.filter((t) => ["PENDING", "PENDING_REVIEW", "NEEDS_REVIEW", "COMPLETED"].includes((t.status || "").toUpperCase())).length,
     approved: ontologyTables.filter((t) => (t.status || "").toUpperCase() === "APPROVED").length,
     rejected: ontologyTables.filter((t) => (t.status || "").toUpperCase() === "REJECTED").length,
   };
@@ -611,7 +610,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
         );
         if (!nameMatch && !descMatch && !colMatch) return false;
       }
-      if (statusFilter === "PENDING") return ["PENDING", "PENDING_REVIEW"].includes((table.status || "").toUpperCase());
+      if (statusFilter === "PENDING") return ["PENDING", "PENDING_REVIEW", "COMPLETED"].includes((table.status || "").toUpperCase());
       if (statusFilter === "APPROVED") return (table.status || "").toUpperCase() === "APPROVED";
       if (statusFilter === "REJECTED") return (table.status || "").toUpperCase() === "REJECTED";
       if (statusFilter === "ai_generated") return !!table.is_ai_generated;
@@ -689,7 +688,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
   // ─── Count by filter ────────────────────────────────────────────────────────
   const countFor = (id: string) => {
     if (id === "all") return ontologyTables.length;
-    if (id === "PENDING") return ontologyTables.filter((t) => ["PENDING", "PENDING_REVIEW"].includes((t.status || "").toUpperCase())).length;
+    if (id === "PENDING") return ontologyTables.filter((t) => ["PENDING", "PENDING_REVIEW", "COMPLETED"].includes((t.status || "").toUpperCase())).length;
     if (id === "APPROVED") return ontologyTables.filter((t) => (t.status || "").toUpperCase() === "APPROVED").length;
     if (id === "REJECTED") return ontologyTables.filter((t) => (t.status || "").toUpperCase() === "REJECTED").length;
     if (id === "ai_generated") return ontologyTables.filter((t) => t.is_ai_generated).length;
@@ -875,6 +874,36 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
     if (res.success) {
       await refreshExplorerData(selectedDb);
       toast.success("Table approved");
+    } else {
+      toast.error(res.error?.message || "Failed to update table");
+    }
+  };
+
+  const handleRejectTable = async (table: OntologyTable) => {
+    if (!selectedDb) return;
+    const res = await updateOntologyTable(selectedDb.id, table.physical_name, {
+      description: table.description || "",
+      category: table.category || "Unknown",
+      status: "REJECTED",
+    });
+    if (res.success) {
+      await refreshExplorerData(selectedDb);
+      toast.success("Table rejected");
+    } else {
+      toast.error(res.error?.message || "Failed to update table");
+    }
+  };
+
+  const handlePendingTable = async (table: OntologyTable) => {
+    if (!selectedDb) return;
+    const res = await updateOntologyTable(selectedDb.id, table.physical_name, {
+      description: table.description || "",
+      category: table.category || "Unknown",
+      status: "PENDING_REVIEW",
+    });
+    if (res.success) {
+      await refreshExplorerData(selectedDb);
+      toast.success("Table status reset to Pending Review");
     } else {
       toast.error(res.error?.message || "Failed to update table");
     }
@@ -2154,7 +2183,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                     {isSelectedTableGenerating && (
                       <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/20 bg-primary/[0.06] text-[11px] text-foreground/80">
                         <Loader2 className="w-3.5 h-3.5 text-primary animate-spin shrink-0" />
-                        {selectedTableGenStatus === "generating"
+                        {selectedTable.status === "GENERATING"
                           ? "Generating AI content for this table…"
                           : "Queued — this table will be enriched shortly…"}
                       </div>
@@ -2192,14 +2221,46 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                             </button>
                           </div>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={startEditDescription}
-                            className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground/70 hover:text-white hover:bg-white/[0.06] transition-colors"
-                            title="Edit description"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={startEditDescription}
+                              className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground/70 hover:text-white hover:bg-white/[0.06] transition-colors"
+                              title="Edit description"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            {(selectedTable.status || "").toUpperCase() !== "APPROVED" && (
+                              <button
+                                type="button"
+                                onClick={() => handleApproveTable(selectedTable)}
+                                className="w-7 h-7 rounded-md flex items-center justify-center text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                                title="Approve Table"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {(selectedTable.status || "").toUpperCase() !== "REJECTED" && (
+                              <button
+                                type="button"
+                                onClick={() => handleRejectTable(selectedTable)}
+                                className="w-7 h-7 rounded-md flex items-center justify-center text-rose-400 hover:bg-rose-500/10 transition-colors"
+                                title="Reject Table"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {((selectedTable.status || "").toUpperCase() === "APPROVED" || (selectedTable.status || "").toUpperCase() === "REJECTED") && (
+                              <button
+                                type="button"
+                                onClick={() => handlePendingTable(selectedTable)}
+                                className="w-7 h-7 rounded-md flex items-center justify-center text-amber-400 hover:bg-amber-500/10 transition-colors"
+                                title="Reset to Pending Review"
+                              >
+                                <Clock className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         )
                       }
                     >
