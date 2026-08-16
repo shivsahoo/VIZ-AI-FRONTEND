@@ -248,6 +248,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
 
   const handleCreateDashboard = async (dashboard: {
     name: string;
+    description?: string;
     dashboardId?: string;
     isAutopilot?: boolean;
     kpiGoals?: string;
@@ -327,6 +328,17 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
     }
   };
 
+  const handleDashboardUpdated = (dashboardId: string, updates: any) => {
+    setDashboards(prevDashboards => prevDashboards.map(d => 
+      String(d.id) === String(dashboardId) ? { ...d, ...updates } : d
+    ));
+    
+    // Also update selectedDashboard if it's the one currently open
+    if (selectedDashboard && String(selectedDashboard.id) === String(dashboardId)) {
+      setSelectedDashboard(prev => prev ? { ...prev, ...updates } : prev);
+    }
+  };
+
   const renderContent = () => {
     // If a dashboard is selected, show the detail view
     if (selectedDashboard) {
@@ -353,6 +365,7 @@ export function WorkspaceView({ projectName, onBack, isDark, activeTab, onTabCha
           onAutopilotConsumed={() => setAutopilotConfig(null)}
           isAutopilot={selectedDashboard.isAutopilot ?? false}
           savedKpiQueries={selectedDashboard.kpiQueries ?? null}
+          onDashboardUpdated={handleDashboardUpdated}
         />
       );
     }
