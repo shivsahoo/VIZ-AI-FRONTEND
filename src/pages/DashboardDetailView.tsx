@@ -21,7 +21,7 @@ import {
 import { toast } from "sonner";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { getDashboardCharts, getChartData, deleteChart, addChartToDashboard, getCurrentUser, generateDashboardKpiQueries, executeKpiQuery, updateDashboard, type ChartData, type KpiQueryDescriptor } from "../services/api";
+import { getDashboardCharts, getChartData, deleteChart, addChartToDashboard, getCurrentUser, generateDashboardKpiQueries, executeKpiQuery, regenerateDashboardKpiQuery, updateDashboard, type ChartData, type KpiQueryDescriptor } from "../services/api";
 import { ShareLinkModal } from "../components/features/dashboards/ShareLinkModal";
 import { AllowedDomainsSection } from "../components/features/dashboards/AllowedDomainsSection";
 import { ProbeModeDialog } from "../components/features/charts/ProbeModeDialog";
@@ -110,6 +110,8 @@ interface DashboardDetailViewProps {
   isAutopilot?: boolean;
   /** Previously saved KPI query descriptors (if already generated) */
   savedKpiQueries?: KpiQueryDescriptor[] | null;
+  /** Callback to sync dashboard state up to parent */
+  onDashboardUpdated?: (dashboardId: string, updates: any) => void;
 }
 
 interface ChartCardData {
@@ -157,6 +159,7 @@ export function DashboardDetailView({
   onAutopilotConsumed,
   isAutopilot = false,
   savedKpiQueries,
+  onDashboardUpdated,
 }: DashboardDetailViewProps) {
   const { isPinned, togglePin } = usePinnedCharts();
   const [localDashboardName, setLocalDashboardName] = useState(dashboardName);
@@ -357,6 +360,10 @@ export function DashboardDetailView({
     // Reset values so cards show loading skeletons
     setKpiValues({});
     setKpiErrors({});
+    
+    let activeDescriptors = [...descriptors];
+    let hasChanges = false;
+    
     // Execute all queries in parallel
     await Promise.allSettled(
       descriptors.map(async (kpi) => {
@@ -364,15 +371,62 @@ export function DashboardDetailView({
           setKpiErrors((prev) => ({ ...prev, [kpi.label]: true }));
           return;
         }
-        try {
-          const value = await executeKpiQuery(kpi.connection_id, kpi.query);
-          setKpiValues((prev) => ({ ...prev, [kpi.label]: value }));
-        } catch {
-          setKpiErrors((prev) => ({ ...prev, [kpi.label]: true }));
+        
+        let currentQuery = kpi.query;
+        let currentKpi = kpi;
+        let attempt = 0;
+        const maxRetries = 3;
+        
+        while (attempt <= maxRetries) {
+          try {
+            const value = await executeKpiQuery(currentKpi.connection_id!, currentQuery);
+            if (value !== 0 && value !== null && value !== undefined) {
+              setKpiValues((prev) => ({ ...prev, [currentKpi.label]: value }));
+              return; // Success
+            }
+          } catch (err) {
+            // Execution failed, proceed to retry
+          }
+          
+          attempt++;
+          if (attempt > maxRetries) {
+            // Exhausted retries, hide card by removing it
+            activeDescriptors = activeDescriptors.filter(d => d.label !== currentKpi.label);
+            hasChanges = true;
+            return;
+          }
+          
+          // Try to regenerate via backend
+          try {
+            const regenResp = await regenerateDashboardKpiQuery(dashboardId!, {
+              connection_id: currentKpi.connection_id!,
+              label: currentKpi.label,
+              failed_query: currentQuery,
+            });
+            if (regenResp.success && regenResp.data?.kpi?.query) {
+              currentQuery = regenResp.data.kpi.query;
+              currentKpi = regenResp.data.kpi;
+              // Update active descriptors with the new KPI properties
+              activeDescriptors = activeDescriptors.map(d => d.label === currentKpi.label ? currentKpi : d);
+              hasChanges = true;
+            } else {
+              activeDescriptors = activeDescriptors.filter(d => d.label !== currentKpi.label);
+              hasChanges = true;
+              return;
+            }
+          } catch {
+            activeDescriptors = activeDescriptors.filter(d => d.label !== currentKpi.label);
+            hasChanges = true;
+            return;
+          }
         }
       })
     );
-  }, []);
+    
+    if (hasChanges) {
+      setKpiDescriptors(activeDescriptors);
+    }
+  }, [dashboardId]);
 
   // KPI Infographics — load for all dashboards (Autopilot uses config; manual uses chart's connection)
   useEffect(() => {
@@ -399,6 +453,7 @@ export function DashboardDetailView({
           if (resp.success && resp.data) {
             const descriptors = resp.data.kpi_queries;
             setKpiDescriptors(descriptors);
+            onDashboardUpdated?.(dashboardId, { kpiQueries: descriptors });
             await runKpiQueries(descriptors);
           } else {
             setKpiGenerationError(resp.error?.message ?? "Failed to generate KPI metrics");
@@ -415,9 +470,9 @@ export function DashboardDetailView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAutopilot, dashboardId]);
 
-  // For non-autopilot dashboards: trigger KPI generation after charts are loaded
+  // For non-autopilot dashboards (or autopilot missing config): trigger KPI generation after charts are loaded
   useEffect(() => {
-    if (isAutopilot) return;                   // autopilot handled above
+    if (isAutopilot && autopilotConfig) return; // fresh autopilot handled above
     if (isLoadingCharts) return;               // wait for charts to finish loading
     if (kpiGeneratedRef.current) return;       // already generated
     if (kpiDescriptors.length > 0) return;     // already have descriptors
@@ -440,6 +495,7 @@ export function DashboardDetailView({
         if (resp.success && resp.data) {
           const descriptors = resp.data.kpi_queries;
           setKpiDescriptors(descriptors);
+          onDashboardUpdated?.(dashboardId, { kpiQueries: descriptors });
           await runKpiQueries(descriptors);
         } else {
           setKpiGenerationError(resp.error?.message ?? "Failed to generate KPI metrics");
@@ -597,6 +653,7 @@ export function DashboardDetailView({
                   .then((resp) => {
                     if (resp.success) {
                       setLocalDashboardName(derivedName);
+                      onDashboardUpdated?.(dashboardId, { name: derivedName });
                     }
                   })
                   .catch(() => {

@@ -1005,6 +1005,34 @@ export const generateDashboardKpiQueries = async (
   }
 };
 
+export const regenerateDashboardKpiQuery = async (
+  dashboardId: string,
+  data: {
+    connection_id: string;
+    label: string;
+    failed_query: string;
+  }
+): Promise<ApiResponse<{ success: boolean; kpi: KpiQueryDescriptor }>> => {
+  try {
+    const response = await apiRequest<{ success: boolean; kpi: KpiQueryDescriptor }>(
+      `/api/v1/backend/dashboards/${dashboardId}/regenerate-kpi`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+    return { success: true, data: response };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: {
+        code: 'REGENERATE_KPI_QUERY_FAILED',
+        message: error.message || 'Failed to regenerate KPI query',
+      },
+    };
+  }
+};
+
 /**
  * Create new dashboard
  */
@@ -3614,6 +3642,7 @@ const api = {
   deleteDashboard,
   getDashboardCharts,
   generateDashboardKpiQueries,
+  regenerateDashboardKpiQuery,
   executeKpiQuery,
   getFavorites,
 
