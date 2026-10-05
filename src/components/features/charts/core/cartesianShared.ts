@@ -162,7 +162,7 @@ export function composeCartesianOption(
       })
       .join("<br/>");
     let html = `<div style="font-size:12px"><b>${String(label)}</b><br/>${rows}</div>`;
-    html += formatExtraFieldsBlock(row, new Set(seriesKeys), extraFields);
+    html += formatExtraFieldsBlock(row, new Set(seriesKeys), extraFields, new Set([String(label)]));
     return html;
   };
 

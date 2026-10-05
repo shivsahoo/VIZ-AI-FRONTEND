@@ -24,6 +24,8 @@ import {
   Tag,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useIsDark } from "../../shared/useIsDark";
+import "./KnowledgeGraph.css";
 import { ConfirmDialog } from "../../shared/ConfirmDialog";
 import {
   Dialog,
@@ -59,7 +61,6 @@ const CENTER_W = 172;
 const CENTER_H = 50;
 const NODE_W = 150;
 const NODE_H = 44;
-const NODE_R = 12;
 
 // Progressive-detail zoom thresholds (Neo4j-Bloom-style level of detail)
 const ZOOM_SHOW_SUBTITLE = 0.6;   // below this, hide the type subtitle
@@ -89,15 +90,23 @@ interface TypePalette {
   glow: string;
 }
 
+// Accent per entity type — readable on both the light and dark canvas.
 const TYPE_COLORS: Record<KGNodeType, TypePalette> = {
-  Organization: { stroke: "#5B9DF0", centerFill: "#182C45", connFill: "#101E30", text: "#DCEAFE", label: "#9DC2F0", gradFrom: "#1B3350", gradTo: "#111E30", glow: "#5B9DF0" },
-  Person:       { stroke: "#A78BFA", centerFill: "#271E42", connFill: "#181330", text: "#E9E3FB", label: "#C4B4F0", gradFrom: "#2A2148", gradTo: "#171330", glow: "#A78BFA" },
-  Location:     { stroke: "#E0A94A", centerFill: "#332614", connFill: "#231A0D", text: "#F6E5C4", label: "#D9BE84", gradFrom: "#392A16", gradTo: "#241A0D", glow: "#E0A94A" },
-  Product:      { stroke: "#3FB98C", centerFill: "#13332A", connFill: "#0C2119", text: "#CFF2E5", label: "#88D9BD", gradFrom: "#153A2E", gradTo: "#0C2119", glow: "#3FB98C" },
-  Concept:      { stroke: "#7C87F0", centerFill: "#1F2245", connFill: "#161832", text: "#E1E4FB", label: "#AAB0F0", gradFrom: "#23264C", gradTo: "#161832", glow: "#7C87F0" },
-  Event:        { stroke: "#EC8B4B", centerFill: "#341F12", connFill: "#23150B", text: "#F7E1CB", label: "#E5B183", gradFrom: "#3A2214", gradTo: "#23150B", glow: "#EC8B4B" },
-  Other:        { stroke: "#8595AB", centerFill: "#1C2634", connFill: "#131B26", text: "#D5DEEA", label: "#93A2B5", gradFrom: "#212C3B", gradTo: "#131B26", glow: "#8595AB" },
+  Organization: { stroke: "#30B0C7", centerFill: "#30B0C71F", connFill: "#30B0C714", text: "#30B0C7", label: "#30B0C7", gradFrom: "#30B0C7", gradTo: "#30B0C7", glow: "#30B0C7" },
+  Person:       { stroke: "#5E5CE6", centerFill: "#5E5CE61F", connFill: "#5E5CE614", text: "#5E5CE6", label: "#5E5CE6", gradFrom: "#5E5CE6", gradTo: "#5E5CE6", glow: "#5E5CE6" },
+  Location:     { stroke: "#FF9500", centerFill: "#FF95001F", connFill: "#FF950014", text: "#FF9500", label: "#FF9500", gradFrom: "#FF9500", gradTo: "#FF9500", glow: "#FF9500" },
+  Product:      { stroke: "#34C759", centerFill: "#34C7591F", connFill: "#34C75914", text: "#34C759", label: "#34C759", gradFrom: "#34C759", gradTo: "#34C759", glow: "#34C759" },
+  Concept:      { stroke: "#0A84FF", centerFill: "#0A84FF1F", connFill: "#0A84FF14", text: "#0A84FF", label: "#0A84FF", gradFrom: "#0A84FF", gradTo: "#0A84FF", glow: "#0A84FF" },
+  Event:        { stroke: "#FF2D55", centerFill: "#FF2D551F", connFill: "#FF2D5514", text: "#FF2D55", label: "#FF2D55", gradFrom: "#FF2D55", gradTo: "#FF2D55", glow: "#FF2D55" },
+  Other:        { stroke: "#8E8E93", centerFill: "#8E8E931F", connFill: "#8E8E9314", text: "#8E8E93", label: "#8E8E93", gradFrom: "#8E8E93", gradTo: "#8E8E93", glow: "#8E8E93" },
 };
+
+/** Canvas colours per theme (SVG attributes can't read CSS variables). */
+function kgCanvasTheme(isDark: boolean) {
+  return isDark
+    ? { dot: "#2c2c2e", edge: "#48484a", edgeFocusOut: "#2997ff", edgeFocusIn: "#64d2ff", labelBg: "#1c1c1e", muted: "#98989d", nodeFill: "#1c1c1e", nodeStroke: "#3a3a3c", ink: "#f5f5f7", sub: "#98989d", faded: "#2c2c2e", shadow: 0.5 }
+    : { dot: "#d2d2d7", edge: "#c7c7cc", edgeFocusOut: "#0071e3", edgeFocusIn: "#30b0c7", labelBg: "#ffffff", muted: "#6e6e73", nodeFill: "#ffffff", nodeStroke: "#e0e0e5", ink: "#1d1d1f", sub: "#6e6e73", faded: "#f0f0f2", shadow: 0.12 };
+}
 
 const DEFAULT_COLORS = TYPE_COLORS.Other;
 
@@ -106,7 +115,7 @@ function getTypeColor(type: string): TypePalette {
 }
 
 // Neutral colour used for faded / unrelated nodes in focus mode.
-const MUTED_STROKE = "#26303f";
+
 
 // ─── Smart label wrapping (up to 2 lines, ellipsis + tooltip beyond) ─────────
 function wrapLabel(label: string, maxCharsPerLine: number, maxLines: number): string[] {
@@ -429,6 +438,8 @@ function computeFullGraphLayout(
 export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
   function KnowledgeGraphViewer(_props, ref) {
     // ── document list state ──
+    const isDark = useIsDark();
+    const kt = kgCanvasTheme(isDark);
     const [documents, setDocuments] = useState<KGDocument[]>([]);
     const [isLoadingDocs, setIsLoadingDocs] = useState(true);
     const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -632,6 +643,21 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
       },
       [selectedNodeId, neighborIds]
     );
+
+    // Connection counts: everything is often one type ("Concept"), so hubs are
+    // what make the graph readable.
+    const { degreeById, hubThreshold, showTypeSubtitle } = useMemo(() => {
+      const deg = new Map<string, number>();
+      for (const e of graphData?.edges ?? []) {
+        deg.set(e.source, (deg.get(e.source) ?? 0) + 1);
+        deg.set(e.target, (deg.get(e.target) ?? 0) + 1);
+      }
+      const sorted = [...deg.values()].sort((x, y) => y - x);
+      const pIdx = Math.max(0, Math.floor(sorted.length * 0.15) - 1);
+      const threshold = Math.max(3, sorted[pIdx] ?? 3);
+      const types = new Set((graphData?.nodes ?? []).map((n) => n.type));
+      return { degreeById: deg, hubThreshold: threshold, showTypeSubtitle: types.size > 1 };
+    }, [graphData]);
 
     // Fit the canvas once when a graph first loads
     useEffect(() => {
@@ -1066,14 +1092,14 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
         </div>
 
         {/* ══════════════ CENTER: Graph Canvas ══════════════ */}
-        <div className="flex-1 flex flex-col min-w-0 bg-[#050d1a] overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 kg-canvas overflow-hidden">
           {/* Toolbar */}
-          <div className="flex items-center gap-2.5 px-4 py-2 border-b border-border/50 shrink-0 bg-[#06101e] h-11">
+          <div className="flex items-center gap-2.5 px-4 py-2 border-b border-border/50 shrink-0 kg-toolbar h-11">
             {/* Node search */}
             <div className="relative shrink-0">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/70 pointer-events-none" />
               <input
-                className="h-8 pl-8 pr-3 text-[12px] rounded-md border border-border/50 bg-[#0a1525] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 w-44 transition-colors"
+                className="h-8 pl-8 pr-3 text-[12px] rounded-md border border-border/50 bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 w-44 transition-colors"
                 placeholder="Search nodes…"
                 value={nodeSearch}
                 onChange={(e) => setNodeSearch(e.target.value)}
@@ -1087,7 +1113,7 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                 }}
               />
               {searchQuery && (
-                <div className="absolute left-0 right-0 top-full mt-1 z-20 max-h-48 overflow-y-auto rounded-md border border-border/60 bg-[#0a1525] shadow-lg">
+                <div className="absolute left-0 right-0 top-full mt-1 z-20 max-h-48 overflow-y-auto rounded-md border border-border/60 bg-card shadow-lg">
                   {searchMatches.length === 0 ? (
                     <p className="px-3 py-2 text-[12px] text-muted-foreground">No matching nodes</p>
                   ) : (
@@ -1211,10 +1237,10 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
               >
                 <defs>
                   <marker id="kg-arrow-out" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
-                    <path d="M0,0.5 L7.5,3.5 L0,6.5" fill="none" stroke="#7C87F0" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M0,0.5 L7.5,3.5 L0,6.5" fill="none" stroke={kt.edgeFocusOut} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
                   </marker>
                   <marker id="kg-arrow-in" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
-                    <path d="M0,0.5 L7.5,3.5 L0,6.5" fill="none" stroke="#57C0F5" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M0,0.5 L7.5,3.5 L0,6.5" fill="none" stroke={kt.edgeFocusIn} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
                   </marker>
                   {/* Per-type card gradients */}
                   {(Object.entries(TYPE_COLORS) as [KGNodeType, TypePalette][]).map(
@@ -1237,10 +1263,10 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                     </feMerge>
                   </filter>
                   <filter id="kg-shadow" x="-20%" y="-20%" width="140%" height="150%">
-                    <feDropShadow dx="0" dy="2" stdDeviation="4" floodColor="#000" floodOpacity="0.45" />
+                    <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#000" floodOpacity={kt.shadow} />
                   </filter>
                   <pattern id="kg-dots" width="28" height="28" patternUnits="userSpaceOnUse">
-                    <circle cx="2" cy="2" r="1" fill="#17223a" />
+                    <circle cx="2" cy="2" r="1" fill={kt.dot} />
                   </pattern>
                 </defs>
 
@@ -1269,13 +1295,13 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                         ? 1
                         : focusId
                           ? 0.16
-                          : 0.5;
+                          : 0.85;
 
                     const strokeColor = touchesFocus
                       ? isOutgoing
-                        ? "#7C87F0"
-                        : "#57C0F5"
-                      : "#3a4a63";
+                        ? kt.edgeFocusOut
+                        : kt.edgeFocusIn
+                      : kt.edge;
                     const markerId = touchesFocus
                       ? isOutgoing
                         ? "url(#kg-arrow-out)"
@@ -1335,8 +1361,8 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                               width={labelW}
                               height={14}
                               rx={5}
-                              fill="#0a1220"
-                              fillOpacity="0.92"
+                              fill={kt.labelBg}
+                              fillOpacity="0.95"
                               stroke={strokeColor}
                               strokeOpacity="0.3"
                               strokeWidth="0.8"
@@ -1347,7 +1373,7 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                               textAnchor="middle"
                               dominantBaseline="middle"
                               fontSize="8.5"
-                              fill={touchesFocus ? strokeColor : "#8595ab"}
+                              fill={touchesFocus ? strokeColor : kt.muted}
                               fillOpacity="0.95"
                               className="select-none"
                             >
@@ -1365,7 +1391,6 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                     if (!pos) return null;
 
                     const isSelected = node.id === selectedNodeId;
-                    const isNeighbor = neighborIds.has(node.id);
                     const isHovered = hoveredNodeId === node.id;
                     const searchActive = matchingNodeIds != null;
                     const matchesSearch = !searchActive || matchingNodeIds!.has(node.id);
@@ -1391,33 +1416,24 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
 
                     const palette = getTypeColor(node.type);
                     const accent = palette.stroke;
-                    // Faded nodes drop to a muted fill so the focus set pops.
                     const bright = inFocusSet || isHovered || matchesSearch;
-                    const fillUrl = bright
-                      ? `url(#kg-grad-${(TYPE_COLORS[node.type as KGNodeType] ? node.type : "Other") as string})`
-                      : "url(#kg-grad-muted)";
-                    const borderColor = bright ? accent : MUTED_STROKE;
-                    const strokeWidth = isSelected ? 2.2 : isNeighbor ? 1.5 : 1.1;
-
-                    // Card geometry
-                    const iconD = Math.min(h - 14, 22);
-                    const iconCx = nx + 11 + iconD / 2;
-                    const iconCy = pos.y;
-                    const textX = nx + 11 + iconD + 9;
-                    const availW = nx + w - 10 - textX;
-                    const titleSize = isSelected ? 12 : 10.5;
+                    const degree = degreeById.get(node.id) ?? 0;
+                    const isHub = degree >= hubThreshold;
+                    // Hubs get a tinted fill so the important entities stand out
+                    const bodyFill = !bright ? kt.faded : isSelected ? accent : isHub ? `${accent}24` : kt.nodeFill;
+                    const borderColor = !bright ? kt.nodeStroke : isSelected || isHub ? accent : kt.nodeStroke;
+                    const strokeWidth = isSelected ? 0 : isHub ? 1.4 : 1;
+                    const textX = nx + 26;
+                    const availW = nx + w - 12 - textX;
+                    const titleSize = isSelected ? 12 : 11;
                     const maxChars = Math.max(6, Math.floor(availW / (titleSize * 0.56)));
                     const allowTwoLines = isSelected || isHovered;
-                    const titleLines = wrapLabel(
-                      node.label,
-                      maxChars,
-                      allowTwoLines ? 2 : 1
-                    );
+                    const titleLines = wrapLabel(node.label, maxChars, allowTwoLines ? 2 : 1);
                     const twoLines = titleLines.length > 1;
                     const showSub = showSubtitles && !twoLines;
-
-                    const textColor = bright ? palette.text : "#5c6b80";
-                    const subColor = bright ? palette.label : "#3c4759";
+                    const textColor = !bright ? kt.sub : isSelected ? "#ffffff" : kt.ink;
+                    const subColor = !bright ? kt.sub : isSelected ? "rgba(255,255,255,0.8)" : kt.sub;
+                    const subText = showTypeSubtitle ? node.type : `${degree} link${degree === 1 ? "" : "s"}`;
 
                     return (
                       <g
@@ -1440,121 +1456,59 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                           transition:
                             "transform 160ms cubic-bezier(0.2,0.7,0.3,1), opacity 220ms ease",
                         }}
-                        filter={
-                          isSelected || isHovered
-                            ? "url(#kg-glow)"
-                            : "url(#kg-shadow)"
-                        }
+                        filter="url(#kg-shadow)"
                       >
                         <title>{`${node.label} — ${node.type}`}</title>
 
-                        {/* Animated selection ring */}
+                        {/* Selection halo */}
                         {isSelected && (
-                          <rect
-                            x={nx - 3.5}
-                            y={ny - 3.5}
-                            width={w + 7}
-                            height={h + 7}
-                            rx={NODE_R + 3}
-                            fill="none"
-                            stroke={accent}
-                            strokeWidth="1.4"
-                          >
-                            <animate
-                              attributeName="stroke-opacity"
-                              values="0.55;0.12;0.55"
-                              dur="2.6s"
-                              repeatCount="indefinite"
-                            />
-                          </rect>
+                          <rect x={nx - 5} y={ny - 5} width={w + 10} height={h + 10} rx={h / 2 + 5} fill={accent} fillOpacity="0.16" />
                         )}
 
-                        {/* Card body */}
+                        {/* Pill body */}
                         <rect
                           x={nx}
                           y={ny}
                           width={w}
                           height={h}
-                          rx={NODE_R}
-                          fill={fillUrl}
+                          rx={h / 2}
+                          fill={bodyFill}
                           stroke={borderColor}
                           strokeWidth={strokeWidth}
-                          strokeOpacity={bright ? (isSelected ? 1 : 0.85) : 0.7}
                         />
-                        {/* Accent side rail */}
-                        {bright && (
-                          <rect
-                            x={nx}
-                            y={ny + NODE_R / 2}
-                            width={3}
-                            height={h - NODE_R}
-                            rx={1.5}
-                            fill={accent}
-                            fillOpacity={isSelected ? 0.95 : 0.7}
-                          />
-                        )}
 
-                        {/* Type icon dot */}
+                        {/* Type dot */}
                         <circle
-                          cx={iconCx}
-                          cy={iconCy}
-                          r={iconD / 2}
-                          fill={accent}
-                          fillOpacity={bright ? 0.92 : 0.5}
+                          cx={nx + 15}
+                          cy={pos.y}
+                          r={isHub || isSelected ? 5 : 4}
+                          fill={isSelected ? "#ffffff" : accent}
+                          fillOpacity={bright ? 1 : 0.4}
                         />
-                        <text
-                          x={iconCx}
-                          y={iconCy}
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          fontSize={iconD * 0.56}
-                          fontWeight="700"
-                          fill="#0b1220"
-                          className="select-none"
-                        >
-                          {node.type.charAt(0).toUpperCase()}
-                        </text>
 
                         {/* Title (1–2 smart-wrapped lines) */}
                         <text
                           x={textX}
                           fontSize={titleSize}
-                          fontWeight={isSelected ? 700 : 600}
+                          fontWeight={isSelected || isHub ? 650 : 500}
                           fill={textColor}
                           className="select-none"
                         >
                           {twoLines ? (
                             <>
-                              <tspan x={textX} y={pos.y - 6} dominantBaseline="middle">
-                                {titleLines[0]}
-                              </tspan>
-                              <tspan x={textX} y={pos.y + 6} dominantBaseline="middle">
-                                {titleLines[1]}
-                              </tspan>
+                              <tspan x={textX} y={pos.y - 6} dominantBaseline="middle">{titleLines[0]}</tspan>
+                              <tspan x={textX} y={pos.y + 6} dominantBaseline="middle">{titleLines[1]}</tspan>
                             </>
                           ) : (
-                            <tspan
-                              x={textX}
-                              y={showSub ? pos.y - 6 : pos.y}
-                              dominantBaseline="middle"
-                            >
+                            <tspan x={textX} y={showSub ? pos.y - 6 : pos.y} dominantBaseline="middle">
                               {titleLines[0]}
                             </tspan>
                           )}
                         </text>
 
-                        {/* Subtitle (type) — hidden when zoomed out or wrapped */}
                         {showSub && (
-                          <text
-                            x={textX}
-                            y={pos.y + 8}
-                            fontSize="8.5"
-                            fontWeight="500"
-                            fill={subColor}
-                            dominantBaseline="middle"
-                            className="select-none"
-                          >
-                            {node.type}
+                          <text x={textX} y={pos.y + 8} fontSize="8.5" fontWeight="500" fill={subColor} dominantBaseline="middle" className="select-none">
+                            {subText}
                           </text>
                         )}
                       </g>
@@ -1585,7 +1539,7 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
 
             {/* Minimap */}
             {graphData && graphData.nodes.length > 1 && (
-              <div className="absolute bottom-3 right-3 rounded-lg border border-border/50 bg-[#070f1c]/85 backdrop-blur-sm shadow-lg overflow-hidden">
+              <div className="absolute bottom-3 right-3 rounded-lg border border-border/50 kg-minimap backdrop-blur-sm shadow-lg overflow-hidden">
                 <svg
                   width={MM_W}
                   height={MM_H}
@@ -1607,7 +1561,7 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                         y1={a.y}
                         x2={b.x}
                         y2={b.y}
-                        stroke="#26374f"
+                        stroke={kt.edge}
                         strokeWidth="0.5"
                         strokeOpacity="0.6"
                       />
@@ -1635,9 +1589,9 @@ export const KnowledgeGraphViewer = forwardRef<KnowledgeGraphViewerHandle>(
                     y={minimap.view.y}
                     width={minimap.view.w}
                     height={minimap.view.h}
-                    fill="#5B9DF0"
+                    fill={kt.edgeFocusOut}
                     fillOpacity="0.1"
-                    stroke="#5B9DF0"
+                    stroke={kt.edgeFocusOut}
                     strokeOpacity="0.7"
                     strokeWidth="1"
                     rx={2}

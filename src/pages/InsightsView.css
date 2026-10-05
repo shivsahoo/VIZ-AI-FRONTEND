@@ -1,0 +1,308 @@
+/* AI Insights page */
+.ins-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.ins-tone-ink { --t: var(--primary); }
+.ins-tone-green { --t: var(--success); }
+.ins-tone-red { --t: var(--destructive); }
+.ins-tone-orange { --t: var(--warning); }
+
+.ins-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 20px;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.25s var(--apple-ease), transform 0.25s var(--apple-ease), background-color 0.25s var(--apple-ease);
+}
+
+.ins-stat:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--t) 40%, transparent);
+}
+
+.ins-stat:disabled {
+  cursor: default;
+}
+
+.ins-stat.is-active {
+  border-color: var(--t);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--t) 16%, transparent);
+}
+
+/* The "all" tile is the dark hero tile */
+.ins-stat.ins-tone-ink {
+  border-color: transparent;
+  background: #000;
+  color: #f5f5f7;
+}
+
+.dark .ins-stat.ins-tone-ink {
+  background: #2c2c2e;
+}
+
+.ins-stat.ins-tone-ink.is-active {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+.ins-stat-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--t) 14%, transparent);
+  color: var(--t);
+}
+
+.ins-stat.ins-tone-ink .ins-stat-icon {
+  background: rgba(41, 151, 255, 0.18);
+  color: #2997ff;
+}
+
+.ins-stat-value {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ins-stat-label {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.ins-card {
+  --t: var(--warning);
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px !important;
+  transition: border-color 0.25s var(--apple-ease), box-shadow 0.25s var(--apple-ease);
+}
+
+.ins-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 18px;
+  bottom: 18px;
+  width: 4px;
+  border-radius: 0 4px 4px 0;
+  background: var(--t);
+}
+
+.ins-card:hover {
+  border-color: color-mix(in srgb, var(--t) 35%, transparent);
+  box-shadow: 0 14px 34px -24px rgba(0, 0, 0, 0.35);
+}
+
+.ins-type-positive { --t: var(--success); }
+.ins-type-negative { --t: var(--destructive); }
+.ins-type-anomaly,
+.ins-type-anomalies { --t: var(--warning); }
+
+.ins-card-title {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+
+@media (max-width: 1000px) {
+  .ins-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── Insight cards (grid) ── */
+.ins-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.ins-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px 16px 22px;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.ins-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ins-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--t) 13%, transparent);
+  color: var(--t);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ins-impact {
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ins-impact.is-high {
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+  color: var(--destructive);
+}
+
+.ins-impact.is-medium {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  color: var(--warning);
+}
+
+.ins-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.ins-icon-btn,
+.ins-save-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  border-radius: 9999px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ins-icon-btn {
+  width: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+.ins-icon-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.ins-save-btn {
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.ins-save-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.ins-card .ins-card-title {
+  margin: 2px 0 0;
+  font-size: 17px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ins-card-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+  white-space: pre-line;
+}
+
+.ins-card-text.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ins-why {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.ins-why:hover {
+  text-decoration: underline;
+}
+
+.ins-reason {
+  margin: 0;
+  padding: 10px 14px;
+  border-left: 3px solid color-mix(in srgb, var(--primary) 50%, transparent);
+  border-radius: 0 12px 12px 0;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+
+.ins-card-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.ins-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.ins-meta--time {
+  margin-left: auto;
+}
+
+/* Opportunity uses the brand accent */
+.ins-type-opportunity { --t: var(--primary); }

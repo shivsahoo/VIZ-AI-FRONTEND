@@ -34,6 +34,7 @@ import {
 import { toast } from "sonner";
 import { DatabaseConnectionFlow } from "../components/features/databases/DatabaseConnectionFlow";
 import { DSGraphViewer } from "../components/features/databases/DSGraphViewer";
+import "../components/features/databases/KnowledgeGraph.css";
 import { OntologyViewer } from "../components/features/databases/OntologyViewer";
 import { KnowledgeGraphViewer, type KnowledgeGraphViewerHandle } from "../components/features/databases/KnowledgeGraphViewer";
 import { OnboardingTour, type TourOutcome } from "../components/shared/OnboardingTour";
@@ -881,8 +882,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
           }
         }}>
           <DialogContent
-            className="!w-[92vw] !max-w-[92vw] sm:!max-w-[92vw] h-[88vh] max-h-[88vh] p-4 flex flex-col overflow-hidden"
-            style={{ width: "92vw", maxWidth: "92vw", height: "88vh", maxHeight: "88vh" }}
+            className="!w-[94vw] !max-w-[94vw] sm:!max-w-[94vw] h-[90vh] max-h-[90vh] p-4 gap-3 flex flex-col overflow-hidden"
+            style={{ width: "94vw", maxWidth: "94vw", height: "90vh", maxHeight: "90vh" }}
             data-tour-container="ds-graph-dialog"
             hideCloseButton={showTour}
             onInteractOutside={(event) => {
@@ -905,22 +906,20 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
             <div className="flex items-start justify-between pr-8 shrink-0">
               <div className="flex flex-col gap-1">
                 {/* Tab switcher */}
-                <div className="flex items-center border-b border-border/40">
+                <div className="ds-segment self-start" role="tablist" aria-label="Graph type">
                   {(["datasource", "knowledge"] as const).map((tab) => (
                     <button
                       key={tab}
+                      role="tab"
+                      aria-selected={dsGraphTab === tab}
                       onClick={() => setDsGraphTab(tab)}
-                      className={`px-4 py-2.5 text-[13px] font-medium whitespace-nowrap transition-colors duration-150 border-b-2 -mb-px ${
-                        dsGraphTab === tab
-                          ? "border-primary text-primary"
-                          : "border-transparent text-muted-foreground hover:text-foreground"
-                      }`}
+                      className={dsGraphTab === tab ? "is-active" : ""}
                     >
                       {tab === "datasource" ? "Datasource Graph" : "Knowledge Graph"}
                     </button>
                   ))}
                 </div>
-                <p className="text-[13px] text-muted-foreground pl-4 pt-0.5">
+                <p className="text-[13px] text-muted-foreground pl-1 pt-1">
                   {dsGraphTab === "datasource"
                     ? selectedDatabase
                       ? `Visual schema graph for ${selectedDatabase.name}`
@@ -988,8 +987,8 @@ export function DatabasesView({ projectId }: DatabasesViewProps) {
           }}
         >
           <DialogContent
-            className="!w-[92vw] !max-w-[92vw] sm:!max-w-[92vw] h-[88vh] max-h-[88vh] p-4 flex flex-col overflow-hidden"
-            style={{ width: "92vw", maxWidth: "92vw", height: "88vh", maxHeight: "88vh" }}
+            className="!w-[94vw] !max-w-[94vw] sm:!max-w-[94vw] h-[90vh] max-h-[90vh] p-4 gap-3 flex flex-col overflow-hidden"
+            style={{ width: "94vw", maxWidth: "94vw", height: "90vh", maxHeight: "90vh" }}
             onInteractOutside={(e) => { if (isPbitUploading) e.preventDefault(); }}
             onPointerDownOutside={(e) => { if (isPbitUploading) e.preventDefault(); }}
             onEscapeKeyDown={(e) => { if (isPbitUploading) e.preventDefault(); }}

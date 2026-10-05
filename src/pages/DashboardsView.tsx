@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { Plus, LayoutDashboard, Search } from "lucide-react";
-import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { GradientButton } from "../components/shared/GradientButton";
 import { ViewModeToggle } from "../components/shared/ViewModeToggle";
@@ -66,26 +65,26 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard,
     dashboard.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const header = (
+    <header className="ws-header">
+      <div>
+        <h1 className="ws-title">Dashboards</h1>
+        <p className="ws-subtitle">Group your charts into views you can share and embed.</p>
+      </div>
+      <div className="ws-actions">
+        <GradientButton onClick={handleCreateDashboard} className="ws-primary-btn">
+          <Plus className="w-4 h-4" />
+          New dashboard
+        </GradientButton>
+      </div>
+    </header>
+  );
+
   if (isLoading) {
     return (
-      <div className="h-full bg-background">
-        <div className="max-w-[2000px] mx-auto px-6 py-5 space-y-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-foreground">Dashboards</h1>
-              <p className="text-muted-foreground mt-0.5">
-                Manage and organize your analytics dashboards
-              </p>
-            </div>
-            {/* Skeleton for buttons */}
-            <div className="flex items-center gap-3 opacity-50">
-              <div className="w-9 h-9 bg-muted/50 rounded-md animate-pulse" />
-              <div className="w-9 h-9 bg-muted/50 rounded-md animate-pulse" />
-              <div className="w-36 h-9 bg-muted/50 rounded-md animate-pulse" />
-            </div>
-          </div>
-
-          {/* Skeleton grid */}
+      <div className="min-h-full">
+        <div className="ws-page">
+          {header}
           <SkeletonGrid count={6} variant="dashboard" />
         </div>
       </div>
@@ -93,103 +92,67 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard,
   }
 
   return (
-    <div className="h-full bg-background">
-      <div className="max-w-[2000px] mx-auto px-6 py-5 space-y-5">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h1 className="text-foreground">Dashboards</h1>
-            <p className="text-muted-foreground mt-0.5">
-              Manage and organize your analytics dashboards
+    <div className="min-h-full">
+      <div className="ws-page">
+        {header}
+
+        {dashboards.length === 0 ? (
+          <div className="ws-empty">
+            <span className="ws-empty-icon">
+              <LayoutDashboard className="w-7 h-7" aria-hidden="true" />
+            </span>
+            <p className="ws-empty-title">No dashboards yet</p>
+            <p className="ws-empty-text">
+              Create a dashboard, then pin charts to it from the Charts page or the AI assistant.
             </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <GradientButton
-              onClick={handleCreateDashboard}
-              size="sm"
-              className="h-9"
-            >
-              <Plus className="w-4 h-4 mr-1.5" />
-              Create Dashboard
+            <GradientButton onClick={handleCreateDashboard} className="ws-primary-btn">
+              <Plus className="w-4 h-4" />
+              Create your first dashboard
             </GradientButton>
           </div>
-        </div>
-
-        {/* Dashboards Grid/List */}
-        {filteredDashboards.length === 0 ? (
-          <Card className="border-border p-12">
-            <div className="flex flex-col items-center text-center gap-4">
-              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-                <LayoutDashboard className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <div>
-                <h3 className="text-foreground mb-2">No dashboards found</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  {searchQuery ? "Try adjusting your search" : "Create your first dashboard to get started"}
-                </p>
-                {!searchQuery && (
-                  <GradientButton
-                    onClick={handleCreateDashboard}
-                    size="sm"
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Create Dashboard
-                  </GradientButton>
-                )}
-              </div>
-            </div>
-          </Card>
-        ) : viewMode === 'grid' ? (
-          <>
-            <div className="flex items-center justify-between">
-              <h2 className="text-foreground">All Dashboards</h2>
-              <div className="flex items-center gap-2">
-                <div className="relative max-w-xs flex-1 max-w-sm">
-                  <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                  <Input
-                    placeholder="Search dashboards..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-8 h-9 border-border text-sm"
-                  />
-                </div>
-                <ViewModeToggle value={viewMode} onChange={setViewMode} />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filteredDashboards.map((dashboard) => (
-                <DashboardCard
-                  key={dashboard.id}
-                  dashboard={dashboard}
-                  viewMode={viewMode}
-                  onDelete={(e) => {
-                    e.stopPropagation();
-                    setDashboardToDelete(dashboard);
-                  }}
-                  onClick={() => onViewDashboard?.(dashboard.name, dashboard.id)}
-                />
-              ))}
-            </div>
-          </>
         ) : (
-          <>
-            <div className="flex items-center justify-between">
-              <h2 className="text-foreground">All Dashboards</h2>
-              <div className="flex items-center gap-2">
-                <div className="relative max-w-xs flex-1 max-w-sm">
-                  <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <section className="ws-section">
+            <div className="ws-section-head">
+              <h2 className="ws-section-title">
+                All dashboards
+                <span className="ws-count">{filteredDashboards.length}</span>
+              </h2>
+              <div className="ws-toolbar">
+                <label className="ws-search">
+                  <Search aria-hidden="true" />
+                  <span className="sr-only">Search dashboards</span>
                   <Input
-                    placeholder="Search dashboards..."
+                    placeholder="Search dashboards"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-8 h-9 border-border text-sm"
                   />
-                </div>
+                </label>
                 <ViewModeToggle value={viewMode} onChange={setViewMode} />
               </div>
             </div>
-            <Card className="border-border overflow-hidden">
-              <div className="divide-y divide-border">
+
+            {filteredDashboards.length === 0 ? (
+              <div className="ws-empty">
+                <p className="ws-empty-title">No dashboards match "{searchQuery}"</p>
+                <p className="ws-empty-text">Try a different name or clear the search.</p>
+              </div>
+            ) : viewMode === 'grid' ? (
+              <div className="ws-grid">
+                {filteredDashboards.map((dashboard) => (
+                  <DashboardCard
+                    key={dashboard.id}
+                    dashboard={dashboard}
+                    viewMode="grid"
+                    onDelete={(e) => {
+                      e.stopPropagation();
+                      setDashboardToDelete(dashboard);
+                    }}
+                    onClick={() => onViewDashboard?.(dashboard.name, dashboard.id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="ws-dash-list">
                 {filteredDashboards.map((dashboard) => (
                   <DashboardCard
                     key={dashboard.id}
@@ -203,17 +166,17 @@ export function DashboardsView({ dashboards, onViewDashboard, onCreateDashboard,
                   />
                 ))}
               </div>
-            </Card>
-          </>
+            )}
+          </section>
         )}
 
         {/* Delete Confirmation Dialog */}
         <AlertDialog open={!!dashboardToDelete} onOpenChange={() => setDashboardToDelete(null)}>
           <AlertDialogContent className="border-border">
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete Dashboard</AlertDialogTitle>
+              <AlertDialogTitle>Delete "{dashboardToDelete?.name}"?</AlertDialogTitle>
               <AlertDialogDescription>
-                Are you sure you want to delete "{dashboardToDelete?.name}"? This will also remove all charts within this dashboard. This action cannot be undone.
+                This also removes the charts placed on it. This can't be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

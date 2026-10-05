@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, Fragment } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   BookOpen,
   Bot,
@@ -42,6 +42,8 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   Network,
+  Rows3,
+  LayoutGrid,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -63,6 +65,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { toast } from "sonner";
+import "./DataOntologyExplorer.css";
 import {
   getDatabases,
   getLatestOntology,
@@ -162,25 +165,25 @@ type BadgeTone = { backgroundColor: string; color: string; borderColor: string }
 function statusStyle(status?: string): BadgeTone {
   const s = (status || "").toUpperCase();
   if (s === "APPROVED") {
-    return { backgroundColor: "rgba(16,185,129,0.22)", color: "#6EE7B7", borderColor: "rgba(52,211,153,0.55)" };
+    return { backgroundColor: "rgba(16,185,129,0.22)", color: "var(--o-green)", borderColor: "rgba(52,211,153,0.55)" };
   }
   if (s === "PENDING" || s === "PENDING_REVIEW" || s === "NEEDS_REVIEW" || s === "COMPLETED") {
-    return { backgroundColor: "rgba(245,158,11,0.22)", color: "#FCD34D", borderColor: "rgba(251,191,36,0.55)" };
+    return { backgroundColor: "rgba(245,158,11,0.22)", color: "var(--o-amber)", borderColor: "rgba(251,191,36,0.55)" };
   }
   if (s === "REJECTED") {
-    return { backgroundColor: "rgba(239,68,68,0.22)", color: "#FCA5A5", borderColor: "rgba(248,113,113,0.55)" };
+    return { backgroundColor: "rgba(239,68,68,0.22)", color: "var(--o-red)", borderColor: "rgba(248,113,113,0.55)" };
   }
   if (s === "GENERATING") {
-    return { backgroundColor: "rgba(14,165,233,0.22)", color: "#7DD3FC", borderColor: "rgba(56,189,248,0.55)" };
+    return { backgroundColor: "rgba(14,165,233,0.22)", color: "var(--o-sky)", borderColor: "rgba(56,189,248,0.55)" };
   }
   if (s === "QUEUED") {
-    return { backgroundColor: "rgba(148,163,184,0.14)", color: "#CBD5E1", borderColor: "rgba(148,163,184,0.35)" };
+    return { backgroundColor: "rgba(148,163,184,0.14)", color: "var(--o-slate)", borderColor: "rgba(148,163,184,0.35)" };
   }
   if (s === "HUMAN_EDITED" || s === "HUMAN EDITED") {
-    return { backgroundColor: "rgba(59,130,246,0.22)", color: "#93C5FD", borderColor: "rgba(96,165,250,0.55)" };
+    return { backgroundColor: "rgba(59,130,246,0.22)", color: "var(--o-blue)", borderColor: "rgba(96,165,250,0.55)" };
   }
   // AI Generated / default
-  return { backgroundColor: "rgba(139,92,246,0.22)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.55)" };
+  return { backgroundColor: "rgba(139,92,246,0.22)", color: "var(--o-violet)", borderColor: "rgba(167,139,250,0.55)" };
 }
 
 function statusLabel(status?: string) {
@@ -226,30 +229,30 @@ function StatusBadge({ status, className = "" }: { status?: string; className?: 
 function semanticTypeStyle(type?: string): BadgeTone {
   const t = (type || "").toLowerCase();
   if (t === "identifier" || t === "pk" || t === "primary key") {
-    return { backgroundColor: "rgba(139,92,246,0.18)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.5)" };
+    return { backgroundColor: "rgba(139,92,246,0.18)", color: "var(--o-violet)", borderColor: "rgba(167,139,250,0.5)" };
   }
   if (t === "descriptive" || t === "attribute") {
-    return { backgroundColor: "rgba(59,130,246,0.18)", color: "#93C5FD", borderColor: "rgba(96,165,250,0.5)" };
+    return { backgroundColor: "rgba(59,130,246,0.18)", color: "var(--o-blue)", borderColor: "rgba(96,165,250,0.5)" };
   }
   if (t === "metric" || t === "measure") {
-    return { backgroundColor: "rgba(249,115,22,0.18)", color: "#FDBA74", borderColor: "rgba(251,146,60,0.5)" };
+    return { backgroundColor: "rgba(249,115,22,0.18)", color: "var(--o-orange)", borderColor: "rgba(251,146,60,0.5)" };
   }
   if (t === "dimension") {
-    return { backgroundColor: "rgba(16,185,129,0.18)", color: "#6EE7B7", borderColor: "rgba(52,211,153,0.5)" };
+    return { backgroundColor: "rgba(16,185,129,0.18)", color: "var(--o-green)", borderColor: "rgba(52,211,153,0.5)" };
   }
   if (t === "date" || t === "datetime" || t === "timestamp") {
-    return { backgroundColor: "rgba(6,182,212,0.18)", color: "#67E8F9", borderColor: "rgba(34,211,238,0.5)" };
+    return { backgroundColor: "rgba(6,182,212,0.18)", color: "var(--o-cyan)", borderColor: "rgba(34,211,238,0.5)" };
   }
   if (t === "reference" || t === "fk" || t === "foreign key") {
-    return { backgroundColor: "rgba(14,165,233,0.18)", color: "#7DD3FC", borderColor: "rgba(56,189,248,0.5)" };
+    return { backgroundColor: "rgba(14,165,233,0.18)", color: "var(--o-sky)", borderColor: "rgba(56,189,248,0.5)" };
   }
   if (t === "boolean" || t === "bool") {
-    return { backgroundColor: "rgba(236,72,153,0.18)", color: "#F9A8D4", borderColor: "rgba(244,114,182,0.5)" };
+    return { backgroundColor: "rgba(236,72,153,0.18)", color: "var(--o-pink)", borderColor: "rgba(244,114,182,0.5)" };
   }
   if (t === "enum") {
-    return { backgroundColor: "rgba(99,102,241,0.18)", color: "#A5B4FC", borderColor: "rgba(129,140,248,0.5)" };
+    return { backgroundColor: "rgba(99,102,241,0.18)", color: "var(--o-indigo)", borderColor: "rgba(129,140,248,0.5)" };
   }
-  return { backgroundColor: "rgba(148,163,184,0.12)", color: "#CBD5E1", borderColor: "rgba(148,163,184,0.35)" };
+  return { backgroundColor: "rgba(148,163,184,0.12)", color: "var(--o-slate)", borderColor: "rgba(148,163,184,0.35)" };
 }
 
 // Confidence values from the LLM service may arrive as a 0-1 fraction or a
@@ -268,31 +271,31 @@ function confidenceBarHex(val: number) {
 }
 
 function confidenceTextHex(val: number) {
-  if (val >= 95) return "#6EE7B7";
-  if (val >= 80) return "#FCD34D";
-  if (val >= 60) return "#FBBF24";
-  return "#FCA5A5";
+  if (val >= 95) return "var(--o-green)";
+  if (val >= 80) return "var(--o-amber)";
+  if (val >= 60) return "var(--o-amber)";
+  return "var(--o-red)";
 }
 
 function dataTypeBadge(type?: string): { label: string; style: BadgeTone } | null {
   const t = (type || "").toLowerCase();
   if (t.includes("int") || t.includes("serial") || t.includes("number")) {
-    return { label: type || "integer", style: { backgroundColor: "rgba(59,130,246,0.18)", color: "#93C5FD", borderColor: "rgba(96,165,250,0.5)" } };
+    return { label: type || "integer", style: { backgroundColor: "rgba(59,130,246,0.18)", color: "var(--o-blue)", borderColor: "rgba(96,165,250,0.5)" } };
   }
   if (t.includes("char") || t.includes("text") || t.includes("string") || t.includes("uuid")) {
-    return { label: type || "varchar", style: { backgroundColor: "rgba(139,92,246,0.18)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.5)" } };
+    return { label: type || "varchar", style: { backgroundColor: "rgba(139,92,246,0.18)", color: "var(--o-violet)", borderColor: "rgba(167,139,250,0.5)" } };
   }
   if (t.includes("date") || t.includes("time")) {
-    return { label: type || "date", style: { backgroundColor: "rgba(249,115,22,0.18)", color: "#FDBA74", borderColor: "rgba(251,146,60,0.5)" } };
+    return { label: type || "date", style: { backgroundColor: "rgba(249,115,22,0.18)", color: "var(--o-orange)", borderColor: "rgba(251,146,60,0.5)" } };
   }
   if (t.includes("bool")) {
-    return { label: type || "boolean", style: { backgroundColor: "rgba(16,185,129,0.18)", color: "#6EE7B7", borderColor: "rgba(52,211,153,0.5)" } };
+    return { label: type || "boolean", style: { backgroundColor: "rgba(16,185,129,0.18)", color: "var(--o-green)", borderColor: "rgba(52,211,153,0.5)" } };
   }
   if (t.includes("decimal") || t.includes("numeric") || t.includes("float") || t.includes("double") || t.includes("money")) {
-    return { label: type || "decimal", style: { backgroundColor: "rgba(6,182,212,0.18)", color: "#67E8F9", borderColor: "rgba(34,211,238,0.5)" } };
+    return { label: type || "decimal", style: { backgroundColor: "rgba(6,182,212,0.18)", color: "var(--o-cyan)", borderColor: "rgba(34,211,238,0.5)" } };
   }
   if (!type) return null;
-  return { label: type, style: { backgroundColor: "rgba(148,163,184,0.14)", color: "#CBD5E1", borderColor: "rgba(148,163,184,0.35)" } };
+  return { label: type, style: { backgroundColor: "rgba(148,163,184,0.14)", color: "var(--o-slate)", borderColor: "rgba(148,163,184,0.35)" } };
 }
 
 
@@ -395,8 +398,8 @@ function PanelSection({
     <section
       className="rounded-xl bg-card/70 p-4 shadow-sm transition-colors"
       style={{
-        border: "1px solid rgba(255,255,255,0.22)",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+        border: "1px solid color-mix(in srgb, var(--foreground) 22%, transparent)",
+        boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--foreground) 4%, transparent)",
       }}
     >
       <div className="flex items-center justify-between gap-2 mb-3">
@@ -504,6 +507,16 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [rightPanelTab, setRightPanelTab] = useState<"overview" | "columns" | "relationships" | "history">("overview");
   const [sortOrder, setSortOrder] = useState<"recently_updated" | "name_az" | "status">("recently_updated");
+  // Compact list by default: large catalogs (100s of tables) are unmanageable as cards.
+  const [tableView, setTableView] = useState<"list" | "cards">(() => {
+    try {
+      return localStorage.getItem("vizai_ontology_view") === "cards" ? "cards" : "list";
+    } catch {
+      return "list";
+    }
+  });
+  const ONTO_PAGE = 50;
+  const [visibleCount, setVisibleCount] = useState(ONTO_PAGE);
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [savingDescription, setSavingDescription] = useState(false);
@@ -599,6 +612,10 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
       ).sort();
 
   // ─── Filtered + sorted tables ──────────────────────────────────────────────
+  useEffect(() => {
+    setVisibleCount(ONTO_PAGE);
+  }, [statusFilter, categoryFilter, sidebarSearch, sortOrder]);
+
   const filteredTables = (() => {
     let list = ontologyTables.filter((table) => {
       const searchQ = sidebarSearch.trim().toLowerCase();
@@ -1167,18 +1184,18 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
       <input type="file" accept=".pbit" hidden ref={fileInputRef} onChange={handlePbitFileChange} />
 
       {/* ══════════════ HEADER BAR ══════════════ */}
-      <header className="shrink-0 flex items-center gap-5 px-6 py-3 border-b border-border bg-card/70 backdrop-blur">
+      <header className="onto-header shrink-0 flex items-center flex-wrap gap-x-5 gap-y-3 px-6 py-4 border-b border-border">
         {/* Title */}
         <div className="min-w-0 pl-1">
-          <h1 className="text-[13px] font-semibold text-foreground leading-snug tracking-tight">Catalog Explorer</h1>
-          <p className="text-[11px] text-muted-foreground leading-snug mt-0.5 truncate">
+          <h1 className="onto-title">Data Ontology</h1>
+          <p className="onto-sub truncate">
             AI-powered semantic catalog for{" "}
             <span className="text-foreground/70">{selectedDb?.name ?? "—"}</span>
           </p>
         </div>
 
         {/* View switch tabs */}
-        <div className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/20 p-0.5 shrink-0 ml-2">
+        <div className="onto-segment shrink-0" role="tablist" aria-label="Ontology view">
           {([
             { id: "catalog" as const, label: "Catalog Explorer", Icon: BookOpen },
             { id: "business_context" as const, label: "Business Context", Icon: Briefcase },
@@ -1187,12 +1204,10 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
             return (
               <button
                 key={t.id}
+                role="tab"
+                aria-selected={isActive}
                 onClick={() => setActiveView(t.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-colors ${
-                  isActive
-                    ? "bg-primary/15 text-primary shadow-sm"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
-                }`}
+                className={`onto-segment-btn${isActive ? " is-active" : ""}`}
               >
                 <t.Icon className="w-3.5 h-3.5" />
                 {t.label}
@@ -1205,9 +1220,9 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
 
         {/* Datasource selector */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-[11px] text-muted-foreground hidden xl:inline">Datasource</span>
+          <span className="text-[13px] text-muted-foreground hidden xl:inline">Datasource</span>
           <Select value={selectedDb?.id ?? ""} onValueChange={handleDatasourceChange}>
-            <SelectTrigger className="h-7 min-w-[190px] text-[11px] gap-1.5">
+            <SelectTrigger className="h-10 min-w-[200px] text-[13px] gap-1.5">
               <SelectValue placeholder="Select datasource" />
             </SelectTrigger>
             <SelectContent>
@@ -1223,7 +1238,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               ))}
             </SelectContent>
           </Select>
-          <Button variant="ghost" size="sm" onClick={openWelcome} className="h-7 gap-1 text-[11px] px-2" title="Change datasource">
+          <Button variant="ghost" size="icon" onClick={openWelcome} className="h-10 w-10" title="Change datasource" aria-label="Change datasource">
             <RefreshCw className="w-3 h-3" />
             <span className="hidden 2xl:inline">Change</span>
           </Button>
@@ -1239,11 +1254,8 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               isolation: "isolate",
               padding: 1,
               borderRadius: 9999,
-              background: "linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%)",
-              height: 36,
-              width: 172,
-              minWidth: 172,
-              maxWidth: 172,
+              background: "color-mix(in srgb, var(--foreground) 16%, transparent)",
+              height: 40,
               boxSizing: "border-box",
               flexShrink: 0,
             }}
@@ -1253,10 +1265,10 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               size="sm"
               onClick={handlePbitUploadClick}
               disabled={isPbitUploading || ontologyLoading || !hasCatalog}
-              className="gap-1.5 text-[11px] px-3 border-0 shadow-none justify-center"
+              className="gap-1.5 text-[13px] px-4 border-0 shadow-none justify-center"
               style={
                 isPbitUploading
-                  ? { background: "linear-gradient(135deg,rgba(129,140,248,.15),rgba(34,211,238,.1))", color: "#a5b4fc", pointerEvents: "none", height: "100%", width: "100%", borderRadius: 9999 }
+                  ? { background: "linear-gradient(135deg,rgba(129,140,248,.15),rgba(34,211,238,.1))", color: "var(--o-indigo)", pointerEvents: "none", height: "100%", width: "100%", borderRadius: 9999 }
                   : { background: "var(--background)", color: "inherit", height: "100%", width: "100%", borderRadius: 9999 }
               }
             >
@@ -1283,18 +1295,15 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
             }
             className="rounded-full shadow-none justify-center text-white"
             style={{
-              backgroundImage: "linear-gradient(90deg, #6366F1 0%, #0E9AB8 100%)",
-              height: 36,
-              width: 172,
-              minWidth: 172,
-              maxWidth: 172,
-              paddingLeft: 12,
-              paddingRight: 12,
+              backgroundColor: "var(--apple-blue-focus)",
+              height: 40,
+              paddingLeft: 18,
+              paddingRight: 18,
               boxSizing: "border-box",
               flexShrink: 0,
             }}
           >
-            <span className="flex items-center justify-center gap-1.5 text-[11px] w-full">
+            <span className="flex items-center justify-center gap-1.5 text-[13px] w-full">
               {syncJob?.status === "running" ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
@@ -1336,17 +1345,17 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
           swaps these three panes. */}
       {activeView === "catalog" && selectedDb && (
       <div
-        className="flex-1 min-h-0 min-w-0 overflow-hidden"
-        style={{ display: "grid", gridTemplateColumns: "212px minmax(0, 1fr) 400px", gridTemplateRows: "minmax(0, 1fr)" }}
+        className="onto-grid flex-1 min-h-0 min-w-0 overflow-hidden"
+        data-panel={selectedTable ? "open" : "closed"}
       >
 
         {/* ──────────── LEFT SIDEBAR ──────────── */}
-        <aside className="min-w-0 overflow-hidden flex flex-col border-r border-border bg-card/50">
+        <aside className="onto-filters min-w-0 overflow-hidden flex flex-col border-r border-border">
           <div className="flex-1 min-h-0 overflow-y-auto py-3">
 
             {/* Section label */}
             <div className="flex items-center gap-1.5 px-3 mb-2">
-              <p className="text-[9.5px] font-semibold text-primary uppercase tracking-[0.14em]">Filters</p>
+              <p className="onto-filter-label">Status</p>
             </div>
 
             {/* Status filter list */}
@@ -1358,15 +1367,15 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                   <button
                     key={f.id}
                     onClick={() => { setStatusFilter(f.id); setCategoryFilter("all"); }}
-                    className={`group w-full flex items-center gap-2.5 px-2.5 py-1 rounded-lg text-left transition-all duration-150 ${
+                    className={`group w-full flex items-center gap-2.5 px-3 py-2 rounded-full text-left transition-all duration-150 ${
                       isActive
-                        ? "bg-primary/15 text-foreground font-medium ring-1 ring-inset ring-primary/30"
+                        ? "bg-primary/12 text-primary font-medium"
                         : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
                     }`}
                   >
                     <f.Icon className={`w-3.5 h-3.5 shrink-0 transition-opacity ${f.color} ${isActive ? "opacity-100" : "opacity-50 group-hover:opacity-90"}`} />
-                    <span className="flex-1 text-[12.5px] truncate">{f.label}</span>
-                    <span className={`text-[10.5px] tabular-nums shrink-0 min-w-[22px] text-right ${isActive ? "text-primary font-semibold" : "text-muted-foreground/50"}`}>
+                    <span className="flex-1 text-[14px] truncate">{f.label}</span>
+                    <span className={`text-[12px] tabular-nums shrink-0 min-w-[22px] text-right ${isActive ? "text-primary font-semibold" : "text-muted-foreground"}`}>
                       {count}
                     </span>
                   </button>
@@ -1379,9 +1388,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               <div className="mt-4 px-2">
                 <div className="-mx-2 mb-4 border-t border-border/50" />
                 <div className="px-1 mb-2">
-                  <p className="text-[9.5px] font-semibold text-primary uppercase tracking-[0.08em] whitespace-nowrap">
-                    Filter by Category
-                  </p>
+                  <p className="onto-filter-label">Category</p>
                 </div>
                 <div className="px-1 space-y-px max-h-[30vh] overflow-y-auto">
                   {aiCategories.map((cat) => {
@@ -1391,15 +1398,15 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                       <button
                         key={cat}
                         onClick={() => { setCategoryFilter(cat); setStatusFilter("all"); }}
-                        className={`group w-full flex items-center gap-2.5 px-2.5 py-1 rounded-lg text-left transition-all duration-150 ${
+                        className={`group w-full flex items-center gap-2.5 px-3 py-2 rounded-full text-left transition-all duration-150 ${
                           isActive
-                            ? "bg-primary/15 text-foreground font-medium ring-1 ring-inset ring-primary/30"
+                            ? "bg-primary/12 text-primary font-medium"
                             : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
                         }`}
                       >
                         <Tag className={`w-3.5 h-3.5 shrink-0 transition-opacity ${isActive ? "text-primary opacity-100" : "text-violet-400/70 opacity-70 group-hover:opacity-100"}`} />
-                        <span className="flex-1 text-[12.5px] truncate">{cat}</span>
-                        <span className={`text-[10.5px] tabular-nums shrink-0 min-w-[22px] text-right ${isActive ? "text-primary font-semibold" : "text-muted-foreground/50"}`}>{cnt}</span>
+                        <span className="flex-1 text-[14px] truncate">{cat}</span>
+                        <span className={`text-[12px] tabular-nums shrink-0 min-w-[22px] text-right ${isActive ? "text-primary font-semibold" : "text-muted-foreground"}`}>{cnt}</span>
                       </button>
                     );
                   })}
@@ -1410,12 +1417,12 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
         </aside>
 
         {/* ──────────── CENTER PANEL (table list) ──────────── */}
-        <main className="min-w-0 overflow-hidden flex flex-col border-r border-border">
+        <main className="onto-center min-w-0 overflow-y-auto overflow-x-hidden flex flex-col border-r border-border">
 
           {/* ── Compact KPI status bar + attached summary ── */}
-          <div className="shrink-0 border-b border-border bg-card/10 min-w-0">
-            <div className="overflow-x-auto">
-              <div className="flex items-center px-4 py-3 w-max min-w-full">
+          <div className="onto-top shrink-0 border-b border-border min-w-0">
+            <div>
+              <div className="onto-kpis">
                 {[
                   {
                     label: "Tables",
@@ -1459,60 +1466,26 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                     Icon: TrendingUp,
                     color: "#06B6D4",
                   },
-                ].map((s, i, arr) => (
-                  <Fragment key={s.label}>
-                    <div className="group/tile flex items-center gap-3 shrink-0 rounded-lg px-1.5 py-1 transition-colors duration-[180ms] ease-out hover:bg-white/[0.035]">
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-[filter] duration-[180ms] ease-out group-hover/tile:brightness-125"
-                        style={{
-                          backgroundColor: `${s.color}1F`,
-                          border: `1px solid ${s.color}40`,
-                        }}
-                      >
-                        <s.Icon className="w-[18px] h-[18px]" strokeWidth={1.75} style={{ color: s.color }} />
-                      </div>
-
-                      <div className="flex items-center gap-2.5 shrink-0">
-                        <span className="text-[24px] font-bold leading-none tabular-nums tracking-tight text-foreground">
-                          {ontologyLoading
-                            ? <span className="inline-block w-7 h-5 rounded bg-muted/40 animate-pulse align-middle" />
-                            : s.value.toLocaleString()}
-                        </span>
-                        <div className="flex flex-col justify-center gap-0.5 shrink-0">
-                          <span className="text-[14px] font-semibold leading-none text-foreground whitespace-nowrap">
-                            {s.label}
-                          </span>
-                          <span
-                            className="text-[11px] font-medium whitespace-nowrap leading-[1.2]"
-                            style={{ color: "rgba(255,255,255,0.55)" }}
-                          >
-                            {s.sub}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {i < arr.length - 1 && (
-                      <div
-                        aria-hidden
-                        className="h-9 w-px shrink-0 self-center"
-                        style={{
-                          backgroundColor: "rgba(255,255,255,0.14)",
-                          marginLeft: 14,
-                          marginRight: 14,
-                        }}
-                      />
-                    )}
-                  </Fragment>
+                ].map((s) => (
+                  <div key={s.label} className="onto-kpi">
+                    <span className="onto-kpi-icon" style={{ color: s.color, backgroundColor: `${s.color}1F` }}>
+                      <s.Icon className="w-[18px] h-[18px]" strokeWidth={1.75} />
+                    </span>
+                    <span className="onto-kpi-value">
+                      {ontologyLoading
+                        ? <span className="inline-block w-8 h-6 rounded bg-muted/60 animate-pulse align-middle" />
+                        : s.value.toLocaleString()}
+                    </span>
+                    <span className="onto-kpi-label">{s.label}</span>
+                    <span className="onto-kpi-sub">{s.sub}</span>
+                  </div>
                 ))}
               </div>
             </div>
 
             {/* AI Catalog summary — centered, branded gradient + colored metrics */}
             {syncJob?.status !== "running" && hasCatalog ? (
-              <div className="flex items-center justify-start gap-3 min-h-11 px-4 py-2.5 border-t border-white/[0.05] text-[11px] font-normal overflow-x-auto whitespace-nowrap"
-                style={{ background: "linear-gradient(90deg, rgba(91,103,241,0.07) 0%, transparent 35%, transparent 65%, rgba(6,182,212,0.06) 100%)" }}
-              >
+              <div className="onto-summary">
                 <span className="flex items-center gap-1.5 shrink-0">
                   <span className="w-[22px] h-[22px] rounded-full flex items-center justify-center shrink-0 bg-gradient-to-r from-primary to-accent shadow-sm">
                     <Wand2 className="w-3 h-3 text-white" strokeWidth={1.75} />
@@ -1522,47 +1495,47 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                   </span>
                 </span>
 
-                <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.14)" }} />
+                <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "color-mix(in srgb, var(--foreground) 14%, transparent)" }} />
 
                 <span className="flex items-center gap-1.5 shrink-0 tabular-nums">
-                  <span className="font-normal" style={{ color: "#7DD3FC" }}>{stats.tables}</span>
-                  <span style={{ color: "rgba(255,255,255,0.42)" }}>Tables</span>
+                  <span className="font-normal" style={{ color: "var(--o-sky)" }}>{stats.tables}</span>
+                  <span style={{ color: "color-mix(in srgb, var(--foreground) 42%, transparent)" }}>Tables</span>
                 </span>
-                <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.14)" }} />
+                <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "color-mix(in srgb, var(--foreground) 14%, transparent)" }} />
                 <span className="flex items-center gap-1.5 shrink-0 tabular-nums">
-                  <span className="font-normal" style={{ color: "#A5B4FC" }}>{stats.columns}</span>
-                  <span style={{ color: "rgba(255,255,255,0.42)" }}>Columns</span>
+                  <span className="font-normal" style={{ color: "var(--o-indigo)" }}>{stats.columns}</span>
+                  <span style={{ color: "color-mix(in srgb, var(--foreground) 42%, transparent)" }}>Columns</span>
                 </span>
-                <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.14)" }} />
+                <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "color-mix(in srgb, var(--foreground) 14%, transparent)" }} />
                 <span className="flex items-center gap-1.5 shrink-0 tabular-nums">
-                  <span className="font-normal" style={{ color: "#F0ABFC" }}>{catalogTotalRelationships}</span>
-                  <span style={{ color: "rgba(255,255,255,0.42)" }}>Relationships</span>
+                  <span className="font-normal" style={{ color: "var(--o-fuchsia)" }}>{catalogTotalRelationships}</span>
+                  <span style={{ color: "color-mix(in srgb, var(--foreground) 42%, transparent)" }}>Relationships</span>
                 </span>
                 {catalogAvgConfidencePct !== null && (
                   <>
-                    <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.14)" }} />
+                    <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "color-mix(in srgb, var(--foreground) 14%, transparent)" }} />
                     <span className="flex items-center gap-1.5 shrink-0 tabular-nums">
                       <span
                         className="font-normal"
                         style={{
                           color:
                             catalogAvgConfidencePct >= 90
-                              ? "#6EE7B7"
+                              ? "var(--o-green)"
                               : catalogAvgConfidencePct >= 70
-                                ? "#FCD34D"
-                                : "#FCA5A5",
+                                ? "var(--o-amber)"
+                                : "var(--o-red)",
                         }}
                       >
                         {catalogAvgConfidencePct}%
                       </span>
-                      <span style={{ color: "rgba(255,255,255,0.42)" }}>Confidence</span>
+                      <span style={{ color: "color-mix(in srgb, var(--foreground) 42%, transparent)" }}>Confidence</span>
                     </span>
                   </>
                 )}
                 {catalogGeneratedAt && (
                   <>
-                    <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.14)" }} />
-                    <span className="flex items-center gap-1 shrink-0 font-normal" style={{ color: "#FBBF24" }}>
+                    <span aria-hidden className="h-3 w-px shrink-0" style={{ backgroundColor: "color-mix(in srgb, var(--foreground) 14%, transparent)" }} />
+                    <span className="flex items-center gap-1 shrink-0 font-normal" style={{ color: "var(--o-amber)" }}>
                       <Clock3 className="w-3 h-3" strokeWidth={1.75} style={{ color: "#F59E0B" }} />
                       {relativeTime(catalogGeneratedAt)}
                     </span>
@@ -1576,10 +1549,10 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                   onClick={handleGenerateCatalog}
                   disabled={syncJob?.status === "running" || ontologyLoading || !selectedDb || isPbitUploading}
                   title="Regenerate AI Catalog for this datasource"
-                  className="group/regen shrink-0 inline-flex items-center gap-1.5 rounded-full text-[10.5px] font-medium text-white transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none hover:brightness-110 hover:shadow-[0_0_12px_-2px_rgba(99,102,241,0.55)] active:scale-[0.98]"
+                  className="group/regen shrink-0 inline-flex items-center gap-1.5 rounded-full text-[12px] font-medium text-white transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none hover:brightness-110 hover:shadow-[0_0_12px_-2px_rgba(99,102,241,0.55)] active:scale-[0.98]"
                   style={{
-                    backgroundImage: "linear-gradient(90deg, #6366F1 0%, #0E9AB8 100%)",
-                    padding: 8,
+                    backgroundColor: "var(--apple-blue-focus)",
+                    padding: "8px 14px",
                   }}
                 >
                   <RefreshCw className="w-3 h-3 shrink-0 transition-transform duration-300 group-hover/regen:rotate-180" strokeWidth={2.25} />
@@ -1591,11 +1564,11 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
 
           {/* ── Center sub-toolbar: search + sort ── */}
           {!ontologyLoading && !ontologyError && syncJob?.status !== "running" && hasCatalog && (
-            <div className="shrink-0 flex items-center gap-3 px-3 py-2 border-b border-border bg-card/15">
+            <div className="onto-toolbar shrink-0 flex items-center flex-wrap gap-3 px-4 py-3 border-b border-border">
               <div className="relative flex-1 max-w-sm group">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/70 group-focus-within:text-primary transition-colors pointer-events-none" />
                 <input
-                  className="w-full h-8 pl-9 pr-8 text-[12px] rounded-lg border border-border bg-muted/30 text-foreground placeholder:text-muted-foreground/60 transition-colors focus:outline-none focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
+                  className="w-full h-10 pl-9 pr-8 text-[14px] rounded-full border border-border bg-card text-foreground placeholder:text-muted-foreground/60 transition-colors focus:outline-none focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
                   placeholder="Search tables..."
                   value={sidebarSearch}
                   onChange={(e) => setSidebarSearch(e.target.value)}
@@ -1615,7 +1588,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               <div className="flex items-center gap-2 ml-auto">
                 <span className="text-[11px] text-muted-foreground shrink-0">Sort by</span>
                 <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as any)}>
-                  <SelectTrigger className="h-8 min-w-[160px] text-[12px] gap-1.5">
+                  <SelectTrigger className="h-10 min-w-[170px] text-[13px] gap-1.5">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1624,12 +1597,29 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                     <SelectItem value="status">Status</SelectItem>
                   </SelectContent>
                 </Select>
+                <div className="onto-view-toggle" role="group" aria-label="Table layout">
+                  {(["list", "cards"] as const).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      aria-pressed={tableView === v}
+                      className={tableView === v ? "is-active" : ""}
+                      onClick={() => {
+                        setTableView(v);
+                        try { localStorage.setItem("vizai_ontology_view", v); } catch { /* ignore */ }
+                      }}
+                    >
+                      {v === "list" ? <Rows3 className="w-4 h-4" /> : <LayoutGrid className="w-4 h-4" />}
+                      {v === "list" ? "List" : "Cards"}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
           {/* ── Main content area ── */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-4">
+          <div className={`flex-1 px-3 py-3 ${tableView === "list" ? "onto-list" : "space-y-4"}`}>
 
             {ontologyLoading && Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)}
 
@@ -1689,7 +1679,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                   </p>
                 </div>
                 {schemaEstimate && (
-                  <div className="w-full rounded-xl border border-white/[0.10] bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4">
+                  <div className="w-full rounded-xl border border-foreground/[0.10] bg-gradient-to-b from-foreground/[0.04] to-transparent px-4 py-4">
                     <div className="flex items-center justify-center gap-1.5 mb-3">
                       <Clock3 className="w-3 h-3 text-muted-foreground/70" strokeWidth={2} />
                       <p className="text-[10px] font-medium text-muted-foreground/80 uppercase tracking-[0.08em]">
@@ -1697,13 +1687,13 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                       </p>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-lg border border-white/[0.07] bg-black/20 px-2.5 py-2.5 text-center">
+                      <div className="rounded-lg border border-foreground/[0.07] bg-muted/40 px-2.5 py-2.5 text-center">
                         <p className="text-[15px] font-semibold text-foreground tabular-nums leading-none">
                           {schemaEstimate.tables}
                         </p>
                         <p className="mt-1.5 text-[10px] text-muted-foreground/70 leading-none">Tables</p>
                       </div>
-                      <div className="rounded-lg border border-white/[0.07] bg-black/20 px-2.5 py-2.5 text-center">
+                      <div className="rounded-lg border border-foreground/[0.07] bg-muted/40 px-2.5 py-2.5 text-center">
                         <p className="text-[15px] font-semibold text-foreground tabular-nums leading-none">
                           {schemaEstimate.columns}
                         </p>
@@ -1723,7 +1713,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                   disabled={ontologyLoading || !selectedDb}
                   className="rounded-full shadow-none justify-center text-white"
                   style={{
-                    backgroundImage: "linear-gradient(90deg, #6366F1 0%, #0E9AB8 100%)",
+                    backgroundColor: "var(--apple-blue-focus)",
                     height: 36,
                     minWidth: 172,
                     paddingLeft: 16,
@@ -1746,7 +1736,19 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               </div>
             )}
 
-            {!ontologyLoading && !ontologyError && syncJob?.status !== "running" && hasCatalog && filteredTables.map((table) => {
+            {!ontologyLoading && !ontologyError && syncJob?.status !== "running" && hasCatalog && filteredTables.length > 0 && tableView === "list" && (
+              <div className="onto-list-head" aria-hidden="true">
+                <span>Table</span>
+                <span>Status</span>
+                <span>Confidence</span>
+                <span className="text-right">Columns</span>
+                <span className="text-right">Links</span>
+                <span>Updated</span>
+                <span />
+              </div>
+            )}
+
+            {!ontologyLoading && !ontologyError && syncJob?.status !== "running" && hasCatalog && filteredTables.slice(0, visibleCount).map((table) => {
               const isExpanded = expandedTables.has(table.physical_name);
               const isSelected = selectedTableName === table.physical_name;
               const isFav = favorites.has(table.physical_name);
@@ -1757,170 +1759,21 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
               const tags = (table.tags && table.tags.length > 0)
                 ? table.tags
                 : (table.category ? [table.category] : []);
-
-              return (
-                <div
-                  key={table.physical_name}
-                  className={`group/card rounded-2xl border cursor-pointer overflow-hidden transition-[border-color,box-shadow,background-color,transform] duration-200 ease-out ${
-                    isSelected
-                      ? "border-primary/50 bg-gradient-to-br from-primary/[0.08] via-card/80 to-card/80 shadow-[0_0_0_1px_rgba(129,140,248,0.15)]"
-                      : "border-white/[0.08] bg-gradient-to-br from-white/[0.035] via-card/75 to-card/60 hover:border-primary/40 hover:shadow-[0_10px_28px_-14px_rgba(0,0,0,0.65)] hover:-translate-y-0.5"
-                  }`}
-                  onClick={() => { setSelectedTableName(table.physical_name); setRightPanelTab("overview"); }}
-                >
-                  {/* ── Card header: top row = title/badges + meta; description uses full width under meta ── */}
-                  <div className="flex items-start gap-4 p-5">
-                    {/* Left icon — unified primary tint */}
-                    <div
-                      className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
-                      style={{
-                        backgroundColor: "rgba(129,140,248,0.12)",
-                        border: "1px solid rgba(129,140,248,0.25)",
-                      }}
-                    >
-                      <Table2 className="w-5 h-5 text-primary" strokeWidth={1.75} />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      {/* Top row: title/badges | Columns/Relationships + expand */}
-                      <div className="flex items-start gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <h3 className="text-[15px] font-semibold text-foreground tracking-tight truncate">
-                              {table.physical_name}
-                            </h3>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); toggleFavorite(table.physical_name); }}
-                              className="p-0.5 rounded text-muted-foreground/35 hover:text-yellow-400 transition-colors duration-150 shrink-0"
-                              title="Toggle favorite"
-                            >
-                              <Star className={`w-3.5 h-3.5 ${isFav ? "text-yellow-400 fill-yellow-400" : ""}`} />
-                            </button>
-                          </div>
-
-                          <div className="flex items-center flex-wrap gap-2 mt-2.5">
-                            <StatusBadge status={table.status} />
-                            {(table.is_ai_generated) && (
-                              <span
-                                className="inline-flex items-center gap-1 rounded-full font-medium leading-none border"
-                                style={{ backgroundColor: "rgba(139,92,246,0.22)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.55)", padding: "5px 12px", height: 26, fontSize: 13 }}
-                              >
-                                <Sparkles className="w-3 h-3" strokeWidth={2} style={{ color: "#C4B5FD" }} />
-                                AI Generated
-                              </span>
-                            )}
-                            {confPct !== null && (
-                              <span className="inline-flex items-center gap-1.5 font-medium tabular-nums" style={{ color: "#93C5FD", fontSize: 13 }}>
-                                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: confidenceBarHex(confPct) }} />
-                                {confPct}%
-                                <span className="font-normal" style={{ color: "rgba(147,197,253,0.75)" }}>Confidence</span>
-                              </span>
-                            )}
-                            {timeAgo && (
-                              <span className="font-normal" style={{ color: "rgba(255,255,255,0.42)", fontSize: 13 }}>
-                                Updated {timeAgo}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Right metadata + expand (stays top-right) */}
-                        <div className="shrink-0 flex items-center gap-2.5 self-start pt-0.5">
-                          <span
-                            className="inline-flex items-center gap-1.5 h-8 rounded-lg tabular-nums"
-                            style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", padding: "0 12px", fontSize: 13, color: "rgba(255,255,255,0.75)" }}
-                          >
-                            <Columns3 className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
-                            {colCount} Columns
-                          </span>
-                          <span className="text-white/15 select-none" style={{ fontSize: 13 }}>|</span>
-                          <span
-                            className="inline-flex items-center gap-1.5 h-8 rounded-lg tabular-nums"
-                            style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", padding: "0 12px", fontSize: 13, color: "rgba(255,255,255,0.75)" }}
-                          >
-                            <Network className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
-                            {relCount} Relationships
-                          </span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); toggleExpanded(table.physical_name); }}
-                            className={`w-9 h-9 rounded-lg flex items-center justify-center border transition-all duration-200 ease-out shrink-0 ${
-                              isExpanded
-                                ? "bg-primary/15 border-primary/35 text-primary"
-                                : "bg-white/[0.03] border-white/[0.08] text-muted-foreground/60 hover:text-primary hover:border-primary/30 hover:bg-primary/10"
-                            }`}
-                            title={isExpanded ? "Collapse columns" : "Expand columns"}
-                          >
-                            <ChevronDown
-                              className={`w-[18px] h-[18px] transition-transform duration-200 ease-out ${isExpanded ? "rotate-180" : "rotate-0"}`}
-                              strokeWidth={2}
-                            />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Description — full width under Columns/Relationships */}
-                      <p
-                        className="mt-3 leading-[1.7] line-clamp-2"
-                        style={{
-                          fontSize: 15,
-                          color: table.description ? "rgba(255,255,255,0.58)" : "rgba(255,255,255,0.28)",
-                          maskImage: table.description ? "linear-gradient(180deg, #000 60%, transparent)" : undefined,
-                          WebkitMaskImage: table.description ? "linear-gradient(180deg, #000 60%, transparent)" : undefined,
-                        }}
-                      >
-                        {table.description || "Not generated"}
-                      </p>
-
-                      {/* Tags */}
-                      {tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-3">
-                          {tags.map((tag, i) => {
-                            const tagPalettes = [
-                              { backgroundColor: "rgba(139,92,246,0.14)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.4)" },
-                              { backgroundColor: "rgba(59,130,246,0.14)", color: "#93C5FD", borderColor: "rgba(96,165,250,0.4)" },
-                              { backgroundColor: "rgba(16,185,129,0.14)", color: "#6EE7B7", borderColor: "rgba(52,211,153,0.4)" },
-                              { backgroundColor: "rgba(249,115,22,0.14)", color: "#FDBA74", borderColor: "rgba(251,146,60,0.4)" },
-                              { backgroundColor: "rgba(6,182,212,0.14)", color: "#67E8F9", borderColor: "rgba(34,211,238,0.4)" },
-                              { backgroundColor: "rgba(236,72,153,0.14)", color: "#F9A8D4", borderColor: "rgba(244,114,182,0.4)" },
-                            ];
-                            const tone = tagPalettes[i % tagPalettes.length];
-                            return (
-                              <span
-                                key={tag}
-                                className="rounded-full font-medium capitalize transition-opacity duration-150 hover:opacity-90"
-                                style={{
-                                  backgroundColor: tone.backgroundColor,
-                                  border: `1px solid ${tone.borderColor}`,
-                                  color: tone.color,
-                                  padding: "5px 16px",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  lineHeight: 1.4,
-                                  fontSize: 13,
-                                }}
-                              >
-                                #{tag}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
+              const expandedBlock = (
+                <>
                   {/* ── Expanded table — continuous card, no double border ── */}
                   {isExpanded && (
-                    <div className="border-t border-white/[0.06] animate-in fade-in duration-200">
+                    <div className="border-t border-foreground/[0.06] animate-in fade-in duration-200">
                       {(table.columns ?? []).length > 0 ? (
                         <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
                           <table className="w-full border-collapse" style={{ fontSize: 14 }}>
                             <thead className="sticky top-0 z-[1]">
-                              <tr className="bg-[#0e1018]/95 backdrop-blur-sm border-b border-white/[0.06]">
+                              <tr className="bg-card backdrop-blur-sm border-b border-foreground/[0.06]">
                                 {["Column Name", "AI Description", "Type", "Tag", "Confidence", "Status", "Actions"].map((h) => (
                                   <th
                                     key={h}
-                                    className="text-left font-semibold uppercase tracking-[0.1em] px-4 py-3 whitespace-nowrap"
-                                    style={{ color: "#FFFFFF", fontSize: 14 }}
+                                    className="text-left font-semibold px-4 py-3 whitespace-nowrap"
+                                    style={{ color: "var(--foreground)", fontSize: 12 }}
                                   >
                                     {h}
                                   </th>
@@ -1952,7 +1805,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                                 return (
                                   <tr
                                     key={col.physical_name}
-                                    className="group/row border-b border-white/[0.04] last:border-b-0 cursor-pointer transition-colors duration-150 hover:bg-white/[0.035]"
+                                    className="group/row border-b border-foreground/[0.04] last:border-b-0 cursor-pointer transition-colors duration-150 hover:bg-foreground/[0.035]"
                                   >
                                     <td className="px-4 py-3.5 align-middle whitespace-nowrap" style={{ fontSize: 14 }}>
                                       <div className="flex items-center gap-2">
@@ -1961,7 +1814,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                                             style={{
                                               ...keyBadgeBase,
                                               backgroundColor: "rgba(139,92,246,0.22)",
-                                              color: "#C4B5FD",
+                                              color: "var(--o-violet)",
                                               borderColor: "rgba(167,139,250,0.55)",
                                             }}
                                           >
@@ -1973,7 +1826,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                                             style={{
                                               ...keyBadgeBase,
                                               backgroundColor: "rgba(59,130,246,0.22)",
-                                              color: "#93C5FD",
+                                              color: "var(--o-blue)",
                                               borderColor: "rgba(96,165,250,0.55)",
                                             }}
                                           >
@@ -1984,26 +1837,26 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                                           <span
                                             style={{
                                               ...keyBadgeBase,
-                                              backgroundColor: "rgba(255,255,255,0.05)",
-                                              color: "rgba(255,255,255,0.45)",
-                                              borderColor: "rgba(255,255,255,0.1)",
+                                              backgroundColor: "color-mix(in srgb, var(--foreground) 5%, transparent)",
+                                              color: "color-mix(in srgb, var(--foreground) 45%, transparent)",
+                                              borderColor: "color-mix(in srgb, var(--foreground) 10%, transparent)",
                                             }}
                                           >
                                             COL
                                           </span>
                                         )}
-                                        <span className="font-mono tracking-tight" style={{ color: "rgba(255,255,255,0.92)", fontSize: 14, fontWeight: 400 }}>
+                                        <span className="font-mono tracking-tight" style={{ color: "color-mix(in srgb, var(--foreground) 92%, transparent)", fontSize: 14, fontWeight: 400 }}>
                                           {col.physical_name}
                                         </span>
                                       </div>
                                     </td>
                                     <td className="px-4 py-3.5 align-middle max-w-[300px]" style={{ fontSize: 14 }}>
                                       {col.business_definition ? (
-                                        <span className="line-clamp-2 leading-[1.6]" style={{ color: "rgba(255,255,255,0.62)", fontSize: 14 }}>
+                                        <span className="line-clamp-2 leading-[1.6]" style={{ color: "color-mix(in srgb, var(--foreground) 62%, transparent)", fontSize: 14 }}>
                                           {col.business_definition}
                                         </span>
                                       ) : (
-                                        <span className="inline-flex items-center gap-1.5 italic" style={{ color: "rgba(255,255,255,0.35)", fontSize: 14 }}>
+                                        <span className="inline-flex items-center gap-1.5 italic" style={{ color: "color-mix(in srgb, var(--foreground) 35%, transparent)", fontSize: 14 }}>
                                           <Sparkles className="w-3.5 h-3.5" strokeWidth={1.75} style={{ color: "rgba(196,181,253,0.55)" }} />
                                           This field hasn't been analyzed yet.
                                         </span>
@@ -2018,7 +1871,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                                           {typeBadge.label}
                                         </span>
                                       ) : (
-                                        <span style={{ color: "rgba(255,255,255,0.28)", fontSize: 14 }}>—</span>
+                                        <span style={{ color: "color-mix(in srgb, var(--foreground) 28%, transparent)", fontSize: 14 }}>—</span>
                                       )}
                                     </td>
                                     <td className="px-4 py-3.5 align-middle" style={{ fontSize: 14 }}>
@@ -2030,13 +1883,13 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                                           {col.semantic_type}
                                         </span>
                                       ) : (
-                                        <span style={{ color: "rgba(255,255,255,0.28)", fontSize: 14 }}>—</span>
+                                        <span style={{ color: "color-mix(in srgb, var(--foreground) 28%, transparent)", fontSize: 14 }}>—</span>
                                       )}
                                     </td>
                                     <td className="px-4 py-3.5 align-middle min-w-[130px]" style={{ fontSize: 14 }}>
                                       {conf !== null && barHex && confHex ? (
                                         <div className="flex items-center gap-2.5">
-                                          <div className="flex-1 h-2 rounded-full overflow-hidden min-w-[64px]" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
+                                          <div className="flex-1 h-2 rounded-full overflow-hidden min-w-[64px]" style={{ backgroundColor: "color-mix(in srgb, var(--foreground) 8%, transparent)" }}>
                                             <div
                                               className="h-full rounded-full transition-all duration-300"
                                               style={{
@@ -2051,7 +1904,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                                           </span>
                                         </div>
                                       ) : (
-                                        <span style={{ color: "rgba(255,255,255,0.28)", fontSize: 14 }}>—</span>
+                                        <span style={{ color: "color-mix(in srgb, var(--foreground) 28%, transparent)", fontSize: 14 }}>—</span>
                                       )}
                                     </td>
                                     <td className="px-4 py-3.5 align-middle whitespace-nowrap" style={{ fontSize: 14 }}>
@@ -2061,15 +1914,15 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                                       <div className="flex items-center gap-1">
                                         <button
                                           className="w-8 h-8 rounded-md flex items-center justify-center transition-colors duration-150"
-                                          style={{ color: "rgba(255,255,255,0.35)" }}
+                                          style={{ color: "color-mix(in srgb, var(--foreground) 35%, transparent)" }}
                                           title="Regenerate description"
                                           disabled={generatingColumn === `${table.physical_name}:${col.physical_name}`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleGenerateColumnDescription(table.physical_name, col.physical_name);
                                           }}
-                                          onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.9)"; e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)"; }}
-                                          onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.35)"; e.currentTarget.style.backgroundColor = "transparent"; }}
+                                          onMouseEnter={(e) => { e.currentTarget.style.color = "color-mix(in srgb, var(--foreground) 90%, transparent)"; e.currentTarget.style.backgroundColor = "color-mix(in srgb, var(--foreground) 6%, transparent)"; }}
+                                          onMouseLeave={(e) => { e.currentTarget.style.color = "color-mix(in srgb, var(--foreground) 35%, transparent)"; e.currentTarget.style.backgroundColor = "transparent"; }}
                                         >
                                           {generatingColumn === `${table.physical_name}:${col.physical_name}`
                                             ? <Loader2 className="w-4 h-4 animate-spin" />
@@ -2077,14 +1930,14 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                                         </button>
                                         <button
                                           className="w-8 h-8 rounded-md flex items-center justify-center transition-colors duration-150"
-                                          style={{ color: "rgba(255,255,255,0.35)" }}
+                                          style={{ color: "color-mix(in srgb, var(--foreground) 35%, transparent)" }}
                                           title="Approve column"
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleApproveColumn(table.physical_name, col);
                                           }}
-                                          onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.9)"; e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.06)"; }}
-                                          onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.35)"; e.currentTarget.style.backgroundColor = "transparent"; }}
+                                          onMouseEnter={(e) => { e.currentTarget.style.color = "color-mix(in srgb, var(--foreground) 90%, transparent)"; e.currentTarget.style.backgroundColor = "color-mix(in srgb, var(--foreground) 6%, transparent)"; }}
+                                          onMouseLeave={(e) => { e.currentTarget.style.color = "color-mix(in srgb, var(--foreground) 35%, transparent)"; e.currentTarget.style.backgroundColor = "transparent"; }}
                                         >
                                           <CheckCircle2 className="w-4 h-4" />
                                         </button>
@@ -2097,18 +1950,234 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                           </table>
                         </div>
                       ) : (
-                        <p className="px-5 py-6 text-center" style={{ color: "rgba(255,255,255,0.4)", fontSize: 14 }}>No column data available.</p>
+                        <p className="px-5 py-6 text-center" style={{ color: "color-mix(in srgb, var(--foreground) 40%, transparent)", fontSize: 14 }}>No column data available.</p>
                       )}
                     </div>
                   )}
+                </>
+              );
+              const openTable = () => { setSelectedTableName(table.physical_name); setRightPanelTab("overview"); };
+
+              if (tableView === "list") {
+                return (
+                  <div key={table.physical_name} className={`onto-row-wrap${isSelected ? " is-selected" : ""}${isExpanded ? " is-expanded" : ""}`}>
+                    <div
+                      className="onto-row"
+                      role="button"
+                      tabIndex={0}
+                      onClick={openTable}
+                      onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); openTable(); } }}
+                      title={table.description || undefined}
+                    >
+                      <div className="onto-row-name">
+                        <span className="onto-row-icon"><Table2 className="w-4 h-4" strokeWidth={1.75} /></span>
+                        <div className="min-w-0">
+                          <p className="onto-row-title">
+                            <span className="truncate">{table.physical_name}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); toggleFavorite(table.physical_name); }}
+                              className="onto-row-fav"
+                              aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
+                            >
+                              <Star className={`w-3.5 h-3.5 ${isFav ? "text-yellow-400 fill-yellow-400" : ""}`} />
+                            </button>
+                          </p>
+                          <p className="onto-row-sub">{resolveCategory(table) ?? "Uncategorised"}{table.description ? ` · ${table.description}` : ""}</p>
+                        </div>
+                      </div>
+                      <div><StatusBadge status={table.status} /></div>
+                      <div className="onto-row-conf">
+                        {confPct !== null ? (
+                          <>
+                            <span className="onto-conf-bar"><span style={{ width: `${confPct}%`, backgroundColor: confidenceBarHex(confPct) }} /></span>
+                            <span className="tabular-nums">{confPct}%</span>
+                          </>
+                        ) : <span className="text-muted-foreground">—</span>}
+                      </div>
+                      <div className="onto-row-num">{colCount}</div>
+                      <div className="onto-row-num">{relCount}</div>
+                      <div className="onto-row-date">{timeAgo || "—"}</div>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); toggleExpanded(table.physical_name); }}
+                        className={`onto-row-expand${isExpanded ? " is-open" : ""}`}
+                        aria-label={isExpanded ? "Hide columns" : "Show columns"}
+                        aria-expanded={isExpanded}
+                      >
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
+                    </div>
+                    {expandedBlock}
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={table.physical_name}
+                  className={`group/card rounded-2xl border cursor-pointer overflow-hidden transition-[border-color,box-shadow,background-color,transform] duration-200 ease-out ${
+                    isSelected
+                      ? "onto-card is-selected"
+                      : "onto-card"
+                  }`}
+                  onClick={() => { setSelectedTableName(table.physical_name); setRightPanelTab("overview"); }}
+                >
+                  {/* ── Card header: top row = title/badges + meta; description uses full width under meta ── */}
+                  <div className="flex items-start gap-4 p-5">
+                    {/* Left icon — unified primary tint */}
+                    <div
+                      className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                      style={{
+                        backgroundColor: "color-mix(in srgb, var(--primary) 12%, transparent)",
+                      }}
+                    >
+                      <Table2 className="w-5 h-5 text-primary" strokeWidth={1.75} />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      {/* Top row: title/badges | Columns/Relationships + expand (wraps when narrow) */}
+                      <div className="flex items-start flex-wrap gap-x-4 gap-y-3">
+                        <div className="flex-1 min-w-[220px]">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <h3 className="text-[15px] font-semibold text-foreground tracking-tight truncate">
+                              {table.physical_name}
+                            </h3>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleFavorite(table.physical_name); }}
+                              className="p-0.5 rounded text-muted-foreground/35 hover:text-yellow-400 transition-colors duration-150 shrink-0"
+                              title="Toggle favorite"
+                            >
+                              <Star className={`w-3.5 h-3.5 ${isFav ? "text-yellow-400 fill-yellow-400" : ""}`} />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center flex-wrap gap-2 mt-2.5">
+                            <StatusBadge status={table.status} />
+                            {(table.is_ai_generated) && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full font-medium leading-none border"
+                                style={{ backgroundColor: "rgba(139,92,246,0.22)", color: "var(--o-violet)", borderColor: "rgba(167,139,250,0.55)", padding: "5px 12px", height: 26, fontSize: 13 }}
+                              >
+                                <Sparkles className="w-3 h-3" strokeWidth={2} style={{ color: "var(--o-violet)" }} />
+                                AI Generated
+                              </span>
+                            )}
+                            {confPct !== null && (
+                              <span className="inline-flex items-center gap-1.5 font-medium tabular-nums" style={{ color: "var(--o-blue)", fontSize: 13 }}>
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: confidenceBarHex(confPct) }} />
+                                {confPct}%
+                                <span className="font-normal" style={{ color: "color-mix(in srgb, var(--o-blue) 80%, transparent)" }}>Confidence</span>
+                              </span>
+                            )}
+                            {timeAgo && (
+                              <span className="font-normal" style={{ color: "color-mix(in srgb, var(--foreground) 42%, transparent)", fontSize: 13 }}>
+                                Updated {timeAgo}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Right metadata + expand (stays top-right) */}
+                        <div className="shrink-0 flex items-center gap-2.5 self-start pt-0.5">
+                          <span
+                            className="inline-flex items-center gap-1.5 h-8 rounded-lg tabular-nums"
+                            style={{ backgroundColor: "color-mix(in srgb, var(--foreground) 3%, transparent)", border: "1px solid color-mix(in srgb, var(--foreground) 6%, transparent)", padding: "0 12px", fontSize: 13, color: "color-mix(in srgb, var(--foreground) 75%, transparent)" }}
+                          >
+                            <Columns3 className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
+                            {colCount} Columns
+                          </span>
+                          <span className="text-foreground/15 select-none" style={{ fontSize: 13 }}>|</span>
+                          <span
+                            className="inline-flex items-center gap-1.5 h-8 rounded-lg tabular-nums"
+                            style={{ backgroundColor: "color-mix(in srgb, var(--foreground) 3%, transparent)", border: "1px solid color-mix(in srgb, var(--foreground) 6%, transparent)", padding: "0 12px", fontSize: 13, color: "color-mix(in srgb, var(--foreground) 75%, transparent)" }}
+                          >
+                            <Network className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
+                            {relCount} Relationships
+                          </span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleExpanded(table.physical_name); }}
+                            className={`w-9 h-9 rounded-lg flex items-center justify-center border transition-all duration-200 ease-out shrink-0 ${
+                              isExpanded
+                                ? "bg-primary/15 border-primary/35 text-primary"
+                                : "bg-foreground/[0.03] border-foreground/[0.08] text-muted-foreground/60 hover:text-primary hover:border-primary/30 hover:bg-primary/10"
+                            }`}
+                            title={isExpanded ? "Collapse columns" : "Expand columns"}
+                          >
+                            <ChevronDown
+                              className={`w-[18px] h-[18px] transition-transform duration-200 ease-out ${isExpanded ? "rotate-180" : "rotate-0"}`}
+                              strokeWidth={2}
+                            />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Description — full width under Columns/Relationships */}
+                      <p
+                        className="mt-3 leading-[1.6] line-clamp-2"
+                        style={{
+                          fontSize: 14,
+                          color: table.description ? "color-mix(in srgb, var(--foreground) 58%, transparent)" : "color-mix(in srgb, var(--foreground) 28%, transparent)",
+                        }}
+                      >
+                        {table.description || "Not generated"}
+                      </p>
+
+                      {/* Tags */}
+                      {tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-3">
+                          {tags.map((tag, i) => {
+                            const tagPalettes = [
+                              { backgroundColor: "rgba(139,92,246,0.14)", color: "var(--o-violet)", borderColor: "rgba(167,139,250,0.4)" },
+                              { backgroundColor: "rgba(59,130,246,0.14)", color: "var(--o-blue)", borderColor: "rgba(96,165,250,0.4)" },
+                              { backgroundColor: "rgba(16,185,129,0.14)", color: "var(--o-green)", borderColor: "rgba(52,211,153,0.4)" },
+                              { backgroundColor: "rgba(249,115,22,0.14)", color: "var(--o-orange)", borderColor: "rgba(251,146,60,0.4)" },
+                              { backgroundColor: "rgba(6,182,212,0.14)", color: "var(--o-cyan)", borderColor: "rgba(34,211,238,0.4)" },
+                              { backgroundColor: "rgba(236,72,153,0.14)", color: "var(--o-pink)", borderColor: "rgba(244,114,182,0.4)" },
+                            ];
+                            const tone = tagPalettes[i % tagPalettes.length];
+                            return (
+                              <span
+                                key={tag}
+                                className="rounded-full font-medium capitalize transition-opacity duration-150 hover:opacity-90"
+                                style={{
+                                  backgroundColor: tone.backgroundColor,
+                                  border: `1px solid ${tone.borderColor}`,
+                                  color: tone.color,
+                                  padding: "3px 12px",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  lineHeight: 1.4,
+                                  fontSize: 13,
+                                }}
+                              >
+                                #{tag}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {expandedBlock}
                 </div>
               );
             })}
+
+            {!ontologyLoading && !ontologyError && syncJob?.status !== "running" && hasCatalog && filteredTables.length > visibleCount && (
+              <div className="onto-more">
+                <span>Showing {visibleCount} of {filteredTables.length} tables</span>
+                <button type="button" onClick={() => setVisibleCount((n) => n + ONTO_PAGE)}>
+                  Show {Math.min(ONTO_PAGE, filteredTables.length - visibleCount)} more
+                </button>
+              </div>
+            )}
           </div>
         </main>
 
         {/* ──────────── RIGHT DETAILS PANEL (always mounted, always 400px) ──────────── */}
-        <aside className="min-w-0 overflow-hidden flex flex-col bg-card/40 border-l border-border">
+        <aside className="onto-panel min-w-0 overflow-hidden flex flex-col border-l border-border">
           {selectedTable ? (
             <div key={selectedTable.physical_name} className="flex flex-col h-full min-h-0 animate-in fade-in duration-200">
 
@@ -2124,9 +2193,14 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                       <p className="text-[9px] text-muted-foreground uppercase tracking-[0.12em] mt-1">Entity · Table</p>
                     </div>
                   </div>
-                  <button onClick={() => toggleFavorite(selectedTable.physical_name)} className="p-1.5 rounded-md hover:bg-muted/40 transition-colors shrink-0" title="Toggle favorite">
-                    <Star className={`w-4 h-4 transition-colors ${favorites.has(selectedTable.physical_name) ? "text-yellow-400 fill-yellow-400" : "text-muted-foreground/30 hover:text-yellow-400"}`} />
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => toggleFavorite(selectedTable.physical_name)} className="p-2 rounded-full hover:bg-muted/40 transition-colors" title="Toggle favorite" aria-label="Toggle favorite">
+                      <Star className={`w-4 h-4 transition-colors ${favorites.has(selectedTable.physical_name) ? "text-yellow-400 fill-yellow-400" : "text-muted-foreground/50 hover:text-yellow-400"}`} />
+                    </button>
+                    <button onClick={() => setSelectedTableName(null)} className="p-2 rounded-full hover:bg-muted/40 transition-colors text-muted-foreground hover:text-foreground" title="Close details" aria-label="Close details">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
                 {/* Badges */}
                 <div className="flex items-center flex-wrap gap-1.5 mt-3">
@@ -2134,16 +2208,16 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                   {selectedTable.is_ai_generated && (
                     <span
                       className="inline-flex items-center gap-1 rounded-full font-medium leading-none border"
-                      style={{ backgroundColor: "rgba(139,92,246,0.22)", color: "#C4B5FD", borderColor: "rgba(167,139,250,0.55)", padding: "5px 12px", height: 26, fontSize: 13 }}
+                      style={{ backgroundColor: "rgba(139,92,246,0.22)", color: "var(--o-violet)", borderColor: "rgba(167,139,250,0.55)", padding: "5px 12px", height: 26, fontSize: 13 }}
                     >
-                      <Sparkles className="w-3 h-3" strokeWidth={2} style={{ color: "#C4B5FD" }} />
+                      <Sparkles className="w-3 h-3" strokeWidth={2} style={{ color: "var(--o-violet)" }} />
                       AI Generated
                     </span>
                   )}
                   {selectedTable.category && (
                     <span
                       className="inline-flex items-center rounded-full font-medium leading-none border"
-                      style={{ backgroundColor: "rgba(148,163,184,0.14)", color: "#CBD5E1", borderColor: "rgba(148,163,184,0.35)", padding: "5px 12px", height: 26, fontSize: 13 }}
+                      style={{ backgroundColor: "rgba(148,163,184,0.14)", color: "var(--o-slate)", borderColor: "rgba(148,163,184,0.35)", padding: "5px 12px", height: 26, fontSize: 13 }}
                     >
                       {selectedTable.category}
                     </span>
@@ -2201,7 +2275,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                               type="button"
                               onClick={cancelEditDescription}
                               disabled={savingDescription}
-                              className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-white/[0.06] transition-colors disabled:opacity-50"
+                              className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground/70 hover:text-foreground hover:bg-foreground/[0.06] transition-colors disabled:opacity-50"
                               title="Cancel"
                             >
                               <X className="w-3.5 h-3.5" />
@@ -2225,7 +2299,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                             <button
                               type="button"
                               onClick={startEditDescription}
-                              className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground/70 hover:text-white hover:bg-white/[0.06] transition-colors"
+                              className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground/70 hover:text-white hover:bg-foreground/[0.06] transition-colors"
                               title="Edit description"
                             >
                               <Pencil className="w-3.5 h-3.5" />
@@ -2272,7 +2346,7 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                           autoFocus
                           disabled={savingDescription}
                           className="w-full resize-y min-h-[88px] rounded-lg bg-black/30 px-3 py-2 text-[12px] text-foreground/85 leading-relaxed outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
-                          style={{ border: "1px solid rgba(255,255,255,0.18)" }}
+                          style={{ border: "1px solid color-mix(in srgb, var(--foreground) 18%, transparent)" }}
                           placeholder="Enter a business description for this table…"
                         />
                       ) : selectedTable.description ? (
@@ -2440,8 +2514,8 @@ export function DataOntologyExplorerView({ projectId }: DataOntologyExplorerView
                               key={col.physical_name}
                               className="flex items-start justify-between gap-3 p-3 rounded-xl bg-card/70 transition-colors hover:bg-card/90"
                               style={{
-                                border: "1px solid rgba(255,255,255,0.22)",
-                                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+                                border: "1px solid color-mix(in srgb, var(--foreground) 22%, transparent)",
+                                boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--foreground) 4%, transparent)",
                               }}
                             >
                               <div className="min-w-0 flex-1">

@@ -15,7 +15,8 @@ import {
   Database,
   Download,
   Copy,
-  Check
+  Check,
+  Pin,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -39,6 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
+import "./InsightsView.css";
 import {
   Dialog,
   DialogContent,
@@ -919,6 +921,8 @@ export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProp
   const requiresAttention = insightStats.negative;
   const anomalies = insightStats.anomalies;
 
+  const [openInsightIds, setOpenInsightIds] = useState<Set<string | number>>(new Set());
+
   const typeStyles = {
     positive: {
       color: "text-success",
@@ -949,15 +953,15 @@ export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProp
   };
 
   return (
-    <div className="px-12 py-10">
-      <div className="max-w-[1600px] mx-auto">
+    <div className="min-h-full">
+      <div className="ws-page">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <header className="ws-header">
           <div>
-            <h2 className="text-2xl text-foreground mb-1">AI Insights</h2>
-            <p className="text-muted-foreground">Automatic discoveries and anomalies detected in your data</p>
+            <h1 className="ws-title">AI Insights</h1>
+            <p className="ws-subtitle">Trends, risks and anomalies VizAI found in your data.</p>
           </div>
-          <div className="flex gap-3">
+          <div className="ws-actions">
             {/* <Button 
               variant="outline"
               onClick={() => setShowGenerateDialog(true)}
@@ -968,14 +972,15 @@ export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProp
             </Button> */}
             <Button 
               variant="outline"
+              className="ws-primary-btn"
               onClick={handleExportCSV}
               disabled={filteredInsights.length === 0 || isGenerating}
             >
-              <Download className="w-4 h-4 mr-2" />
-              Export Insights
+              <Download className="w-4 h-4" />
+              Export CSV
             </Button>
             <Button 
-              className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-all"
+              className="ws-primary-btn bg-gradient-to-r from-primary to-accent text-white"
               onClick={() => setShowGenerateDialog(true)}
               disabled={!projectId || isGenerating}
             >
@@ -992,85 +997,33 @@ export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProp
               )}
             </Button>
           </div>
-        </div>
+        </header>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card 
-            className="p-6 border border-border cursor-pointer hover:shadow-lg transition-all hover:border-accent"
-            onClick={() => setActiveFilter("all")}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center">
-                <Lightbulb className="w-6 h-6 text-accent" />
-              </div>
-              <div>
-                <p className="text-2xl text-foreground mb-1">{totalInsights}</p>
-                <p className="text-sm text-muted-foreground">Total Insights</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card 
-            className="p-6 border border-border cursor-pointer hover:shadow-lg transition-all hover:border-success"
-            onClick={() => {
-              if (insightStats.positive > 0) {
-                setActiveFilter("positive");
-              }
-            }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-success/10 flex items-center justify-center">
-                <TrendingUp className="w-6 h-6 text-success" />
-              </div>
-              <div>
-                <p className="text-2xl text-foreground mb-1">{positiveTrends}</p>
-                <p className="text-sm text-muted-foreground">Positive Trends</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card 
-            className="p-6 border border-border cursor-pointer hover:shadow-lg transition-all hover:border-destructive"
-            onClick={() => {
-              if (insightStats.negative > 0) {
-                setActiveFilter("negative");
-              }
-            }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-destructive/10 flex items-center justify-center">
-                <TrendingDown className="w-6 h-6 text-destructive" />
-              </div>
-              <div>
-                <p className="text-2xl text-foreground mb-1">{requiresAttention}</p>
-                <p className="text-sm text-muted-foreground">Requires Attention</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card 
-            className="p-6 border border-border cursor-pointer hover:shadow-lg transition-all hover:border-chart-2"
-            onClick={() => {
-              if (insightStats.anomalies > 0) {
-                setActiveFilter("anomalies");
-              }
-            }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-chart-2/10 flex items-center justify-center">
-                <AlertCircle className="w-6 h-6 text-chart-2" />
-              </div>
-              <div>
-                <p className="text-2xl text-foreground mb-1">{anomalies}</p>
-                <p className="text-sm text-muted-foreground">Anomalies Detected</p>
-              </div>
-            </div>
-          </Card>
+        {/* Stats tiles (click to filter) */}
+        <div className="ins-stats">
+          {[
+            { id: "all", label: "Total insights", value: totalInsights, Icon: Lightbulb, tone: "ink", enabled: true },
+            { id: "positive", label: "Positive trends", value: positiveTrends, Icon: TrendingUp, tone: "green", enabled: insightStats.positive > 0 },
+            { id: "negative", label: "Needs attention", value: requiresAttention, Icon: TrendingDown, tone: "red", enabled: insightStats.negative > 0 },
+            { id: "anomalies", label: "Anomalies", value: anomalies, Icon: AlertCircle, tone: "orange", enabled: insightStats.anomalies > 0 },
+          ].map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`ins-stat ins-tone-${t.tone}${activeFilter === t.id ? " is-active" : ""}`}
+              onClick={() => t.enabled && setActiveFilter(t.id)}
+              disabled={!t.enabled}
+              aria-pressed={activeFilter === t.id}
+            >
+              <span className="ins-stat-icon"><t.Icon className="w-[18px] h-[18px]" aria-hidden="true" /></span>
+              <span className="ins-stat-value">{t.value}</span>
+              <span className="ins-stat-label">{t.label}</span>
+            </button>
+          ))}
         </div>
 
         {/* Filter Tabs */}
-        <Tabs value={activeFilter} onValueChange={setActiveFilter} className="mb-6">
+        <Tabs value={activeFilter} onValueChange={setActiveFilter}>
           <TabsList>
             {filterOptions.map((option) => (
               <TabsTrigger key={option.value} value={option.value}>
@@ -1084,19 +1037,19 @@ export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProp
 
         {/* Insights Grid */}
         {filteredInsights.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
-              <Lightbulb className="w-8 h-8 text-muted-foreground" />
-            </div>
-            <h3 className="text-lg text-foreground mb-2">No insights yet</h3>
-            <p className="text-sm text-muted-foreground mb-6">
+          <div className="ws-empty">
+            <span className="ws-empty-icon">
+              <Lightbulb className="w-7 h-7" aria-hidden="true" />
+            </span>
+            <p className="ws-empty-title">No insights yet</p>
+            <p className="ws-empty-text">
               {projectId 
                 ? "Generate insights to discover patterns in your data" 
                 : "Select a project to generate insights"}
             </p>
             {projectId && (
               <Button 
-                className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
+                className="ws-primary-btn bg-gradient-to-r from-primary to-accent text-white"
                 onClick={() => setShowGenerateDialog(true)}
                 disabled={isGenerating}
               >
@@ -1115,9 +1068,8 @@ export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProp
             )}
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="ins-grid">
             {filteredInsights.map((insight) => {
-              const style = typeStyles[insight.type as keyof typeof typeStyles] ?? typeStyles.default;
               const Icon =
                 categoryIcons[insight.category] ??
                 (insight.type === "positive"
@@ -1134,92 +1086,96 @@ export function InsightsView({ projectId, onGeneratingChange }: InsightsViewProp
                 reasoningIndex = insight.description.indexOf(reasoningLabel);
               }
               const hasReasoning = reasoningIndex !== -1;
-              const mainDescription = hasReasoning
+              const mainDescription = (hasReasoning
                 ? insight.description.slice(0, reasoningIndex).trimEnd()
-                : insight.description;
+                : insight.description
+              )
+                // The impact pill already says this
+                .replace(/\s*-?\s*Potential Impact:\s*\w+\.?\s*$/i, "")
+                .trim();
               const reasoningText = hasReasoning
                 ? insight.description.slice(reasoningIndex + reasoningLabel.length).trim()
                 : "";
+              const isOpen = openInsightIds.has(insight.id);
+              const typeLabel =
+                insight.type === "positive" ? "Positive" : insight.type === "negative" ? "Risk" : insight.type === "opportunity" ? "Opportunity" : (insight.category || "Insight");
+              const impact = String(insight.impact || "").toLowerCase();
 
               return (
-                <Card 
-                  key={insight.id}
-                  className="p-6 border border-border hover:shadow-lg transition-all cursor-pointer"
-                >
-                  <div className="flex gap-4">
-                    <div className={`w-12 h-12 rounded-xl ${style.bg} flex items-center justify-center flex-shrink-0`}>
-                      <Icon className={`w-6 h-6 ${style.color}`} />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-4 mb-3">
-                        <div className="flex-1">
-                          <h3 className="text-lg text-foreground mb-2">{insight.title}</h3>
-                          <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
-                            {mainDescription}
-                          </p>
-                          {hasReasoning && (
-                            <p className="text-sm text-muted-foreground leading-relaxed mt-2">
-                              <span className="font-semibold">Reasoning:</span> {reasoningText}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex gap-2 shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopyToClipboard(insight);
-                            }}
-                            title="Copy to clipboard"
-                            disabled={isGenerating}
-                          >
-                            {copiedInsightId === insight.id ? (
-                              <Check className="w-4 h-4 text-success" />
-                            ) : (
-                              <Copy className="w-4 h-4" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="whitespace-nowrap"
-                            onClick={() => handleAddToHome(insight)}
-                            disabled={isGenerating}
-                          >
-                            + Add to Homepage
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 text-sm">
-                        <Badge variant="outline" className="border-border">
-                          {insight.category}
-                        </Badge>
-                        {insight.source && (
-                          <Badge variant="outline" className="border-border">
-                            <Database className="w-3 h-3 mr-1" />
-                            {insight.source}
-                          </Badge>
-                        )}
-                        <Badge 
-                          className={
-                            insight.impact === 'High' 
-                              ? 'bg-destructive/10 text-destructive border-destructive/20'
-                              : insight.impact === 'Medium'
-                              ? 'bg-chart-2/10 text-chart-2 border-chart-2/20'
-                              : 'bg-muted text-muted-foreground border-border'
-                          }
-                        >
-                          {insight.impact} Impact
-                        </Badge>
-                        <span className="text-muted-foreground">{insight.timestamp}</span>
-                      </div>
+                <article key={insight.id} className={`ins-card ins-type-${insight.type ?? "default"}`}>
+                  <div className="ins-card-top">
+                    <span className="ins-chip">
+                      <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                      {typeLabel}
+                    </span>
+                    {insight.impact && (
+                      <span className={`ins-impact is-${impact}`}>{insight.impact} impact</span>
+                    )}
+                    <div className="ins-card-actions">
+                      <button
+                        type="button"
+                        className="ins-icon-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCopyToClipboard(insight);
+                        }}
+                        aria-label="Copy insight"
+                        title="Copy"
+                        disabled={isGenerating}
+                      >
+                        {copiedInsightId === insight.id ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                      <button
+                        type="button"
+                        className="ins-save-btn"
+                        onClick={() => handleAddToHome(insight)}
+                        disabled={isGenerating}
+                        title="Save to Overview"
+                      >
+                        <Pin className="w-3.5 h-3.5" aria-hidden="true" />
+                        Save
+                      </button>
                     </div>
                   </div>
-                </Card>
+
+                  <h3 className="ins-card-title">{insight.title}</h3>
+                  <p className={`ins-card-text${isOpen ? "" : " is-clamped"}`}>{mainDescription}</p>
+
+                  {hasReasoning && (
+                    <>
+                      <button
+                        type="button"
+                        className="ins-why"
+                        aria-expanded={isOpen}
+                        onClick={() =>
+                          setOpenInsightIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(insight.id)) next.delete(insight.id);
+                            else next.add(insight.id);
+                            return next;
+                          })
+                        }
+                      >
+                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                        {isOpen ? "Hide reasoning" : "Why VizAI thinks this"}
+                      </button>
+                      {isOpen && <blockquote className="ins-reason">{reasoningText}</blockquote>}
+                    </>
+                  )}
+
+                  <div className="ins-card-foot">
+                    {insight.source && (
+                      <span className="ins-meta">
+                        <Database className="w-3.5 h-3.5" aria-hidden="true" />
+                        {insight.source}
+                      </span>
+                    )}
+                    {insight.category && insight.category !== typeLabel && (
+                      <span className="ins-meta">{insight.category}</span>
+                    )}
+                    <span className="ins-meta ins-meta--time">{insight.timestamp}</span>
+                  </div>
+                </article>
               );
             })}
           </div>

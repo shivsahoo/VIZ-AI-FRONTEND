@@ -1,14 +1,28 @@
-import { useState, useEffect, type MouseEvent } from "react";
-import { Plus, Database, LayoutDashboard, TrendingUp, Clock, Users as UsersIcon, ArrowRight, Trash2, Loader2, Search, Globe, Building2 } from "lucide-react";
-import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
-import { Input } from "../components/ui/input";
-import { GradientButton } from "../components/shared/GradientButton";
+import { useState, useEffect, useMemo } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  CalendarDays,
+  Database,
+  Globe,
+  LayoutDashboard,
+  Loader2,
+  Plus,
+  Check,
+  ChevronDown,
+  Search,
+  Trash2,
+  Users as UsersIcon,
+  X,
+} from "lucide-react";
 import { OnboardingFlow } from "./OnboardingFlow";
-import { LoadingSpinner } from "../components/shared/LoadingSpinner";
 import { toast } from "sonner";
-import { getProjects, createProject, getCurrentUser, deleteProject, listApps, deleteApp, type Project as ApiProject, type AppDetail } from "../services/api";
+import { getProjects, createProject, deleteProject, listApps, deleteApp, type Project as ApiProject, type AppDetail } from "../services/api";
 import { CreateAppModal } from "../components/features/apps/CreateAppModal";
+import { AskDemo } from "../components/shared/AskDemo";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import { initialsFor, toneFor } from "../components/shared/tone";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,6 +33,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
+import "./ProjectsView.css";
+
+const EASE = [0.28, 0.11, 0.32, 1] as const;
 
 // Helper function to format time ago
 const formatTimeAgo = (dateString: string): string => {
@@ -29,59 +46,64 @@ const formatTimeAgo = (dateString: string): string => {
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
 
-  if (diffMins < 60) return `${diffMins} minutes ago`;
-  if (diffHours < 24) return `${diffHours} hours ago`;
-  if (diffDays < 7) return `${diffDays} days ago`;
-  return date.toLocaleDateString();
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins} min ago`;
+  if (diffHours < 24) return `${diffHours} h ago`;
+  if (diffDays < 7) return `${diffDays} d ago`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 };
 
-// Helper function to get gradient colors based on index
-const getProjectGradient = (index: number): { gradient: string; iconBg: string } => {
-  const gradients = [
-    { gradient: "from-blue-500/10 to-cyan-500/10", iconBg: "from-blue-500 to-cyan-500" },
-    { gradient: "from-purple-500/10 to-pink-500/10", iconBg: "from-purple-500 to-pink-500" },
-    { gradient: "from-emerald-500/10 to-teal-500/10", iconBg: "from-emerald-500 to-teal-500" },
-    { gradient: "from-orange-500/10 to-red-500/10", iconBg: "from-orange-500 to-red-500" },
-    { gradient: "from-indigo-500/10 to-purple-500/10", iconBg: "from-indigo-500 to-purple-500" },
-    { gradient: "from-rose-500/10 to-pink-500/10", iconBg: "from-rose-500 to-pink-500" },
-  ];
-  return gradients[index % gradients.length];
+const greetingFor = (date: Date) => {
+  const h = date.getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
 };
 
 // UI Project type (extends API Project with display fields)
 interface UIProject extends ApiProject {
-  dashboards?: number;
-  databases?: number;
-  team?: number;
-  lastActive?: string;
-  gradient: string;
-  iconBg: string;
+  dashboards: number;
+  databases: number;
+  team: number;
+  lastActive: string;
 }
+
+// Setup steps a product goes through: created → database connected → first dashboard.
+const setupProgress = (p: UIProject) => {
+  const done = 1 + (p.databases > 0 ? 1 : 0) + (p.dashboards > 0 ? 1 : 0);
+  const next = p.databases === 0 ? "Connect a database" : p.dashboards === 0 ? "Create a dashboard" : null;
+  return { pct: Math.round((done / 3) * 100), done, next };
+};
 
 interface ProjectsViewProps {
   onProjectSelect: (projectName: string, projectId?: string, isNewProject?: boolean) => void;
+  onAskInProduct?: (projectName: string, projectId: string, question: string) => void;
+  userName?: string;
 }
 
-export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
+const ASK_SUGGESTIONS = ["Top 10 by revenue", "Monthly trend this year", "Compare regions"];
+
+export function ProjectsView({ onProjectSelect, onAskInProduct, userName }: ProjectsViewProps) {
+  const [askProjectId, setAskProjectId] = useState<string | null>(null);
+  const [askText, setAskText] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
   const [showNewProjectFlow, setShowNewProjectFlow] = useState(false);
   const [projects, setProjects] = useState<UIProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<UIProject | null>(null);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
-  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState("");
 
   // App registration state
   const [apps, setApps] = useState<AppDetail[]>([]);
   const [showCreateAppModal, setShowCreateAppModal] = useState(false);
-  const [isDeletingApp, setIsDeletingApp] = useState<string | null>(null);
+  const [appToDelete, setAppToDelete] = useState<AppDetail | null>(null);
+  const [isDeletingApp, setIsDeletingApp] = useState(false);
 
-  // Fetch projects and user ID on mount
   useEffect(() => {
     fetchProjects();
-    fetchUserId();
     fetchApps();
   }, []);
 
@@ -90,38 +112,28 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
       const response = await listApps();
       if (response.success && response.data) {
         setApps(response.data);
-        console.log(`[APP][STEP 3] App list refreshed — ${response.data.length} apps visible`);
       }
     } catch (error) {
       console.error("Failed to fetch apps:", error);
     }
   };
 
-  const handleDeleteApp = async (appId: string) => {
-    setIsDeletingApp(appId);
+  const handleConfirmDeleteApp = async () => {
+    if (!appToDelete) return;
+    setIsDeletingApp(true);
     try {
-      const response = await deleteApp(appId);
+      const response = await deleteApp(appToDelete.app_id);
       if (response.success) {
-        setApps((prev) => prev.filter((a) => a.app_id !== appId));
-        toast.success("App deleted");
+        setApps((prev) => prev.filter((a) => a.app_id !== appToDelete.app_id));
+        toast.success(`"${appToDelete.company_name}" removed`);
       } else {
         toast.error(response.error?.message || "Failed to delete app");
       }
     } catch (error: any) {
       toast.error(error.message || "Failed to delete app");
     } finally {
-      setIsDeletingApp(null);
-    }
-  };
-
-  const fetchUserId = async () => {
-    try {
-      const response = await getCurrentUser();
-      if (response.success && response.data) {
-        setCurrentUserId(response.data.id);
-      }
-    } catch (error) {
-      console.error("Failed to get user ID:", error);
+      setIsDeletingApp(false);
+      setAppToDelete(null);
     }
   };
 
@@ -131,31 +143,21 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     try {
       const response = await getProjects();
       if (response.success && response.data) {
-        // Map API projects to UI format
-        const uiProjects: UIProject[] = response.data.map((project, index) => {
-          const colors = getProjectGradient(index);
-          return {
+        setProjects(
+          response.data.map((project) => ({
             ...project,
             dashboards: project.dashboardCount || 0,
             databases: project.databaseCount || 0,
             team: project.memberCount || 0,
             lastActive: formatTimeAgo(project.createdAt),
-            gradient: colors.gradient,
-            iconBg: colors.iconBg,
-          };
-        });
-        setProjects(uiProjects);
-        setError(null); // Clear any previous errors
+          }))
+        );
       } else {
-        const errorMsg = response.error?.message || "Unable to load projects. Please try again.";
-        setError(errorMsg);
-        toast.error(errorMsg);
+        setError(response.error?.message || "Unable to load products. Please try again.");
       }
     } catch (err: any) {
       // Error message is already sanitized by apiRequest
-      const errorMessage = err.message || "Unable to load projects. Please check your connection and try again.";
-      setError(errorMessage);
-      toast.error(errorMessage);
+      setError(err.message || "Unable to load products. Check your connection and try again.");
     } finally {
       setIsLoading(false);
     }
@@ -170,20 +172,15 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
     try {
       // Check if project was already created in Step 1 (via WebSocket project_info workflow)
       const existingProjectId = projectData.context?.projectId;
-      
+
       let projectId: string;
       let createdAt: string;
-      
+
       if (existingProjectId) {
-        // Project was already created in Step 1, just use that ID
-        console.log('[ProjectsView] Using existing project ID from Step 1:', existingProjectId);
         projectId = existingProjectId;
         createdAt = new Date().toISOString();
-        
-        toast.success(`Project "${projectData.name}" setup completed!`);
       } else {
         // Fallback: Create project via API (shouldn't normally happen in the new flow)
-        console.log('[ProjectsView] No existing project ID, creating new project');
         const description = projectData.context?.enhanced_description || projectData.description;
         const response = await createProject({
           name: projectData.name,
@@ -196,17 +193,14 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         });
 
         if (!response.success || !response.data) {
-          toast.error(response.error?.message || "Failed to create project");
+          toast.error(response.error?.message || "Failed to create product");
           return;
         }
-        
+
         projectId = response.data.id;
         createdAt = response.data.createdAt;
-        toast.success(`Project "${projectData.name}" created successfully!`);
       }
-      
-      // Add new project to list with UI formatting
-      const colors = getProjectGradient(projects.length);
+
       const newProject: UIProject = {
         id: projectId,
         name: projectData.name,
@@ -221,37 +215,17 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
         databases: 0,
         team: 1,
         lastActive: "just now",
-        gradient: colors.gradient,
-        iconBg: colors.iconBg,
       };
       setProjects([newProject, ...projects]);
-      
-      // Navigate directly to the created project (skip second KPI collection)
       setShowNewProjectFlow(false);
-      
-      toast.success(
-        `🎉 Project "${projectData.name}" created successfully! Redirecting to your workspace...`,
-        { duration: 3000 }
-      );
-      
+      toast.success(`"${projectData.name}" is ready`, { description: "Opening your workspace…" });
+
       setTimeout(() => {
         onProjectSelect(projectData.name, projectId, true); // true indicates this is a new project
       }, 500);
     } catch (err: any) {
-      toast.error(err.message || "An error occurred while setting up project");
+      toast.error(err.message || "An error occurred while setting up the product");
     }
-  };
-
-  const handleNewProjectCancel = () => {
-    setShowNewProjectFlow(false);
-  };
-
-  const handleToggleDescription = (projectId: string, event: MouseEvent) => {
-    event.stopPropagation();
-    setExpandedProjects((prev) => ({
-      ...prev,
-      [projectId]: !prev[projectId],
-    }));
   };
 
   const handleConfirmDelete = async () => {
@@ -262,385 +236,581 @@ export function ProjectsView({ onProjectSelect }: ProjectsViewProps) {
       const response = await deleteProject(projectToDelete.id);
       if (response.success) {
         setProjects((prev) => prev.filter((p) => p.id !== projectToDelete.id));
-        toast.success(`Project "${projectToDelete.name}" deleted`);
+        toast.success(`"${projectToDelete.name}" deleted`);
       } else {
-        toast.error(response.error?.message || "Failed to delete project");
+        toast.error(response.error?.message || "Failed to delete product");
       }
     } catch (err: any) {
-      toast.error(err.message || "Failed to delete project");
+      toast.error(err.message || "Failed to delete product");
     } finally {
       setIsDeletingProject(false);
       setProjectToDelete(null);
     }
   };
 
-  // Calculate stats from real data
-  const stats = [
-    { 
-      label: "Total Projects", 
-      value: projects.length.toString(), 
-      icon: LayoutDashboard 
-    },
-    { 
-      label: "Active Dashboards", 
-      value: projects.reduce((sum, p) => sum + (p.dashboards || 0), 0).toString(), 
-      icon: TrendingUp 
-    },
-    { 
-      label: "Data Sources", 
-      value: projects.reduce((sum, p) => sum + (p.databases || 0), 0).toString(), 
-      icon: Database 
-    },
-    { 
-      label: "Team Members", 
-      value: projects.reduce((sum, p) => sum + (p.team || 0), 0).toString(), 
-      icon: UsersIcon 
-    }
-  ];
+  const stats = useMemo(
+    () => [
+      { label: "Products", value: projects.length, icon: LayoutDashboard },
+      { label: "Dashboards", value: projects.reduce((s, p) => s + p.dashboards, 0), icon: ArrowUpRight },
+      { label: "Data sources", value: projects.reduce((s, p) => s + p.databases, 0), icon: Database },
+      { label: "Team members", value: projects.reduce((s, p) => s + p.team, 0), icon: UsersIcon },
+    ],
+    [projects]
+  );
 
-  // If creating a new project, show the full onboarding flow
+  // Featured: the product you opened last, then the most recent ones.
+  const featured = useMemo(() => {
+    let lastId: string | null = null;
+    try {
+      lastId = localStorage.getItem("vizai_last_project_id");
+    } catch {
+      // ignore
+    }
+    const last = projects.find((p) => p.id === lastId);
+    return [...(last ? [last] : []), ...projects.filter((p) => p !== last)].slice(0, 2);
+  }, [projects]);
+
+  const filteredProjects = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter(
+      (p) => p.name.toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q)
+    );
+  }, [projects, searchQuery]);
+
   if (showNewProjectFlow) {
     return (
       <div className="min-h-full bg-background">
-        <OnboardingFlow 
-          onComplete={handleNewProjectComplete} 
-          onCancel={handleNewProjectCancel}
-        />
+        <OnboardingFlow onComplete={handleNewProjectComplete} onCancel={() => setShowNewProjectFlow(false)} />
       </div>
     );
   }
 
-  // Show loading state
-  if (isLoading) {
-    return (
-      <div className="min-h-full bg-background flex items-center justify-center">
-        <LoadingSpinner size="lg" text="Loading projects..." />
-      </div>
-    );
-  }
-
-  // Show error state
-  if (error && projects.length === 0) {
-    return (
-      <div className="min-h-full bg-background flex items-center justify-center">
-        <Card className="p-8 max-w-md">
-          <div className="text-center">
-            <h3 className="text-lg font-semibold text-foreground mb-2">Unable to Load Projects</h3>
-            <p className="text-muted-foreground mb-4">{error}</p>
-            <Button onClick={fetchProjects}>Try Again</Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
+  const now = new Date();
+  const firstName = userName?.split(" ")[0];
 
   return (
-    <div className="min-h-full bg-background">
-      {/* Hero Section */}
-      <div className="relative overflow-hidden border-b border-border bg-muted/30">
-        <div className="absolute inset-0 bg-grid-pattern opacity-30"></div>
-        <div className="relative px-8 py-12 max-w-7xl mx-auto">
-          <div className="mb-8">
-            <h1 className="text-4xl text-foreground mb-2">Welcome back!</h1>
-            <p className="text-muted-foreground text-lg">Continue where you left off</p>
-          </div>
-
-          {/* Quick Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {stats.map((stat) => {
-              const Icon = stat.icon;
-              return (
-                <Card key={stat.label} className="p-4 border border-border bg-card hover:shadow-md transition-shadow">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Icon className="w-5 h-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-2xl text-foreground">{stat.value}</p>
-                      <p className="text-xs text-muted-foreground">{stat.label}</p>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Projects Section */}
-      <div className="px-8 py-12 max-w-7xl mx-auto">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+    <div className="home">
+      <div className="home-main">
+        {/* Header */}
+        <motion.header
+          className="home-header"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: EASE }}
+        >
           <div>
-            <h2 className="text-2xl text-foreground mb-1">Your Products</h2>
-            <p className="text-muted-foreground">Select a product to view analytics and insights</p>
+            <h1 className="home-title">
+              {greetingFor(now)}
+              {firstName ? `, ${firstName}` : ""}
+            </h1>
+            <p className="home-subtitle">Here's how your products are doing.</p>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="relative max-w-xs w-full sm:w-auto">
-              <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Search projects..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9 border-border text-sm"
-              />
-            </div>
-            <GradientButton 
-              onClick={() => setShowNewProjectFlow(true)}
-              className="shadow-lg hover:shadow-xl transition-all"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              New Product
-            </GradientButton>
+          <span className="home-date">
+            <CalendarDays size={16} aria-hidden="true" />
+            Today, {now.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}
+          </span>
+        </motion.header>
+
+        {error && projects.length === 0 && !isLoading ? (
+          <div className="home-card home-error" role="alert">
+            <p className="home-error-title">We couldn't load your products</p>
+            <p className="home-muted">{error}</p>
+            <button type="button" className="home-btn home-btn--primary" onClick={fetchProjects}>
+              Try again
+            </button>
           </div>
-        </div>
-
-        {/* Projects Grid */}
-        {(() => {
-          const filteredProjects = projects.filter(project =>
-            project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (project.description || "").toLowerCase().includes(searchQuery.toLowerCase())
-          );
-
-          return filteredProjects.length === 0 ? (
-          <Card className="p-12 text-center border border-border">
-            <LayoutDashboard className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-            <h3 className="text-xl font-semibold text-foreground mb-2">
-              {searchQuery ? "No projects found" : "No projects yet"}
-            </h3>
-            <p className="text-muted-foreground mb-6">
-              {searchQuery ? "Try adjusting your search" : "Create your first project to get started"}
-            </p>
-            {!searchQuery && (
-              <GradientButton onClick={() => setShowNewProjectFlow(true)}>
-                <Plus className="w-4 h-4 mr-2" />
-                Create Your First Project
-              </GradientButton>
-            )}
-          </Card>
         ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {filteredProjects.map((project) => (
-            <Card 
-              key={project.id}
-              className="group relative overflow-hidden border border-border hover:border-primary/30 hover:shadow-xl transition-all duration-300 cursor-pointer bg-card"
-                onClick={() => onProjectSelect(project.name, project.id)}
-            >
-              <div className="p-6">
-                {/* Icon & Title */}
-                <div className="flex items-start gap-4 mb-4">
-                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${project.iconBg} flex items-center justify-center shadow-lg flex-shrink-0`}>
-                    <LayoutDashboard className="w-6 h-6 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-lg text-foreground mb-1 group-hover:text-primary transition-colors">
-                      {project.name}
-                    </h3>
-                    <p
-                      className={`text-sm text-muted-foreground leading-relaxed transition-all ${
-                        expandedProjects[project.id] ? "" : "line-clamp-1"
-                      }`}
-                    >
-                        {project.description || "No description"}
-                    </p>
-                    {project.description && project.description.length > 80 && (
-                      <button
-                        className="mt-1 text-xs font-medium text-primary hover:underline"
-                        onClick={(event) => handleToggleDescription(project.id, event)}
-                        type="button"
-                      >
-                        {expandedProjects[project.id] ? "View less" : "View more"}
+          <>
+            {/* Stats */}
+            <ul className="home-stats" aria-label="Summary">
+              {stats.map((s, i) => (
+                <motion.li
+                  key={s.label}
+                  className="home-stat"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.45, delay: 0.05 + i * 0.05, ease: EASE }}
+                >
+                  <span className="home-stat-icon">
+                    <s.icon size={18} aria-hidden="true" />
+                  </span>
+                  <span className="home-stat-value">{isLoading ? <span className="home-skel home-skel--num" /> : s.value}</span>
+                  <span className="home-stat-label">{s.label}</span>
+                </motion.li>
+              ))}
+            </ul>
+
+            {/* Featured */}
+            {(isLoading || featured.length > 0) && (
+              <section aria-labelledby="home-featured-title">
+                <h2 id="home-featured-title" className="home-section-title">
+                  Pick up where you left off
+                </h2>
+                <div className="home-featured">
+                  {isLoading
+                    ? [0, 1].map((i) => <div key={i} className="home-card home-skel home-skel--card" />)
+                    : featured.map((p, i) => (
+                        <FeaturedCard
+                          key={p.id}
+                          project={p}
+                          index={i}
+                          onOpen={() => onProjectSelect(p.name, p.id)}
+                        />
+                      ))}
+                </div>
+              </section>
+            )}
+
+            {/* All products */}
+            <section className="home-card home-list-card" aria-labelledby="home-list-title">
+              <div className="home-list-head">
+                <h2 id="home-list-title" className="home-section-title home-section-title--flush">
+                  All products
+                  {!isLoading && <span className="home-count">{projects.length}</span>}
+                </h2>
+                <div className="home-list-tools">
+                  <label className="home-search">
+                    <Search size={16} aria-hidden="true" />
+                    <span className="sr-only">Search products</span>
+                    <input
+                      type="search"
+                      placeholder="Search products"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                    {searchQuery && (
+                      <button type="button" onClick={() => setSearchQuery("")} aria-label="Clear search">
+                        <X size={14} />
                       </button>
                     )}
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setProjectToDelete(project);
-                      }}
-                      title="Delete project"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                    <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
-                  </div>
-                </div>
-
-                {/* Stats */}
-                <div className="flex items-center gap-4 py-3 px-4 rounded-lg bg-muted/50 border border-border/50">
-                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <LayoutDashboard className="w-4 h-4" />
-                      <span>{project.dashboards || 0}</span>
-                  </div>
-                  <div className="w-px h-4 bg-border"></div>
-                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <Database className="w-4 h-4" />
-                      <span>{project.databases || 0}</span>
-                  </div>
-                  <div className="w-px h-4 bg-border"></div>
-                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <UsersIcon className="w-4 h-4" />
-                      <span>{project.team || 0}</span>
-                  </div>
-                  <div className="flex-1"></div>
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Clock className="w-3.5 h-3.5" />
-                      <span>{project.lastActive || "Unknown"}</span>
-                  </div>
+                  </label>
+                  <button type="button" className="home-btn home-btn--primary" onClick={() => setShowNewProjectFlow(true)}>
+                    <Plus size={16} aria-hidden="true" />
+                    New product
+                  </button>
                 </div>
               </div>
 
-              {/* Subtle gradient background on hover */}
-              <div className={`absolute inset-0 bg-gradient-to-br ${project.gradient} opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none`}></div>
-            </Card>
-          ))}
-        </div>
-        );
-        })()}
-
-      </div>
-
-      {/* Registered Apps Section */}
-      <div className="px-8 py-12 max-w-7xl mx-auto border-t border-border">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-2xl text-foreground mb-1">Registered Apps</h2>
-            <p className="text-muted-foreground">
-              External applications that can embed your dashboards
-            </p>
-          </div>
-          <Button
-            id="create-app-btn"
-            variant="outline"
-            onClick={() => {
-              setShowCreateAppModal(true);
-              console.log(`[APP][STEP 1] User clicked "Create app"`);
-            }}
-            className="border-border"
-          >
-            <Globe className="w-4 h-4 mr-2" />
-            Create App
-          </Button>
-        </div>
-
-        {apps.length === 0 ? (
-          <Card className="p-8 text-center border border-dashed border-border">
-            <Globe className="w-12 h-12 mx-auto mb-3 text-muted-foreground" />
-            <h3 className="text-base font-medium text-foreground mb-1">
-              No registered apps
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
-              Register an app to enable domain-locked dashboard embedding.
-              Each app represents an external website that can display your dashboards.
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => setShowCreateAppModal(true)}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Create Your First App
-            </Button>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-            {apps.map((app) => (
-              <Card
-                key={app.app_id}
-                className="p-4 border border-border hover:border-primary/30 transition-colors"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Building2 className="w-5 h-5 text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {app.company_name}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {app.domain_url}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                    onClick={() => handleDeleteApp(app.app_id)}
-                    disabled={isDeletingApp === app.app_id}
-                    title="Delete app"
-                  >
-                    {isDeletingApp === app.app_id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
+              {isLoading ? (
+                <div className="home-rows">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="home-skel home-skel--row" />
+                  ))}
                 </div>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Clock className="w-3 h-3" />
-                  <span>
-                    Created{" "}
-                    {new Date(app.created_at).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
+              ) : filteredProjects.length === 0 ? (
+                <div className="home-empty">
+                  <span className="home-empty-icon">
+                    <LayoutDashboard size={24} aria-hidden="true" />
                   </span>
+                  <p className="home-empty-title">{searchQuery ? "No matching products" : "No products yet"}</p>
+                  <p className="home-muted">
+                    {searchQuery
+                      ? `Nothing matches "${searchQuery}". Try a different name.`
+                      : "Create a product, connect a database, and start asking questions."}
+                  </p>
+                  {!searchQuery && (
+                    <button type="button" className="home-btn home-btn--primary" onClick={() => setShowNewProjectFlow(true)}>
+                      <Plus size={16} aria-hidden="true" />
+                      Create your first product
+                    </button>
+                  )}
                 </div>
-              </Card>
-            ))}
-          </div>
+              ) : (
+                <ul className="home-rows">
+                  <AnimatePresence initial={false}>
+                    {filteredProjects.map((p, i) => (
+                      <ProductRow
+                        key={p.id}
+                        project={p}
+                        index={i}
+                        onOpen={() => onProjectSelect(p.name, p.id)}
+                        onDelete={() => setProjectToDelete(p)}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </ul>
+              )}
+            </section>
+          </>
         )}
       </div>
 
-      {/* Create App Modal */}
-      <CreateAppModal
-        open={showCreateAppModal}
-        onOpenChange={setShowCreateAppModal}
-        onAppCreated={fetchApps}
-      />
+      {/* Right rail */}
+      <aside className="home-rail" aria-label="Shortcuts">
+        <motion.section
+          className="home-hero"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.1, ease: EASE }}
+        >
+          <p className="home-hero-eyebrow">Ask VizAI</p>
+          <h2 className="home-hero-title">Questions in. Charts out.</h2>
+          <div className="home-hero-demo" aria-hidden="true">
+            <AskDemo />
+          </div>
 
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog
-        open={!!projectToDelete}
-        onOpenChange={(open) => {
-          if (!open && !isDeletingProject) {
-            setProjectToDelete(null);
-          }
-        }}
-      >
-        <AlertDialogContent className="border-border">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Project</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete "{projectToDelete?.name}"? This will remove all associated dashboards and data sources from the workspace. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="border-border" disabled={isDeletingProject}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={isDeletingProject}
+          {isLoading ? (
+            <div className="home-skel" style={{ height: 120, borderRadius: 16, opacity: 0.25 }} />
+          ) : projects.length === 0 ? (
+            <>
+              <p className="home-hero-text">Create a product and connect a database — then ask anything in plain language.</p>
+              <button type="button" className="home-btn home-btn--hero" onClick={() => setShowNewProjectFlow(true)}>
+                Create a product
+                <ArrowRight size={16} aria-hidden="true" />
+              </button>
+            </>
+          ) : (
+            (() => {
+              const target = projects.find((p) => p.id === askProjectId) ?? featured[0] ?? projects[0];
+              const submit = (q: string) => {
+                if (!target) return;
+                if (onAskInProduct) onAskInProduct(target.name, target.id, q);
+                else onProjectSelect(target.name, target.id);
+              };
+              return (
+                <form
+                  className="home-ask"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submit(askText);
+                  }}
+                >
+                  <div className="home-ask-box">
+                    <Popover open={pickerOpen} onOpenChange={(o) => { setPickerOpen(o); if (!o) setPickerQuery(""); }}>
+                      <PopoverTrigger asChild>
+                        <button type="button" className="home-ask-target" aria-label={`Product: ${target?.name}. Change product`}>
+                          <span className="home-ask-target-label">Asking in</span>
+                          <span className={`app-tile app-tile--xs tone-${toneFor(target?.name ?? "")}`} aria-hidden="true">{initialsFor(target?.name ?? "?")}</span>
+                          <span className="home-ask-target-name">{target?.name}</span>
+                          <ChevronDown size={14} aria-hidden="true" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent align="start" className="w-72 p-2">
+                        <label className="home-picker-search">
+                          <Search size={14} aria-hidden="true" />
+                          <input
+                            autoFocus
+                            value={pickerQuery}
+                            onChange={(e) => setPickerQuery(e.target.value)}
+                            placeholder={`Search ${projects.length} products`}
+                            aria-label="Search products"
+                          />
+                        </label>
+                        <div className="home-picker-list" role="listbox" aria-label="Products">
+                          {[...(featured[0] ? [featured[0]] : []), ...projects.filter((p) => p.id !== featured[0]?.id)]
+                            .filter((p) => p.name.toLowerCase().includes(pickerQuery.trim().toLowerCase()))
+                            .map((p, i) => {
+                              const active = p.id === target?.id;
+                              const setup = setupProgress(p);
+                              return (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={active}
+                                  className={`home-picker-item${active ? " is-active" : ""}`}
+                                  onClick={() => {
+                                    setAskProjectId(p.id);
+                                    setPickerOpen(false);
+                                    setPickerQuery("");
+                                  }}
+                                >
+                                  <span className={`app-tile app-tile--sm tone-${toneFor(p.name)}`} aria-hidden="true">{initialsFor(p.name)}</span>
+                                  <span className="min-w-0 flex-1 text-left">
+                                    <span className="home-picker-name">{p.name}</span>
+                                    <span className="home-picker-meta">
+                                      {i === 0 && !pickerQuery ? "Recent · " : ""}
+                                      {setup.next ?? `${p.dashboards} dashboard${p.dashboards === 1 ? "" : "s"}`}
+                                    </span>
+                                  </span>
+                                  {active && <Check size={14} aria-hidden="true" className="text-primary" />}
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+
+                    <label className="home-ask-input">
+                      <span className="sr-only">Question for {target?.name}</span>
+                      <input
+                        value={askText}
+                        onChange={(e) => setAskText(e.target.value)}
+                        placeholder="Ask a question about your data…"
+                      />
+                      <button type="submit" aria-label={`Ask in ${target?.name}`} className="home-ask-send">
+                        <ArrowRight size={16} />
+                      </button>
+                    </label>
+                  </div>
+
+                  <div className="home-ask-suggestions">
+                    {ASK_SUGGESTIONS.map((q) => (
+                      <button key={q} type="button" onClick={() => setAskText(q)}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+
+                  {target && target.databases === 0 && (
+                    <p className="home-ask-note">{target.name} has no database yet — you'll connect one first.</p>
+                  )}
+                </form>
+              );
+            })()
+          )}
+        </motion.section>
+
+        <section className="home-card home-apps" aria-labelledby="home-apps-title">
+          <div className="home-apps-head">
+            <div>
+              <h2 id="home-apps-title" className="home-section-title home-section-title--flush">
+                Registered apps
+              </h2>
+              <p className="home-muted home-small">Sites allowed to embed your dashboards.</p>
+            </div>
+            <button
+              id="create-app-btn"
+              type="button"
+              className="home-icon-btn home-icon-btn--accent"
+              onClick={() => setShowCreateAppModal(true)}
+              aria-label="Register an app"
             >
-              {isDeletingProject ? (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Deleting...
-                </div>
-              ) : (
-                "Delete"
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              <Plus size={18} />
+            </button>
+          </div>
+
+          {apps.length === 0 ? (
+            <div className="home-apps-empty">
+              <Globe size={20} aria-hidden="true" />
+              <p className="home-muted home-small">No apps yet. Register a domain to embed dashboards on it.</p>
+              <button type="button" className="home-btn home-btn--ghost" onClick={() => setShowCreateAppModal(true)}>
+                Register an app
+              </button>
+            </div>
+          ) : (
+            <ul className="home-apps-list">
+              {apps.map((app) => (
+                <li key={app.app_id} className="home-app">
+                  <span className={`app-tile tone-${toneFor(app.company_name)}`}>{initialsFor(app.company_name)}</span>
+                  <div className="home-app-text">
+                    <p className="home-app-name">{app.company_name}</p>
+                    <p className="home-app-meta">
+                      {app.domain_url}
+                      <span aria-hidden="true"> · </span>
+                      {new Date(app.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    </p>
+                  </div>
+                  <span className={`home-pill ${app.is_active ? "home-pill--ok" : ""}`}>
+                    {app.is_active ? "Active" : "Inactive"}
+                  </span>
+                  <button
+                    type="button"
+                    className="home-icon-btn home-icon-btn--danger"
+                    onClick={() => setAppToDelete(app)}
+                    aria-label={`Delete ${app.company_name}`}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </aside>
+
+      <CreateAppModal open={showCreateAppModal} onOpenChange={setShowCreateAppModal} onAppCreated={fetchApps} />
+
+      <ConfirmDelete
+        open={!!projectToDelete}
+        busy={isDeletingProject}
+        title={`Delete "${projectToDelete?.name}"?`}
+        description="This removes its dashboards and data source connections from the workspace. This can't be undone."
+        onCancel={() => setProjectToDelete(null)}
+        onConfirm={handleConfirmDelete}
+      />
+      <ConfirmDelete
+        open={!!appToDelete}
+        busy={isDeletingApp}
+        title={`Remove "${appToDelete?.company_name}"?`}
+        description={`Dashboards embedded on ${appToDelete?.domain_url ?? "this domain"} will stop loading.`}
+        onCancel={() => setAppToDelete(null)}
+        onConfirm={handleConfirmDeleteApp}
+      />
     </div>
+  );
+}
+
+/* ── Pieces ── */
+
+function ProgressRing({ pct, size = 40 }: { pct: number; size?: number }) {
+  const r = (size - 6) / 2;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="home-ring" aria-hidden="true">
+      <circle cx={size / 2} cy={size / 2} r={r} className="home-ring-track" />
+      <motion.circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        className={`home-ring-value${pct === 100 ? " is-done" : ""}`}
+        style={{ rotate: -90, transformOrigin: "50% 50%" }}
+        initial={{ pathLength: 0 }}
+        animate={{ pathLength: pct / 100 }}
+        transition={{ duration: 0.9, delay: 0.2, ease: EASE }}
+      />
+    </svg>
+  );
+}
+
+function FeaturedCard({ project, index, onOpen }: { project: UIProject; index: number; onOpen: () => void }) {
+  const setup = setupProgress(project);
+  return (
+    <motion.button
+      type="button"
+      className="home-card home-feature"
+      onClick={onOpen}
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.15 + index * 0.08, ease: EASE }}
+      whileHover={{ y: -3 }}
+    >
+      <div className="home-feature-top">
+        <span className={`app-tile app-tile--lg tone-${toneFor(project.name)}`}>{initialsFor(project.name)}</span>
+        <span className="home-pill">{index === 0 ? "Recent" : "Product"}</span>
+      </div>
+      <h3 className="home-feature-title">{project.name}</h3>
+      <p className="home-feature-desc">{project.description || "No description yet."}</p>
+      <div className="home-feature-stats">
+        <div>
+          <p className="home-label">Setup</p>
+          <div className="home-feature-progress">
+            <ProgressRing pct={setup.pct} size={32} />
+            <span className="home-feature-pct">{setup.pct}%</span>
+          </div>
+        </div>
+        <div>
+          <p className="home-label">Next step</p>
+          <p className="home-feature-next">{setup.next ?? "All set"}</p>
+        </div>
+      </div>
+      <div className="home-feature-foot">
+        <Meta icon={LayoutDashboard} value={project.dashboards} label="dashboards" />
+        <Meta icon={Database} value={project.databases} label="data sources" />
+        <Meta icon={UsersIcon} value={project.team} label="members" />
+        <span className="home-feature-open" aria-hidden="true">
+          <ArrowRight size={16} />
+        </span>
+      </div>
+    </motion.button>
+  );
+}
+
+function ProductRow({
+  project,
+  index,
+  onOpen,
+  onDelete,
+}: {
+  project: UIProject;
+  index: number;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  const setup = setupProgress(project);
+  return (
+    <motion.li
+      layout
+      className="home-row"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ duration: 0.35, delay: Math.min(index, 8) * 0.03, ease: EASE }}
+    >
+      <button type="button" className="home-row-main" onClick={onOpen} title={project.description || undefined}>
+        <span className={`app-tile tone-${toneFor(project.name)}`}>{initialsFor(project.name)}</span>
+        <span className="home-row-text">
+          <span className="home-row-name">{project.name}</span>
+          <span className="home-row-desc">{project.description || "No description"}</span>
+        </span>
+        <span className="home-row-progress" aria-label={`Setup ${setup.done} of 3 steps complete`}>
+          <ProgressRing pct={setup.pct} size={28} />
+          <span>{setup.pct}%</span>
+        </span>
+        <span className="home-row-meta">
+          <Meta icon={LayoutDashboard} value={project.dashboards} label="dashboards" />
+          <Meta icon={Database} value={project.databases} label="data sources" />
+          <Meta icon={UsersIcon} value={project.team} label="members" />
+        </span>
+        <span className="home-row-date">{project.lastActive}</span>
+      </button>
+      <button type="button" className="home-icon-btn home-icon-btn--danger" onClick={onDelete} aria-label={`Delete ${project.name}`}>
+        <Trash2 size={16} />
+      </button>
+    </motion.li>
+  );
+}
+
+function Meta({ icon: Icon, value, label }: { icon: typeof Database; value: number; label: string }) {
+  return (
+    <span className="home-meta" title={`${value} ${label}`}>
+      <Icon size={14} aria-hidden="true" />
+      {value}
+      <span className="sr-only"> {label}</span>
+    </span>
+  );
+}
+
+function ConfirmDelete({
+  open,
+  busy,
+  title,
+  description,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  busy: boolean;
+  title: string;
+  description: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !busy) onCancel();
+      }}
+    >
+      <AlertDialogContent className="border-border">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="border-border" disabled={busy}>
+            Cancel
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault();
+              onConfirm();
+            }}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            disabled={busy}
+          >
+            {busy ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Deleting…
+              </span>
+            ) : (
+              "Delete"
+            )}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

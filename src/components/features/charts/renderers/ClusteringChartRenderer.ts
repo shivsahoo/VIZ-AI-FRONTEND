@@ -199,11 +199,7 @@ export function buildClusteringOption(
   const xVals = clustered.map((p) => p.x);
   const yVals = clustered.map((p) => p.y);
   const xMin = Math.min(...xVals);
-  const xMax = Math.max(...xVals);
   const yMin = Math.min(...yVals);
-  const yMax = Math.max(...yVals);
-  const xPad = Math.max(0.6, (xMax - xMin) * 0.08);
-  const yPad = Math.max(0.6, (yMax - yMin) * 0.08);
   const xAxisName = toAxisName(xKey, "Total Orders");
   const yAxisName = toAxisName(yKey, "Total Spend");
 
@@ -211,14 +207,16 @@ export function buildClusteringOption(
   return withBaseOption({
     grid: {
       ...buildGrid(compact, Boolean(title)),
-      ...(compact ? {} : { left: 120, right: 96, bottom: 72 }),
+      // Room for the axis names; the cluster legend sits under the plot.
+      ...(compact ? {} : { left: 40, right: 20, bottom: 84 }),
     },
     xAxis: {
       type: "value",
       scale: true,
       show: !compact,
-      min: xMin - xPad,
-      max: xMax + xPad,
+      // Let ECharts pick round bounds around the padded range (scale: true).
+      // Non-negative data starts at 0; otherwise let ECharts choose a round bound
+      min: xMin >= 0 ? 0 : undefined,
       name: compact ? undefined : xAxisName,
       nameLocation: "middle",
       nameGap: 36,
@@ -240,11 +238,10 @@ export function buildClusteringOption(
     yAxis: {
       ...yAxisBase,
       scale: true,
-      min: yMin - yPad,
-      max: yMax + yPad,
+      min: yMin >= 0 ? 0 : undefined,
       name: compact ? undefined : yAxisName,
       nameLocation: "middle",
-      nameGap: 52,
+      nameGap: 46,
       nameTextStyle: {
         color: labelColor,
         fontSize: 12,
@@ -312,40 +309,43 @@ export function buildClusteringOption(
             </div>`;
           },
         },
-    visualMap: compact
+    // One series per cluster so the legend can scroll under the plot instead of
+    // a vertical colour key that overlaps the chart when labels are long.
+    legend: compact
       ? { show: false }
       : {
-          type: "piecewise",
-          orient: "vertical",
-          right: 8,
-          top: 24,
-          bottom: 24,
-          itemWidth: 14,
-          itemHeight: 10,
-          itemGap: 8,
-          min: 0,
-          max: Math.max(0, clusterCount - 1),
-          splitNumber: clusterCount,
-          dimension: 2,
-          pieces,
+          type: "scroll",
+          bottom: 4,
+          left: 12,
+          right: 12,
+          icon: "circle",
+          itemWidth: 8,
+          itemHeight: 8,
+          itemGap: 14,
           textStyle: { color: labelColor, fontSize: 11 },
+          pageIconSize: 10,
+          pageTextStyle: { color: labelColor },
         },
-    series: [
-      {
-        type: "scatter",
-        encode: { tooltip: [0, 1] },
-        symbolSize: 15,
-        itemStyle: {
-          borderColor: dotBorder,
-          borderWidth: 1,
-        },
-        data: clustered.map((p) => ({
+    series: pieces.map((piece) => ({
+      type: "scatter" as const,
+      name: piece.label,
+      encode: { tooltip: [0, 1] },
+      symbolSize: 13,
+      itemStyle: {
+        color: piece.color,
+        opacity: 0.85,
+        borderColor: dotBorder,
+        borderWidth: 1,
+      },
+      emphasis: { focus: "series" as const, itemStyle: { opacity: 1 } },
+      data: clustered
+        .filter((p) => p.cluster === piece.value)
+        .map((p) => ({
           value: [p.x, p.y, p.cluster],
           clusterLabel:
             clusterLabelById.get(p.cluster) ?? p.clusterLabel ?? `Cluster ${p.cluster + 1}`,
           row: p.row,
         })),
-      },
-    ],
+    })),
   });
 }

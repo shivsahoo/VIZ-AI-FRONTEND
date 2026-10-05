@@ -50,13 +50,17 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
   const palette = colors?.length ? colors : DEFAULT_SERIES_COLORS;
   const categories = data.map((row, i) => String(row[xKey] ?? `Row ${i + 1}`));
 
-  const yAxisDefs = metricKeys.map((key, index) => {
+  const yAxisDefs = metricKeys.map((_key, index) => {
     const axisColor = palette[index % palette.length];
-    const position: "left" | "right" = index === 2 ? "left" : "right";
-    const offset = index === 1 ? 80 : 0;
+    // Left axis for the first metric, right for the second; a third keeps its own
+    // scale but no visible axis (three stacked axes crowd the plot — the tooltip
+    // and legend carry its values).
+    const position: "left" | "right" = index === 0 ? "left" : "right";
+    const offset = 0;
     return {
       type: "value" as const,
-      name: compact ? undefined : toLabel(key),
+      show: index < 2,
+      name: undefined,
       position,
       alignTicks: true,
       offset,
@@ -66,7 +70,7 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
       },
       axisTick: { show: false },
       splitLine:
-        index === 2 && !compact
+        index === 0 && !compact
           ? { lineStyle: { color: splitLineColor } }
           : { show: false },
       axisLabel: compact
@@ -146,7 +150,7 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
         },
     grid: compact
       ? { top: 0, bottom: 0, left: 0, right: 0, containLabel: false }
-      : { top: title ? 56 : 22, left: 72, right: 180, bottom: 52, containLabel: true },
+      : { top: title ? 56 : 22, left: 12, right: 12, bottom: 52, containLabel: true },
     xAxis: {
       type: "category",
       data: categories,
@@ -157,8 +161,8 @@ export function buildMultiYAxisOption(props: ChartOptionBuildProps): EChartsOpti
             color: labelColor,
             fontSize: 11,
             hideOverlap: true,
-            interval: 0,
-            rotate: categories.length > 8 ? 26 : 0,
+            interval: "auto",
+            rotate: 0,
           },
       axisLine: { lineStyle: { color: axisLineColor } },
     },

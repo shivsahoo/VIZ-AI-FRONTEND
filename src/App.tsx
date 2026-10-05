@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from "react";
+import { MotionConfig } from "motion/react";
 import { TopBar } from "./components/layout/TopBar";
-import { WorkspaceSidebar } from "./components/layout/WorkspaceSidebar";
+import { AppSidebar } from "./components/layout/AppSidebar";
+import "./components/layout/AppShell.css";
+import { PageErrorBoundary } from "./components/shared/PageErrorBoundary";
 import { ProjectsView } from "./pages/ProjectsView";
 import { WorkspaceView } from "./pages/WorkspaceView";
 import { AuthView } from "./pages/AuthView";
@@ -32,7 +35,10 @@ export default function App() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
-  const [isDark, setIsDark] = useState(true);
+  // Theme is applied pre-paint by the script in index.html; read it back from there.
+  const [isDark, setIsDark] = useState(() =>
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+  );
   const [workspaceTab, setWorkspaceTab] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('vizai_workspace_tab') || 'home';
@@ -40,6 +46,15 @@ export default function App() {
     return 'home';
   });
   const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('vizai_sidebar_collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [isGeneratingInsights, setIsGeneratingInsights] = useState(false);
   const [chartCreatedTrigger, setChartCreatedTrigger] = useState(0);
   const [dashboardRefreshTrigger, setDashboardRefreshTrigger] = useState(0);
@@ -82,6 +97,11 @@ export default function App() {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
+    }
+    try {
+      localStorage.setItem('vizai_theme', isDark ? 'dark' : 'light');
+    } catch {
+      // Storage unavailable (private mode); the theme still applies for this session.
     }
   }, [isDark]);
 
@@ -275,6 +295,14 @@ export default function App() {
     }
   };
 
+  // Home "Ask VizAI": open the product, then the assistant with the question pre-filled.
+  // Opened on the next tick so the tab-change auto-close effect doesn't shut it.
+  const handleAskInProduct = (projectName: string, projectId: string, question: string) => {
+    handleProjectSelect(projectName, projectId);
+    setPendingPrompt(question.trim() || null);
+    setTimeout(() => setIsAIAssistantOpen(true), 60);
+  };
+
   const handleProjectChange = (projectName: string) => {
     const project = projects.find(p => p.name === projectName);
     setSelectedProject(projectName);
@@ -384,6 +412,18 @@ export default function App() {
     setIsDark(!isDark);
   };
 
+  const handleToggleSidebar = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('vizai_sidebar_collapsed', next ? '1' : '0');
+      } catch {
+        // Preference just won't persist.
+      }
+      return next;
+    });
+  };
+
   const handleChartCreatedFromAI = (chart: {
     id?: string;
     name: string;
@@ -453,7 +493,7 @@ export default function App() {
 
     switch (currentView) {
       case 'home':
-        return <ProjectsView onProjectSelect={handleProjectSelect} />;
+        return <ProjectsView onProjectSelect={handleProjectSelect} onAskInProduct={handleAskInProduct} userName={currentUser?.name} />;
       case 'profile':
         return currentUser ? (
           <ProfileView 
@@ -463,7 +503,7 @@ export default function App() {
           />
         ) : null;
       default:
-        return <ProjectsView onProjectSelect={handleProjectSelect} />;
+        return <ProjectsView onProjectSelect={handleProjectSelect} onAskInProduct={handleAskInProduct} userName={currentUser?.name} />;
     }
   };
 
@@ -507,7 +547,11 @@ export default function App() {
   if (!isAuthenticated) {
     return (
       <>
-        <AuthView onAuthenticated={handleAuthenticated} />
+        <AuthView
+          onAuthenticated={handleAuthenticated}
+          isDark={isDark}
+          onThemeToggle={handleThemeToggle}
+        />
         <Toaster />
       </>
     );
@@ -526,61 +570,76 @@ export default function App() {
     );
   }
 
+  const isAIAvailableOnTab =
+    isInWorkspace && !['databases', 'team', 'observability', 'ontology'].includes(workspaceTab);
+
   return (
     <PinnedChartsProvider>
-      <div className="h-screen w-screen overflow-hidden bg-background transition-colors duration-200">
-        <div className="flex flex-col h-full">
-          {/* Top Bar - Always visible */}
-          <TopBar
-          currentView={currentView}
-          onNavigate={setCurrentView}
-          selectedProject={isInWorkspace ? selectedProject : null}
-          workspaceTab={isInWorkspace ? workspaceTab : undefined}
-          projects={projects}
-          onProjectChange={handleProjectChange}
-          user={currentUser!}
-          onSignOut={handleSignOut}
-          isDark={isDark}
-          onThemeToggle={handleThemeToggle}
-        />
-        
-        {/* Main Content Area */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Workspace Sidebar - Only visible when in a project */}
-          {isInWorkspace && (
-            <WorkspaceSidebar
-              activeTab={workspaceTab}
-              onTabChange={setWorkspaceTab}
-              onOpenAIAssistant={() => setIsAIAssistantOpen(prev => !prev)}
-              disabled={isGeneratingInsights}
+      <MotionConfig reducedMotion="user">
+        <div className="app-shell">
+          <AppSidebar
+            mode={isInWorkspace ? 'workspace' : 'home'}
+            activeId={isInWorkspace ? workspaceTab : currentView}
+            onWorkspaceTabChange={setWorkspaceTab}
+            onNavigate={(view) => {
+              if (view === 'home') handleBackToHome();
+              else setCurrentView(view);
+            }}
+            projects={projects}
+            selectedProject={isInWorkspace ? selectedProject : null}
+            onProjectChange={handleProjectChange}
+            onProjectOpen={(name, id) => handleProjectSelect(name, id)}
+            onOpenAIAssistant={isAIAvailableOnTab ? () => setIsAIAssistantOpen((prev) => !prev) : undefined}
+            disabled={isGeneratingInsights}
+            collapsed={isSidebarCollapsed}
+            onToggleCollapsed={handleToggleSidebar}
+            mobileOpen={isMobileNavOpen}
+            onCloseMobile={() => setIsMobileNavOpen(false)}
+          />
+
+          <div className="app-main">
+            <TopBar
+              currentView={currentView}
+              onNavigate={(view) => {
+                if (view === 'home') handleBackToHome();
+                else setCurrentView(view);
+              }}
+              selectedProject={isInWorkspace ? selectedProject : null}
+              workspaceTab={isInWorkspace ? workspaceTab : undefined}
+              user={currentUser!}
+              onSignOut={handleSignOut}
+              isDark={isDark}
+              onThemeToggle={handleThemeToggle}
+              onOpenMobileNav={() => setIsMobileNavOpen(true)}
+            />
+
+            <main className="app-content">
+              <PageErrorBoundary resetKey={`${currentView}:${selectedProject ?? ''}:${workspaceTab}`}>
+                {renderView()}
+              </PageErrorBoundary>
+            </main>
+          </div>
+
+          {isAIAvailableOnTab && (
+            <AIAssistant
+              isOpen={isAIAssistantOpen}
+              onOpenChange={(open) => {
+                setIsAIAssistantOpen(open);
+                if (!open) {
+                  setEditingChart(null); // Clear editing chart when closing
+                }
+              }}
+              projectId={selectedProjectId || projects.find(p => p.name === selectedProject)?.id || undefined}
+              currentTab={workspaceTab}
+              onChartCreated={handleChartCreatedFromAI}
+              editingChart={editingChart}
+              initialPrompt={pendingPrompt}
+              onInitialPromptConsumed={() => setPendingPrompt(null)}
             />
           )}
-          
-          {/* Content */}
-          <main className="flex-1 min-w-0 overflow-auto">
-            {renderView()}
-          </main>
-
-          {/* AI Assistant Panel - Only visible when in workspace (except Databases and Team pages) */}
-          {isInWorkspace && workspaceTab !== 'databases' && workspaceTab !== 'team' && workspaceTab !== 'observability' && workspaceTab !== 'ontology' && (
-                    <AIAssistant
-          isOpen={isAIAssistantOpen}
-          onOpenChange={(open) => {
-            setIsAIAssistantOpen(open);
-            if (!open) {
-              setEditingChart(null); // Clear editing chart when closing
-            }
-          }}
-          projectId={selectedProjectId || projects.find(p => p.name === selectedProject)?.id || undefined}
-          currentTab={workspaceTab}
-          onChartCreated={handleChartCreatedFromAI}
-          editingChart={editingChart}
-        />
-          )}
-        </div>
         </div>
         <Toaster />
-      </div>
+      </MotionConfig>
     </PinnedChartsProvider>
   );
 }

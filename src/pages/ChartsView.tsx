@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Search, Sparkles, BarChart3, LineChart, PieChart, AreaChart, ChartScatter, Grid3x3, Funnel, Globe, Pin, Trash2, Plus, Clock, Filter, Calendar as CalendarIcon, X, Download } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { GradientButton } from "../components/shared/GradientButton";
 import { StatusBadge } from "../components/shared/StatusBadge";
@@ -1280,7 +1278,7 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
 
     return (
       <div
-        className="relative h-[280px] bg-gradient-to-br from-muted/20 to-muted/5 rounded-lg overflow-hidden px-4 flex flex-col"
+        className="ws-chart-canvas"
         data-chart-visualization="true"
       >
         {isLoading && hasQueryAndConnection && (
@@ -1387,34 +1385,38 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
       chartTypeIcons[chart.type as keyof typeof chartTypeIcons] ?? LineChart;
     const dashboard = resolvedDashboards.find((d) => String(d.id) === String(chart.dashboardId));
     const dataSourceLabel = getDatabaseLabel(chart);
-    const colorClass: Record<string, string> = {
-      line: 'text-[#06B6D4] bg-[#06B6D4]/10',
-      bar: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
-      pie: 'text-[#10B981] bg-[#10B981]/10',
-      donut: 'text-[#10B981] bg-[#10B981]/10',
-      area: 'text-[#F59E0B] bg-[#F59E0B]/10',
-      scatter: 'text-[#06B6D4] bg-[#06B6D4]/10',
-      clustering: 'text-[#0EA5E9] bg-[#0EA5E9]/10',
-      multiyaxischart: 'text-[#6366F1] bg-[#6366F1]/10',
-      heatmap: 'text-[#EC4899] bg-[#EC4899]/10',
-      funnel: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
-      map: 'text-[#10B981] bg-[#10B981]/10',
-      stackedlinechart: 'text-[#06B6D4] bg-[#06B6D4]/10',
-      stackedhorizontalbar: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
+    // Tone slot (see .tone-N in AppShell.css) per chart family.
+    const toneByType: Record<string, number> = {
+      line: 0, stackedlinechart: 0, bar: 1, stackedhorizontalbar: 1, multiyaxischart: 1, funnel: 1,
+      scatter: 2, clustering: 2, area: 3, pie: 4, donut: 4, heatmap: 4, map: 5,
     };
-    const chartColorClass = colorClass[chart.type as string] ?? 'text-muted-foreground bg-muted/20';
+    const tone = toneByType[chart.type as string] ?? 0;
     const chartName = chart.name?.trim() || "Untitled Chart";
 
+    const isPinnedChart = chart.isFavorite || isPinned(chartIdToNumber(chart.id));
+    const openPreview = () => {
+      if (!isGenerated) handleOpenChartPreview(chart);
+    };
+
     return (
-      <Card
+      <div
         key={chart.id}
-        className="overflow-hidden border-2 border-border hover:border-primary/30 hover:shadow-xl transition-smooth cursor-pointer group hover-lift card-shadow relative"
+        className="ws-chart-card group"
+        role={isGenerated ? undefined : "button"}
+        tabIndex={isGenerated ? undefined : 0}
+        aria-label={isGenerated ? undefined : `Open ${chartName}`}
+        onKeyDown={(e) => {
+          if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+            e.preventDefault();
+            openPreview();
+          }
+        }}
         onClick={(e) => {
           // Don't open preview if clicking on date picker or its container
           const target = e.target as HTMLElement;
           if (
             target.closest('[data-date-picker="true"]') ||
-            target.closest('.react-datepicker-wrapper') || 
+            target.closest('.react-datepicker-wrapper') ||
             target.closest('.react-datepicker__input-container') ||
             target.closest('.react-datepicker') ||
             target.closest('.react-datepicker__portal')
@@ -1422,152 +1424,108 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
             e.stopPropagation();
             return;
           }
-          if (!isGenerated) {
-            handleOpenChartPreview(chart);
-          }
+          openPreview();
         }}
       >
-        {/* Compact Header - Overlaid on chart */}
-        <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-card via-card/95 to-transparent pb-8">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-2.5 flex-1 min-w-0">
-              <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${chartColorClass} transition-smooth group-hover:scale-110`}>
-                <Icon className="w-4 h-4" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <h3 className="text-foreground line-clamp-1 mb-1">
-                      {chartName}
-                    </h3>
-                  </TooltipTrigger>
-                  <TooltipContent
-                    side="top"
-                    align="start"
-                    className="bg-card text-foreground border border-border shadow-lg whitespace-normal break-words max-w-xs"
-                  >
-                    {chartName}
-                  </TooltipContent>
-                </Tooltip>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="line-clamp-1">{dataSourceLabel}</span>
-                  <span>•</span>
-                  <div className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    <span>{chart.lastUpdated}</span>
-                  </div>
-                </div>
-              </div>
+        <div className="ws-chart-head">
+          <span className={`app-tile tone-${tone}`} aria-hidden="true">
+            <Icon className="w-[18px] h-[18px]" />
+          </span>
+          <div className="ws-chart-titles">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <h3 className="ws-chart-title">{chartName}</h3>
+              </TooltipTrigger>
+              <TooltipContent side="top" align="start" className="max-w-xs whitespace-normal break-words">
+                {chartName}
+              </TooltipContent>
+            </Tooltip>
+            <div className="ws-chart-meta">
+              <span>{dataSourceLabel}</span>
+              <span aria-hidden="true">·</span>
+              <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
+              <span className="whitespace-nowrap">{chart.lastUpdated}</span>
             </div>
-            <div className="flex items-center gap-0.5 flex-shrink-0">
-              {isGenerated && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setChartToAddToDashboard(chart);
-                  }}
-                  className="h-7 w-7 text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </Button>
-              )}
-              <ActionButtonGroup
-                actions={[
-                  // Edit functionality commented out
-                  // {
-                  //   icon: <Edit2 />,
-                  //   onClick: (e) => {
-                  //     e?.stopPropagation();
-                  //     if (onEditChart) {
-                  //       onEditChart({
-                  //         name: chart.name,
-                  //         type: chart.type,
-                  //         description: chart.dataSource
-                  //       });
-                  //     }
-                  //     if (onOpenAIAssistant) {
-                  //       onOpenAIAssistant();
-                  //     }
-                  //   },
-                  //   label: "Edit chart",
-                  //   variant: "ghost"
-                  // },
-                  {
-                    icon: <Download />,
-                    onClick: async (e) => {
-                      e?.stopPropagation();
-                      await handleExportChart(chart);
-                    },
-                    label: "Export chart as image",
-                    variant: "ghost",
-                    className: "hover:text-primary"
+          </div>
+          <div className="ws-chart-tools">
+            {isGenerated && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Add to dashboard"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setChartToAddToDashboard(chart);
+                }}
+                className="text-muted-foreground hover:text-primary"
+              >
+                <Plus className="w-4 h-4" />
+              </Button>
+            )}
+            <ActionButtonGroup
+              actions={[
+                {
+                  icon: <Pin className={isPinnedChart ? 'fill-primary/20 rotate-45' : ''} />,
+                  onClick: (e) => {
+                    e?.stopPropagation();
+                    handleTogglePin(chart);
                   },
-                  {
-                    icon: <Trash2 />,
-                    onClick: (e) => {
-                      e?.stopPropagation();
-                      setChartToDelete(chart);
-                    },
-                    label: "Delete chart",
-                    variant: "ghost",
-                    className: "hover:text-destructive"
+                  label: isPinnedChart ? "Unpin chart" : "Pin chart",
+                  variant: "ghost",
+                  className: isPinnedChart ? 'text-primary hover:text-primary/80' : 'hover:text-primary'
+                },
+                {
+                  icon: <Download />,
+                  onClick: async (e) => {
+                    e?.stopPropagation();
+                    await handleExportChart(chart);
                   },
-                  {
-                    icon: <Pin className={(chart.isFavorite || isPinned(chartIdToNumber(chart.id))) ? 'fill-primary/20 rotate-45' : ''} />,
-                    onClick: (e) => {
-                      e?.stopPropagation();
-                      handleTogglePin(chart);
-                    },
-                    label: (chart.isFavorite || isPinned(chartIdToNumber(chart.id))) ? "Unpin chart" : "Pin chart",
-                    variant: "ghost",
-                    className: (chart.isFavorite || isPinned(chartIdToNumber(chart.id))) ? 'text-primary hover:text-primary/80 opacity-100' : 'hover:text-primary'
-                  }
-                ]}
-              />
-            </div>
+                  label: "Export chart as image",
+                  variant: "ghost",
+                  className: "hover:text-primary"
+                },
+                {
+                  icon: <Trash2 />,
+                  onClick: (e) => {
+                    e?.stopPropagation();
+                    setChartToDelete(chart);
+                  },
+                  label: "Delete chart",
+                  variant: "ghost",
+                  className: "hover:text-destructive"
+                },
+              ]}
+            />
           </div>
         </div>
 
-        {/* Chart Visualization */}
-        <div 
-          className="pt-24 px-2 pb-12 relative"
-          data-chart-id={chart.id}
-        >
+        <div className="ws-chart-body" data-chart-id={chart.id}>
           {renderChartPreview(chart)}
         </div>
 
-        <div className="px-4 pb-3 flex items-center justify-between gap-4">
-          {/* Status Badge */}
+        <div className="ws-chart-foot">
           <div>
             {chart.status === 'published' && dashboard && (
               <StatusBadge status="published" label={dashboard.name} />
             )}
-            {chart.status === 'draft' && (
-              <StatusBadge status="draft" />
-            )}
+            {chart.status === 'draft' && <StatusBadge status="draft" />}
           </div>
+          <span className="ws-type-chip">{String(chart.type).replace(/chart$/, "")}</span>
         </div>
-      </Card>
+      </div>
     );
   };
 
   if (isLoadingCharts) {
     return (
-      <div className="h-full overflow-auto bg-background">
-        <div className="max-w-[1600px] mx-auto p-10 space-y-10">
-          <div className="flex items-center justify-between">
+      <div className="min-h-full">
+        <div className="ws-page">
+          <header className="ws-header">
             <div>
-              <h1 className="text-foreground">Charts</h1>
-              <p className="text-muted-foreground mt-0.5">
-                Generate and manage your data visualizations
-              </p>
+              <h1 className="ws-title">Charts</h1>
+              <p className="ws-subtitle">Generate and manage your data visualizations.</p>
             </div>
-            
-            {/* Skeleton for controls */}
-            <div className="w-full sm:w-[140px] h-9 bg-muted/50 rounded-md animate-pulse opacity-50" />
-          </div>
+          </header>
  
           {/* Skeleton grid */}
           <SkeletonGrid count={6} variant="chart" />
@@ -1577,68 +1535,65 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
   }
 
   return (
-    <div className="h-full overflow-auto bg-background">
-      <div className="max-w-[1600px] mx-auto p-10 space-y-10">
-        {/* Header with Inline Generation */}
-        <div className="flex items-center justify-between">
+    <div className="min-h-full">
+      <div className="ws-page">
+        <header className="ws-header">
           <div>
-            <h1 className="text-foreground">Charts</h1>
-            <p className="text-muted-foreground mt-0.5">
-              Generate and manage your data visualizations
-            </p>
+            <h1 className="ws-title">Charts</h1>
+            <p className="ws-subtitle">Generate and manage your data visualizations.</p>
           </div>
-          
-          {/* Compact Generation Controls */}
-          <GradientButton
-            onClick={handleGenerateCharts}
-            size="sm"
-            className="h-9"
-          >
-            <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-            Generate Charts
-          </GradientButton>
-        </div>
+          <div className="ws-actions">
+            <GradientButton onClick={handleGenerateCharts} className="ws-primary-btn">
+              <Sparkles className="w-4 h-4" />
+              Generate charts
+            </GradientButton>
+          </div>
+        </header>
 
         {/* Generated Charts Section */}
         {generatedCharts.length > 0 && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-foreground">Recently Generated</h2>
-              <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5">
-                {generatedCharts.length} charts
-              </Badge>
+          <section className="ws-section">
+            <div className="ws-section-head">
+              <h2 className="ws-section-title">
+                Recently generated
+                <span className="ws-count">{generatedCharts.length}</span>
+              </h2>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="ws-grid">
               {generatedCharts.map((chart) => renderChartCard(chart, true))}
             </div>
-          </div>
+          </section>
         )}
 
         {/* All Charts Section */}
-        <div className="space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <h2 className="text-foreground">All Charts</h2>
+        <section className="ws-section">
+          <div className="ws-section-head">
+            <h2 className="ws-section-title">
+              All charts
+              <span className="ws-count">{filteredCharts.length}</span>
+            </h2>
 
             {/* Filters */}
-            <div className="flex gap-2">
-              <div className="relative flex-1 sm:flex-initial sm:w-[280px]">
-                <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <div className="ws-toolbar">
+              <label className="ws-search">
+                <Search aria-hidden="true" />
+                <span className="sr-only">Search charts</span>
                 <Input
-                  placeholder="Search charts..."
+                  placeholder="Search charts"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8 h-9 border-border text-sm"
                 />
-              </div>
+              </label>
               <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
                     size="icon"
-                    className={`h-9 w-9 border-border ${
+                    aria-label="Filter charts"
+                    className={`ws-icon-pill ${
                       (filterDashboard !== 'all' || filterDatabase !== 'all' || filterStatus !== 'all')
-                        ? 'border-primary text-primary'
+                        ? 'is-active'
                         : ''
                     }`}
                   >
@@ -1726,27 +1681,31 @@ export function ChartsView({ currentUser, projectId, onChartCreated, pendingChar
 
           {/* Charts Grid */}
           {filteredCharts.length === 0 ? (
-            <Card className="border-border p-12">
-              <div className="flex flex-col items-center text-center gap-4">
-                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-                  <BarChart3 className="w-8 h-8 text-muted-foreground" />
-                </div>
-                <div>
-                  <h3 className="text-foreground mb-2">No charts found</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {searchQuery || filterStatus !== "all"
-                      ? "Try adjusting your filters"
-                      : "Generate your first chart using AI"}
-                  </p>
-                </div>
-              </div>
-            </Card>
+            <div className="ws-empty">
+              <span className="ws-empty-icon">
+                <BarChart3 className="w-7 h-7" aria-hidden="true" />
+              </span>
+              <p className="ws-empty-title">
+                {searchQuery || filterStatus !== "all" ? "No charts match" : "No charts yet"}
+              </p>
+              <p className="ws-empty-text">
+                {searchQuery || filterStatus !== "all"
+                  ? "Try a different search or clear the filters."
+                  : "Ask a question in plain language and VizAI will build the chart for you."}
+              </p>
+              {!searchQuery && filterStatus === "all" && (
+                <GradientButton onClick={handleGenerateCharts} className="ws-primary-btn">
+                  <Sparkles className="w-4 h-4" />
+                  Generate charts
+                </GradientButton>
+              )}
+            </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="ws-grid">
               {filteredCharts.map((chart) => renderChartCard(chart, false))}
             </div>
           )}
-        </div>
+        </section>
 
         {/* Add to Dashboard Dialog */}
         <Dialog open={!!chartToAddToDashboard} onOpenChange={() => setChartToAddToDashboard(null)}>

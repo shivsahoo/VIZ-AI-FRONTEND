@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useIsDark } from "../../shared/useIsDark";
+import "./KnowledgeGraph.css";
 import {
   Database,
   KeyRound,
@@ -12,9 +14,6 @@ import {
   Star,
   ArrowUpRight,
   ArrowDownLeft,
-  Shuffle,
-  LayoutGrid,
-  GitFork,
 } from "lucide-react";
 import type { DSGraphPayload } from "../../../services/api";
 
@@ -40,17 +39,14 @@ const CENTER_W = 170;
 const CENTER_H = 46;
 const NODE_W = 148;
 const NODE_H = 38;
-const NODE_R = 8; // border-radius
 
-function getNodeStyle(isCenter: boolean, isConnected: boolean) {
-  if (isCenter) {
-    return { fill: "#312e81", stroke: "#818CF8", textFill: "#e0e7ff", labelFill: "#a5b4fc" };
-  }
-  if (isConnected) {
-    return { fill: "#0f172a", stroke: "#3B82F6", textFill: "#bae6fd", labelFill: "#64748b" };
-  }
-  return { fill: "#0a0f1a", stroke: "#1e293b", textFill: "#475569", labelFill: "#334155" };
+function dsTheme(isDark: boolean) {
+  return isDark
+    ? { dot: "#2c2c2e", out: "#2997ff", inc: "#64d2ff", labelBg: "#1c1c1e", nodeFill: "#1c1c1e", nodeStroke: "#3a3a3c", ink: "#f5f5f7", sub: "#98989d", iconBg: "#2c2c2e", shadow: 0.5 }
+    : { dot: "#d2d2d7", out: "#0071e3", inc: "#30b0c7", labelBg: "#ffffff", nodeFill: "#ffffff", nodeStroke: "#e0e0e5", ink: "#1d1d1f", sub: "#6e6e73", iconBg: "#f0f0f2", shadow: 0.12 };
 }
+
+type EntityFilter = "all" | "connected" | "orphans";
 
 export function DSGraphViewer({ graph }: DSGraphViewerProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string>(
@@ -59,6 +55,19 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
   const [direction, setDirection] = useState<Direction>("both");
   const [activeTab, setActiveTab] = useState<ActiveTab>("overview");
   const [search, setSearch] = useState("");
+  const [entityFilter, setEntityFilter] = useState<EntityFilter>("all");
+  const isDark = useIsDark();
+  const t = dsTheme(isDark);
+
+  // Relationship count per table (for list badges + filters)
+  const degreeById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of graph.edges) {
+      m.set(e.source, (m.get(e.source) ?? 0) + 1);
+      m.set(e.target, (m.get(e.target) ?? 0) + 1);
+    }
+    return m;
+  }, [graph.edges]);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
@@ -133,15 +142,16 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
   }, [selectedNodeId, graph.nodes, connectedIds]);
 
   // When the selected node changes, apply the auto-fit zoom/offset immediately
-  const prevNodeIdRef = useRef(selectedNodeId);
+  const prevNodeIdRef = useRef(`${selectedNodeId}|${direction}`);
   useEffect(() => {
-    if (prevNodeIdRef.current !== selectedNodeId) {
-      prevNodeIdRef.current = selectedNodeId;
+    const key = `${selectedNodeId}|${direction}`;
+    if (prevNodeIdRef.current !== key) {
+      prevNodeIdRef.current = key;
       // Offset keeps CX/CY visually centred after the zoom change
       setOffset({ x: CX * (1 - suggestedZoom), y: CY * (1 - suggestedZoom) });
       setZoom(suggestedZoom);
     }
-  }, [selectedNodeId, suggestedZoom]);
+  }, [selectedNodeId, direction, suggestedZoom]);
 
   // Compute a gently-curved quadratic bezier edge path
   const getEdgePath = (sourceId: string, targetId: string) => {
@@ -182,13 +192,18 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
   // Filtered entity list for left panel
   const filteredNodes = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return graph.nodes.filter(
-      (n) =>
-        !q ||
-        n.label.toLowerCase().includes(q) ||
-        (n.schema ?? "").toLowerCase().includes(q)
-    );
-  }, [graph.nodes, search]);
+    return graph.nodes.filter((n) => {
+      const deg = degreeById.get(n.id) ?? 0;
+      if (entityFilter === "connected" && deg === 0) return false;
+      if (entityFilter === "orphans" && deg > 0) return false;
+      return !q || n.label.toLowerCase().includes(q) || (n.schema ?? "").toLowerCase().includes(q);
+    });
+  }, [graph.nodes, search, entityFilter, degreeById]);
+  const connectedTotal = useMemo(() => graph.nodes.filter((n) => (degreeById.get(n.id) ?? 0) > 0).length, [graph.nodes, degreeById]);
+  const firstConnectedId = useMemo(
+    () => [...graph.nodes].sort((x, y) => (degreeById.get(y.id) ?? 0) - (degreeById.get(x.id) ?? 0))[0]?.id,
+    [graph.nodes, degreeById],
+  );
 
   const handleWheel: React.WheelEventHandler<SVGSVGElement> = (e) => {
     e.preventDefault();
@@ -229,20 +244,37 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
   return (
     <div className="flex h-full min-h-0 overflow-hidden rounded-lg border border-border bg-card">
       {/* ────────────────── LEFT: Entity List ────────────────── */}
-      <div className="w-52 shrink-0 flex flex-col border-r border-border bg-card overflow-hidden">
+      <div className="w-60 shrink-0 flex flex-col border-r border-border bg-card overflow-hidden">
         <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
-          <span className="text-sm font-medium text-foreground">Entities</span>
-          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-accent/15 text-accent">
-            {graph.stats.table_count} Total
-          </span>
+          <span className="text-[15px] font-semibold text-foreground">Tables</span>
+          <span className="ds-count">{filteredNodes.length}</span>
+        </div>
+
+        <div className="ds-filter" role="tablist" aria-label="Filter tables">
+          {([
+            ["all", "All", graph.nodes.length],
+            ["connected", "Linked", connectedTotal],
+            ["orphans", "Orphans", graph.nodes.length - connectedTotal],
+          ] as [EntityFilter, string, number][]).map(([id, label, n]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={entityFilter === id}
+              className={entityFilter === id ? "is-active" : ""}
+              onClick={() => setEntityFilter(id)}
+            >
+              {label} <span>{n}</span>
+            </button>
+          ))}
         </div>
 
         <div className="px-3 pb-2 shrink-0">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <input
-              className="w-full h-8 pl-8 pr-3 text-xs rounded-md border border-border bg-muted/30 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/50"
-              placeholder="Search entities..."
+              className="w-full h-9 pl-8 pr-3 text-[13px] rounded-full border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/25 focus:border-primary/50"
+              placeholder="Search tables"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -250,34 +282,25 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
+          {filteredNodes.length === 0 && (
+            <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">No tables match.</p>
+          )}
           {filteredNodes.map((node) => {
             const isSelected = node.id === selectedNodeId;
-            const isConnected = connectedIds.has(node.id);
+            const deg = degreeById.get(node.id) ?? 0;
             return (
               <button
                 key={node.id}
-                className={`w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors mb-0.5 group ${
-                  isSelected
-                    ? "bg-primary/20 text-primary border border-primary/30"
-                    : "hover:bg-muted/50 text-foreground"
-                }`}
+                className={`ds-entity${isSelected ? " is-selected" : ""}${deg === 0 ? " is-orphan" : ""}`}
                 onClick={() => {
                   setSelectedNodeId(node.id);
                   setActiveTab("overview");
                 }}
+                title={node.label}
               >
-                <div
-                  className={`w-6 h-6 rounded shrink-0 flex items-center justify-center ${
-                    isSelected ? "bg-primary/30" : "bg-muted/50"
-                  }`}
-                >
-                  <TableProperties className={`w-3 h-3 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
-                </div>
-                <span className="text-xs truncate flex-1">{node.label}</span>
-                {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-                {!isSelected && isConnected && (
-                  <div className="w-1.5 h-1.5 rounded-full bg-accent shrink-0 opacity-70" />
-                )}
+                <TableProperties className="w-3.5 h-3.5 shrink-0" />
+                <span className="flex-1 truncate">{node.label}</span>
+                <span className="ds-entity-deg" aria-label={`${deg} relationships`}>{deg || "—"}</span>
               </button>
             );
           })}
@@ -302,44 +325,23 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
       </div>
 
       {/* ────────────────── CENTER: Graph Canvas ────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0 bg-[#050d1a] overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 kg-canvas overflow-hidden">
         {/* Toolbar */}
-        <div className="flex items-center gap-3 px-4 py-2 border-b border-border/50 shrink-0 bg-[#06101e]">
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-border shrink-0 kg-toolbar">
           {/* View label */}
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground border border-border/60 rounded px-2.5 py-1.5">
-            <LayoutGrid className="w-3.5 h-3.5" />
-            <span>Direct Relationships</span>
-          </div>
-
-          <div className="w-px h-5 bg-border/40" />
-
           {/* Direction filter */}
-          <div className="flex items-center gap-0 rounded border border-border/60 overflow-hidden text-xs">
+          <div className="ds-segment" role="tablist" aria-label="Relationship direction">
             {(["both", "outgoing", "incoming"] as Direction[]).map((d) => (
               <button
                 key={d}
                 onClick={() => setDirection(d)}
-                className={`px-3 py-1.5 capitalize transition-colors ${
-                  direction === d
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
-                }`}
+                role="tab"
+                aria-selected={direction === d}
+                className={direction === d ? "is-active" : ""}
               >
                 {d === "both" ? "Both" : d === "outgoing" ? "Outgoing" : "Incoming"}
               </button>
             ))}
-          </div>
-
-          <div className="w-px h-5 bg-border/40" />
-
-          {/* Layout toggle icons */}
-          <div className="flex items-center gap-1">
-            <button className="p-1.5 rounded text-accent border border-accent/40 bg-accent/10">
-              <GitFork className="w-3.5 h-3.5" />
-            </button>
-            <button className="p-1.5 rounded text-muted-foreground hover:text-foreground border border-border/40 hover:bg-muted/20 transition-colors">
-              <Shuffle className="w-3.5 h-3.5" />
-            </button>
           </div>
 
           <div className="flex-1" />
@@ -383,10 +385,10 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
             <defs>
               {/* Slim open-chevron arrowheads */}
               <marker id="arrow-out" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
-                <path d="M0,0.5 L8.5,4 L0,7.5" fill="none" stroke="#818CF8" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M0,0.5 L8.5,4 L0,7.5" fill="none" stroke={t.out} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </marker>
               <marker id="arrow-in" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
-                <path d="M0,0.5 L8.5,4 L0,7.5" fill="none" stroke="#38BDF8" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M0,0.5 L8.5,4 L0,7.5" fill="none" stroke={t.inc} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </marker>
               {/* Soft glow for center node */}
               <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
@@ -398,17 +400,21 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
               </filter>
               {/* Subtle drop-shadow for all nodes */}
               <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
-                <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#000" floodOpacity="0.4" />
+                <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#000" floodOpacity={t.shadow} />
               </filter>
+              <pattern id="ds-dots" width="28" height="28" patternUnits="userSpaceOnUse">
+                <circle cx="2" cy="2" r="1" fill={t.dot} />
+              </pattern>
             </defs>
 
             <g transform={`translate(${offset.x}, ${offset.y}) scale(${zoom})`}>
+              <rect x={-3000} y={-3000} width={6000} height={6000} fill="url(#ds-dots)" pointerEvents="none" />
               {/* Edges */}
               {visibleEdges.map((edge) => {
                 const result = getEdgePath(edge.source, edge.target);
                 if (!result) return null;
                 const isOutgoing = edge.source === selectedNodeId;
-                const strokeColor = isOutgoing ? "#818CF8" : "#38BDF8";
+                const strokeColor = isOutgoing ? t.out : t.inc;
                 const markerId = isOutgoing ? "url(#arrow-out)" : "url(#arrow-in)";
                 const rawLabel = edge.label ?? "";
                 const displayLabel =
@@ -444,8 +450,8 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
                           width={labelW}
                           height={13}
                           rx={4}
-                          fill="#080e1c"
-                          fillOpacity="0.88"
+                          fill={t.labelBg}
+                          fillOpacity="0.95"
                           stroke={strokeColor}
                           strokeOpacity="0.28"
                           strokeWidth="0.8"
@@ -475,22 +481,12 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
                 if (!pos) return null;
                 const isCenter = node.id === selectedNodeId;
                 const isConnected = connectedIds.has(node.id);
-                const style = getNodeStyle(isCenter, isConnected);
                 const nx = pos.x - pos.w / 2;
                 const ny = pos.y - pos.h / 2;
                 const truncLabel =
-                  node.label.length > 18 ? `${node.label.slice(0, 18)}…` : node.label;
-                const truncSchema =
-                  (node.schema ?? "table").length > 14
-                    ? `${(node.schema ?? "table").slice(0, 14)}…`
-                    : node.schema ?? "table";
-
-                const iconSize = pos.h - 10;
-                const iconX = nx + 6;
-                const iconY = ny + 5;
-                const iconBg = isCenter ? "#4338ca" : isConnected ? "#1a3460" : "#161e2e";
-                const iconAccent = isCenter ? "#a5b4fc" : isConnected ? "#60a5fa" : "#334155";
-                const textX = nx + iconSize + 14;
+                  node.label.length > 20 ? `${node.label.slice(0, 19)}…` : node.label;
+                const accent = isCenter ? t.out : isConnected ? t.inc : t.sub;
+                const textX = nx + 36;
 
                 return (
                   <g
@@ -501,56 +497,45 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
                       setActiveTab("overview");
                     }}
                     style={{ cursor: "pointer" }}
-                    filter={isCenter ? "url(#glow)" : "url(#shadow)"}
+                    filter="url(#shadow)"
                   >
-                    {/* Card background */}
+                    {isCenter && (
+                      <rect x={nx - 5} y={ny - 5} width={pos.w + 10} height={pos.h + 10} rx={(pos.h + 10) / 2} fill={t.out} fillOpacity="0.15" />
+                    )}
                     <rect
                       x={nx}
                       y={ny}
                       width={pos.w}
                       height={pos.h}
-                      rx={NODE_R}
-                      fill={style.fill}
-                      stroke={style.stroke}
-                      strokeWidth={isCenter ? 1.8 : 1}
+                      rx={pos.h / 2}
+                      fill={isCenter ? t.out : t.nodeFill}
+                      stroke={isCenter ? "none" : isConnected ? accent : t.nodeStroke}
+                      strokeWidth={isConnected ? 1.3 : 1}
                     />
-                    {/* Gradient header strip */}
-                    <rect
-                      x={nx}
-                      y={ny}
-                      width={pos.w}
-                      height={isCenter ? 4 : 3}
-                      rx={NODE_R}
-                      fill={isCenter ? "#818CF8" : isConnected ? "#38BDF8" : "#334155"}
-                      fillOpacity="0.7"
-                    />
-                    {/* Mini table icon */}
-                    <rect x={iconX} y={iconY} width={iconSize} height={iconSize} rx={4} fill={iconBg} />
-                    {/* table header row */}
-                    <rect x={iconX + 2} y={iconY + 2} width={iconSize - 4} height={3.5} rx={1} fill={iconAccent} fillOpacity="0.9" />
-                    {/* table data rows */}
-                    <rect x={iconX + 2} y={iconY + 7} width={iconSize - 4} height={2.5} rx={0.8} fill={iconAccent} fillOpacity="0.45" />
-                    <rect x={iconX + 2} y={iconY + 11} width={iconSize - 7} height={2.5} rx={0.8} fill={iconAccent} fillOpacity="0.3" />
-                    {/* Primary label */}
+                    {/* Table glyph */}
+                    <circle cx={nx + 19} cy={pos.y} r={11} fill={isCenter ? "rgba(255,255,255,0.22)" : t.iconBg} />
+                    <rect x={nx + 13} y={pos.y - 5} width={12} height={10} rx={2} fill="none" stroke={isCenter ? "#fff" : accent} strokeWidth="1.3" />
+                    <line x1={nx + 13} y1={pos.y - 1.5} x2={nx + 25} y2={pos.y - 1.5} stroke={isCenter ? "#fff" : accent} strokeWidth="1.1" />
                     <text
                       x={textX}
-                      y={ny + (isCenter ? 18 : 15)}
-                      fontSize={isCenter ? "11" : "10"}
-                      fontWeight={isCenter ? "700" : "500"}
-                      fill={style.textFill}
+                      y={pos.y - 5}
+                      fontSize={isCenter ? "11.5" : "10.5"}
+                      fontWeight={isCenter ? "650" : "550"}
+                      fill={isCenter ? "#ffffff" : t.ink}
+                      dominantBaseline="middle"
                       className="select-none"
                     >
                       {truncLabel}
                     </text>
-                    {/* Sub-label */}
                     <text
                       x={textX}
-                      y={ny + (isCenter ? 31 : 27)}
+                      y={pos.y + 8}
                       fontSize="8.5"
-                      fill={style.labelFill}
+                      fill={isCenter ? "rgba(255,255,255,0.8)" : t.sub}
+                      dominantBaseline="middle"
                       className="select-none"
                     >
-                      {isCenter ? `${truncSchema} • ${node.column_count} cols` : truncSchema}
+                      {node.column_count} cols · {degreeById.get(node.id) ?? 0} links
                     </text>
                   </g>
                 );
@@ -558,30 +543,55 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
             </g>
           </svg>
 
+          {visibleEdges.length === 0 && selectedNode && (
+            <div className="ds-empty">
+              <p className="ds-empty-title">
+                {(degreeById.get(selectedNode.id) ?? 0) === 0
+                  ? `${selectedNode.label} has no relationships`
+                  : `No ${direction} relationships`}
+              </p>
+              <p className="ds-empty-text">
+                {(degreeById.get(selectedNode.id) ?? 0) === 0
+                  ? "This table isn't linked to any other table by a foreign key."
+                  : `Try another direction to see its ${degreeById.get(selectedNode.id)} links.`}
+              </p>
+              <div className="ds-empty-actions">
+                {direction !== "both" && (degreeById.get(selectedNode.id) ?? 0) > 0 && (
+                  <button type="button" onClick={() => setDirection("both")}>Show both directions</button>
+                )}
+                {firstConnectedId && firstConnectedId !== selectedNode.id && (degreeById.get(selectedNode.id) ?? 0) === 0 && (
+                  <button type="button" onClick={() => { setSelectedNodeId(firstConnectedId); setDirection("both"); }}>
+                    Jump to the most connected table
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Legend */}
           <div className="absolute bottom-3 left-4 flex items-center gap-4">
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-px bg-[#818CF8]" />
+              <div className="w-3 h-px ds-legend-out" />
               <div
                 style={{
                   width: 0,
                   height: 0,
                   borderTop: "4px solid transparent",
                   borderBottom: "4px solid transparent",
-                  borderLeft: "6px solid #818CF8",
+                  borderLeft: `6px solid ${t.out}`,
                 }}
               />
               <span className="text-[10px] text-muted-foreground">Outgoing</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-3 h-px bg-[#38BDF8]" />
+              <div className="w-3 h-px ds-legend-in" />
               <div
                 style={{
                   width: 0,
                   height: 0,
                   borderTop: "4px solid transparent",
                   borderBottom: "4px solid transparent",
-                  borderLeft: "6px solid #38BDF8",
+                  borderLeft: `6px solid ${t.inc}`,
                 }}
               />
               <span className="text-[10px] text-muted-foreground">Incoming</span>
@@ -660,11 +670,11 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
                     <p className="text-xs font-medium text-foreground mb-2">Direct Relationships</p>
                     <div className="flex gap-2">
                       <div className="flex-1 rounded-md bg-muted/20 border border-border/60 p-2 text-center">
-                        <p className="text-base font-semibold text-[#818CF8]">{outgoingCount}</p>
+                        <p className="text-base font-semibold text-primary">{outgoingCount}</p>
                         <p className="text-[10px] text-muted-foreground">Outgoing</p>
                       </div>
                       <div className="flex-1 rounded-md bg-muted/20 border border-border/60 p-2 text-center">
-                        <p className="text-base font-semibold text-[#38BDF8]">{incomingCount}</p>
+                        <p className="text-base font-semibold ds-text-in">{incomingCount}</p>
                         <p className="text-[10px] text-muted-foreground">Incoming</p>
                       </div>
                       <div className="flex-1 rounded-md bg-muted/20 border border-border/60 p-2 text-center">
@@ -679,7 +689,7 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
                   {/* Outgoing list */}
                   {relatedEdges.outgoing.length > 0 && (
                     <div>
-                      <p className="text-[11px] font-medium text-[#818CF8] mb-1.5 flex items-center gap-1">
+                      <p className="text-[11px] font-medium text-primary mb-1.5 flex items-center gap-1">
                         <ArrowUpRight className="w-3 h-3" />
                         Outgoing Relationships ({selectedNode.label} → Other)
                       </p>
@@ -696,7 +706,7 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
                               }}
                             >
                               <div className="flex items-center gap-2 min-w-0">
-                                <div className="w-2 h-2 rounded-full bg-[#818CF8] shrink-0" />
+                                <div className="w-2 h-2 rounded-full ds-legend-out shrink-0" />
                                 <span className="text-xs text-foreground truncate">
                                   {targetNode?.label ?? edge.target}
                                 </span>
@@ -715,7 +725,7 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
                   {/* Incoming list */}
                   {relatedEdges.incoming.length > 0 && (
                     <div>
-                      <p className="text-[11px] font-medium text-[#38BDF8] mb-1.5 flex items-center gap-1">
+                      <p className="text-[11px] font-medium ds-text-in mb-1.5 flex items-center gap-1">
                         <ArrowDownLeft className="w-3 h-3" />
                         Incoming Relationships (Other → {selectedNode.label})
                       </p>
@@ -732,7 +742,7 @@ export function DSGraphViewer({ graph }: DSGraphViewerProps) {
                               }}
                             >
                               <div className="flex items-center gap-2 min-w-0">
-                                <div className="w-2 h-2 rounded-full bg-[#38BDF8] shrink-0" />
+                                <div className="w-2 h-2 rounded-full ds-legend-in shrink-0" />
                                 <span className="text-xs text-foreground truncate">
                                   {sourceNode?.label ?? edge.source}
                                 </span>

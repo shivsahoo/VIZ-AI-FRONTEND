@@ -173,7 +173,7 @@ export function buildScatterOption(props: ChartOptionBuildProps): EChartsOption 
           color: resolveColor(
             config,
             yKey,
-            Math.max(0, props.dataKeys.indexOf(yKey)),
+            0, // single series: always the lead palette colour
             props.colors
           ),
           opacity: 0.75,

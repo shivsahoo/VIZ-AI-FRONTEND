@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Activity, Filter, RefreshCw, ChevronRight, ChevronDown,
+  Activity, RefreshCw, ChevronRight, ChevronDown,
   CheckCircle2, XCircle, Clock, AlertTriangle, Zap, DollarSign,
-  Cpu, BarChart2, ChevronLeft, X, Database, Bot, Radio
+  Cpu, BarChart2, ChevronLeft, X, Database, Bot, Radio, GanttChartSquare, Rows3,
 } from "lucide-react";
+import { ChartCard } from "../components/features/charts/ChartCard";
+import "./Observability.css";
 import { getTraces, getTraceDetail, getUsageAnalytics, type LLMTrace, type UsageAnalytics } from "../services/api";
 
 const POLL_INTERVAL_MS = 4000; // real-time polling interval
@@ -19,18 +21,25 @@ const AI_SERVICE_LABELS: Record<string, string> = {
   ai_assistant: "AI Assistant",
 };
 
-const SERVICE_COLORS: Record<string, string> = {
-  chart_creation: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  probe_mode: "bg-violet-500/15 text-violet-400 border-violet-500/30",
-  ai_assistant: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+// Tone slot per service (see .obs-tone-* in Observability.css)
+const SERVICE_TONE: Record<string, string> = {
+  chart_creation: "blue",
+  probe_mode: "indigo",
+  ai_assistant: "teal",
 };
+const serviceTone = (service: string) => SERVICE_TONE[service] ?? "gray";
 
 const STATUS_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
-  success: { icon: CheckCircle2, color: "text-green-400", label: "Success" },
-  error: { icon: XCircle, color: "text-red-400", label: "Error" },
-  timeout: { icon: Clock, color: "text-yellow-400", label: "Timeout" },
-  cancelled: { icon: AlertTriangle, color: "text-muted-foreground", label: "Cancelled" },
+  success: { icon: CheckCircle2, color: "is-success", label: "Success" },
+  error: { icon: XCircle, color: "is-error", label: "Error" },
+  timeout: { icon: Clock, color: "is-timeout", label: "Timeout" },
+  cancelled: { icon: AlertTriangle, color: "is-cancelled", label: "Cancelled" },
 };
+
+function formatLatency(ms: number | null) {
+  if (ms == null) return "—";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+}
 
 function formatCost(n: number) {
   if (n === 0) return "$0.00";
@@ -66,21 +75,20 @@ function StatCard({ label, value, sub, icon: Icon, accent = false }: {
   label: string; value: string; sub?: string; icon: any; accent?: boolean;
 }) {
   return (
-    <div className={`rounded-xl border p-4 flex flex-col gap-2 ${accent ? "border-primary/30 bg-primary/5" : "border-border bg-card"}`}>
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">{label}</span>
-        <Icon className={`w-4 h-4 ${accent ? "text-primary" : "text-muted-foreground"}`} />
-      </div>
-      <span className={`text-2xl font-bold ${accent ? "text-primary" : "text-foreground"}`}>{value}</span>
-      {sub && <span className="text-xs text-muted-foreground">{sub}</span>}
+    <div className={`obs-stat${accent ? " is-accent" : ""}`}>
+      <span className="obs-stat-icon"><Icon className="w-4 h-4" aria-hidden="true" /></span>
+      <span className="obs-stat-label">{label}</span>
+      <span className="obs-stat-value">{value}</span>
+      {sub && <span className="obs-stat-sub">{sub}</span>}
     </div>
   );
 }
 
 function ServiceBadge({ service }: { service: string }) {
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${SERVICE_COLORS[service] ?? SERVICE_COLORS.other}`}>
-      {AI_SERVICE_LABELS[service] ?? service}
+    <span className={`obs-service obs-tone-${serviceTone(service)}`}>
+      <span className="obs-service-dot" aria-hidden="true" />
+      {AI_SERVICE_LABELS[service] ?? service.replace(/_/g, " ")}
     </span>
   );
 }
@@ -89,10 +97,83 @@ function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.error;
   const Icon = cfg.icon;
   return (
-    <span className={`flex items-center gap-1 text-xs font-medium ${cfg.color}`}>
-      <Icon className="w-3.5 h-3.5" />
+    <span className={`obs-status ${cfg.color}`}>
+      <Icon className="w-3.5 h-3.5" aria-hidden="true" />
       {cfg.label}
     </span>
+  );
+}
+
+/** Nice round axis maximum for the latency scale. */
+function niceCeil(ms: number) {
+  const steps = [1000, 2000, 5000, 10000, 15000, 20000, 30000, 45000, 60000, 90000, 120000, 300000];
+  return steps.find((s) => s >= ms) ?? Math.ceil(ms / 60000) * 60000;
+}
+
+function TraceTimeline({ traces, onSelect }: { traces: LLMTrace[]; onSelect: (t: LLMTrace) => void }) {
+  const maxLatency = Math.max(1000, ...traces.map((t) => t.latency_ms ?? 0));
+  const axisMax = niceCeil(maxLatency);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * axisMax);
+  return (
+    <div className="obs-timeline" role="table" aria-label="Traces by latency">
+      <div className="obs-tl-head" role="row">
+        <span role="columnheader">Call</span>
+        <div className="obs-tl-axis" role="columnheader" aria-label="Latency">
+          {ticks.map((t, i) => (
+            <span key={i} style={{ left: `${(t / axisMax) * 100}%` }}>{formatLatency(t)}</span>
+          ))}
+        </div>
+        <span role="columnheader">Status</span>
+        <span role="columnheader" className="text-right">Cost</span>
+      </div>
+      {traces.map((trace) => {
+        const pct = Math.max(2, ((trace.latency_ms ?? 0) / axisMax) * 100);
+        const tone = trace.status === "error" ? "red" : trace.status === "timeout" ? "orange" : serviceTone(trace.ai_service);
+        return (
+          <div
+            key={trace.id}
+            className="obs-tl-row"
+            role="row"
+            tabIndex={0}
+            onClick={() => onSelect(trace)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(trace);
+              }
+            }}
+          >
+            <div className="obs-tl-call" role="cell">
+              <span className={`obs-tl-icon obs-tone-${serviceTone(trace.ai_service)}`} aria-hidden="true">
+                {trace.ai_service === "chart_creation" ? <BarChart2 className="w-4 h-4" /> : trace.ai_service === "ai_assistant" ? <Bot className="w-4 h-4" /> : trace.ai_service === "probe_mode" ? <Zap className="w-4 h-4" /> : <Database className="w-4 h-4" />}
+              </span>
+              <div className="min-w-0">
+                <p className="obs-tl-name">{AI_SERVICE_LABELS[trace.ai_service] ?? trace.ai_service.replace(/_/g, " ")}</p>
+                <p className="obs-tl-meta">
+                  <span className="obs-chip">#{trace.id.slice(0, 6)}</span>
+                  <span className="truncate">{trace.model_name ?? "unknown model"}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="whitespace-nowrap">{trace.created_at ? timeAgo(trace.created_at) : "—"}</span>
+                </p>
+              </div>
+            </div>
+            <div className="obs-tl-track" role="cell">
+              {ticks.slice(1, -1).map((t, i) => (
+                <span key={i} className="obs-tl-grid" style={{ left: `${(t / axisMax) * 100}%` }} aria-hidden="true" />
+              ))}
+              <div className={`obs-tl-bar obs-tone-${tone}${pct < 22 ? " is-short" : ""}`} style={{ width: `${pct}%` }}>
+                <span className="obs-tl-bar-label">
+                  {formatLatency(trace.latency_ms)}
+                  {trace.total_tokens > 0 && <span className="obs-tl-bar-sub"> · {formatTokens(trace.total_tokens)} tok</span>}
+                </span>
+              </div>
+            </div>
+            <div role="cell"><StatusBadge status={trace.status} /></div>
+            <div role="cell" className="obs-tl-cost">{formatCost(trace.estimated_cost_usd)}</div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -411,24 +492,6 @@ function TraceDetail({ trace, onClose }: { trace: LLMTrace | null; onClose: () =
 
 // ─── Simple Sparkline using SVG ───────────────────────────────────────────────
 
-function Sparkline({ data, color = "var(--color-primary)" }: { data: number[]; color?: string }) {
-  if (!data.length) return null;
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data);
-  const range = max - min || 1;
-  const w = 120, h = 32, pad = 2;
-  const pts = data.map((v, i) => {
-    const x = pad + (i / (data.length - 1 || 1)) * (w - pad * 2);
-    const y = pad + ((1 - (v - min) / range) * (h - pad * 2));
-    return `${x},${y}`;
-  }).join(" ");
-  return (
-    <svg width={w} height={h} className="overflow-visible">
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function ObservabilityView({ projectId }: ObservabilityViewProps) {
@@ -521,409 +584,400 @@ export function ObservabilityView({ projectId }: ObservabilityViewProps) {
 
   const totalPages = Math.ceil(totalTraces / PAGE_SIZE);
 
-  // Build daily cost sparkline from analytics
-  const dailyCostData = analytics
-    ? [...analytics.daily_trend]
-        .sort((a, b) => a.day.localeCompare(b.day))
+  // Daily cost (all services) for the analytics chart
+  const dailyCost = analytics
+    ? Object.entries(
+        (analytics.daily_trend ?? []).reduce<Record<string, number>>((acc, d) => {
+          acc[d.day] = (acc[d.day] ?? 0) + Number(d.cost_usd || 0);
+          return acc;
+        }, {}),
+      )
+        .sort(([a], [b]) => a.localeCompare(b))
         .slice(-14)
-        .map((d) => Number(d.cost_usd))
+        .map(([day, cost]) => ({ day, cost: Number(cost.toFixed(4)) }))
     : [];
 
+  // Page-level summary for the trace explorer
+  const pageStats = (() => {
+    const n = traces.length || 1;
+    const ok = traces.filter((t) => t.status === "success").length;
+    const lat = traces.filter((t) => t.latency_ms != null);
+    return {
+      success: traces.length ? Math.round((ok / n) * 100) : 0,
+      avgLatency: lat.length ? Math.round(lat.reduce((s, t) => s + (t.latency_ms ?? 0), 0) / lat.length) : null,
+      tokens: traces.reduce((s, t) => s + (t.total_tokens || 0), 0),
+      cost: traces.reduce((s, t) => s + (t.estimated_cost_usd || 0), 0),
+    };
+  })();
+
+  const [traceView, setTraceView] = useState<"timeline" | "table">(() => {
+    try {
+      return localStorage.getItem("vizai_obs_view") === "table" ? "table" : "timeline";
+    } catch {
+      return "timeline";
+    }
+  });
+  const changeTraceView = (v: "timeline" | "table") => {
+    setTraceView(v);
+    try {
+      localStorage.setItem("vizai_obs_view", v);
+    } catch {
+      /* ignore */
+    }
+  };
+  const hasFilters = Boolean(serviceFilter || statusFilter || dateFrom || dateTo);
+  const summary = analytics?.summary;
+
   return (
-    <div className="h-full flex flex-col bg-background">
-      {/* ── Page Header ─────────────────────────────────────────────────── */}
-      <div className="px-6 pt-6 pb-4 border-b border-border">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Activity className="w-4 h-4 text-primary" />
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold text-foreground">AI Observability</h1>
-              <p className="text-xs text-muted-foreground">Trace every LLM call — tokens, cost, reasoning chain</p>
-            </div>
+    <div className="min-h-full">
+      <div className="ws-page obs-page">
+        {/* ── Header ── */}
+        <header className="ws-header">
+          <div>
+            <h1 className="ws-title">AI Observability</h1>
+            <p className="ws-subtitle">Every LLM call with its tokens, cost, latency and reasoning chain.</p>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Live indicator — only shown on traces tab */}
+          <div className="ws-actions">
             {activeTab === "traces" && (
               <button
+                type="button"
                 onClick={() => setLiveMode((v) => !v)}
-                title={liveMode ? "Live mode ON — click to pause" : "Live mode OFF — click to enable"}
-                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium ${
-                  liveMode
-                    ? "border-green-500/40 bg-green-500/10 text-green-400 hover:bg-green-500/20"
-                    : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/50"
-                }`}
+                aria-pressed={liveMode}
+                className={`obs-live${liveMode ? " is-on" : ""}`}
+                title={liveMode ? "Live updates on — click to pause" : "Live updates paused — click to resume"}
               >
-                <Radio className={`w-3 h-3 ${liveMode ? "animate-pulse" : ""}`} />
+                <Radio className="w-3.5 h-3.5" aria-hidden="true" />
                 {liveMode ? "Live" : "Paused"}
+                {lastUpdated && <span className="obs-live-time">{lastUpdated.toLocaleTimeString()}</span>}
               </button>
             )}
-            {lastUpdated && activeTab === "traces" && (
-              <span className="text-xs text-muted-foreground hidden sm:block">
-                {lastUpdated.toLocaleTimeString()}
-              </span>
-            )}
             <button
+              type="button"
+              className="obs-pill-btn"
               onClick={() => activeTab === "traces" ? fetchTraces() : fetchAnalytics()}
-              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-lg border border-border hover:bg-muted/40"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loadingTraces || loadingAnalytics ? "animate-spin" : ""}`} />
+              <RefreshCw className={`w-4 h-4 ${loadingTraces || loadingAnalytics ? "animate-spin" : ""}`} aria-hidden="true" />
               Refresh
             </button>
           </div>
-        </div>
+        </header>
 
-        {/* Tab bar */}
-        <div className="flex gap-1 mt-4">
+        {/* ── Tabs ── */}
+        <div className="obs-segment" role="tablist" aria-label="Observability view">
           {(["traces", "analytics"] as const).map((tab) => (
             <button
               key={tab}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-1.5 text-sm rounded-lg transition-colors capitalize font-medium ${
-                activeTab === tab
-                  ? "bg-primary/10 text-primary border border-primary/20"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-              }`}
+              className={`obs-segment-btn${activeTab === tab ? " is-active" : ""}`}
             >
+              {tab === "traces" ? <Activity className="w-4 h-4" aria-hidden="true" /> : <BarChart2 className="w-4 h-4" aria-hidden="true" />}
               {tab === "traces" ? "Trace Explorer" : "Usage Analytics"}
             </button>
           ))}
         </div>
-      </div>
 
-      {/* ── Trace Explorer ──────────────────────────────────────────────── */}
-      {activeTab === "traces" && (
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Filters */}
-          <div className="px-6 py-3 border-b border-border flex items-center gap-3 flex-wrap">
-            <Filter className="w-4 h-4 text-muted-foreground shrink-0" />
-
-            <select
-              value={serviceFilter}
-              onChange={(e) => { setServiceFilter(e.target.value); setPage(1); }}
-              className="text-sm bg-muted/40 border border-border rounded-lg px-3 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-            >
-              <option value="">All Services</option>
-              {Object.entries(AI_SERVICE_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
+        {/* ── Trace Explorer ── */}
+        {activeTab === "traces" && (
+          <section className="obs-panel">
+            {/* Status tabs */}
+            <div className="obs-status-tabs" role="tablist" aria-label="Filter by status">
+              {[
+                { id: "", label: "All" },
+                { id: "success", label: "Success" },
+                { id: "error", label: "Error" },
+                { id: "timeout", label: "Timeout" },
+              ].map((t) => (
+                <button
+                  key={t.id || "all"}
+                  type="button"
+                  role="tab"
+                  aria-selected={statusFilter === t.id}
+                  className={`obs-status-tab${statusFilter === t.id ? " is-active" : ""}`}
+                  onClick={() => { setStatusFilter(t.id); setPage(1); }}
+                >
+                  {t.label}
+                </button>
               ))}
-            </select>
+              <span className="obs-count">
+                {liveMode && <span className="obs-live-dot" aria-hidden="true" />}
+                {loadingTraces ? "Loading…" : `${totalTraces.toLocaleString()} traces`}
+              </span>
+            </div>
 
-            <select
-              value={statusFilter}
-              onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-              className="text-sm bg-muted/40 border border-border rounded-lg px-3 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-            >
-              <option value="">All Statuses</option>
-              <option value="success">Success</option>
-              <option value="error">Error</option>
-              <option value="timeout">Timeout</option>
-            </select>
+            {/* Filters */}
+            <div className="obs-toolbar">
+              <label className="obs-field">
+                <span className="sr-only">Service</span>
+                <select
+                  value={serviceFilter}
+                  onChange={(e) => { setServiceFilter(e.target.value); setPage(1); }}
+                >
+                  <option value="">All services</option>
+                  {Object.entries(AI_SERVICE_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+                <ChevronDown className="w-4 h-4" aria-hidden="true" />
+              </label>
+              <label className="obs-field obs-field--date">
+                <span className="obs-field-label">From</span>
+                <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
+              </label>
+              <label className="obs-field obs-field--date">
+                <span className="obs-field-label">To</span>
+                <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} />
+              </label>
+              {hasFilters && (
+                <button
+                  type="button"
+                  className="obs-clear"
+                  onClick={() => { setServiceFilter(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); setPage(1); }}
+                >
+                  <X className="w-3.5 h-3.5" aria-hidden="true" /> Clear filters
+                </button>
+              )}
+              <div className="obs-view-toggle" role="group" aria-label="Trace layout">
+                <button
+                  type="button"
+                  aria-pressed={traceView === "timeline"}
+                  className={traceView === "timeline" ? "is-active" : ""}
+                  onClick={() => changeTraceView("timeline")}
+                  title="Timeline"
+                >
+                  <GanttChartSquare className="w-4 h-4" aria-hidden="true" />
+                  <span className="sr-only">Timeline view</span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={traceView === "table"}
+                  className={traceView === "table" ? "is-active" : ""}
+                  onClick={() => changeTraceView("table")}
+                  title="Table"
+                >
+                  <Rows3 className="w-4 h-4" aria-hidden="true" />
+                  <span className="sr-only">Table view</span>
+                </button>
+              </div>
+            </div>
 
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-              className="text-sm bg-muted/40 border border-border rounded-lg px-3 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-              placeholder="From"
-            />
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-              className="text-sm bg-muted/40 border border-border rounded-lg px-3 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-              placeholder="To"
-            />
+            {/* Page summary */}
+            {traces.length > 0 && !loadingTraces && (
+              <div className="obs-summary">
+                <div><span>Success rate</span><strong>{pageStats.success}%</strong></div>
+                <div><span>Avg latency</span><strong>{formatLatency(pageStats.avgLatency)}</strong></div>
+                <div><span>Tokens</span><strong>{formatTokens(pageStats.tokens)}</strong></div>
+                <div><span>Cost</span><strong>{formatCost(pageStats.cost)}</strong></div>
+                <p className="obs-summary-note">For the {traces.length} calls on this page</p>
+              </div>
+            )}
 
-            {(serviceFilter || statusFilter || dateFrom || dateTo) && (
+            {/* New-traces banner */}
+            {newTraceCount > 0 && (
               <button
-                onClick={() => { setServiceFilter(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); setPage(1); }}
-                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                type="button"
+                className="obs-new-banner"
+                onClick={() => { setNewTraceCount(0); fetchTraces(); }}
               >
-                <X className="w-3 h-3" /> Clear
+                <Radio className="w-3.5 h-3.5" aria-hidden="true" />
+                {newTraceCount} new trace{newTraceCount > 1 ? "s" : ""} — show them
               </button>
             )}
 
-            <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1.5">
-              {liveMode && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />}
-              {loadingTraces ? "Loading…" : `${totalTraces.toLocaleString()} traces`}
-            </span>
-          </div>
-
-          {/* New-traces banner */}
-          {newTraceCount > 0 && (
-            <button
-              className="w-full py-2 text-xs font-medium bg-green-500/10 border-b border-green-500/20 text-green-400 hover:bg-green-500/15 transition-colors flex items-center justify-center gap-2"
-              onClick={() => { setNewTraceCount(0); fetchTraces(); }}
-            >
-              <Radio className="w-3 h-3 animate-pulse" />
-              {newTraceCount} new trace{newTraceCount > 1 ? "s" : ""} — click to reload
-            </button>
-          )}
-
-          {/* Table */}
-          <div className="flex-1 overflow-auto">
+            {/* Body */}
             {loadingTraces ? (
-              <div className="flex items-center justify-center h-40">
-                <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
+              <div className="obs-loading">
+                {Array.from({ length: 6 }, (_, i) => <div key={i} className="home-skel" style={{ height: 56, borderRadius: 14 }} />)}
               </div>
             ) : traces.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 text-muted-foreground gap-3">
-                <Activity className="w-8 h-8 opacity-30" />
-                <p className="text-sm">No traces found. Start using Probe Mode to see LLM traces here.</p>
+              <div className="ws-empty obs-empty">
+                <span className="ws-empty-icon"><Activity className="w-7 h-7" aria-hidden="true" /></span>
+                <p className="ws-empty-title">{hasFilters ? "No traces match these filters" : "No traces yet"}</p>
+                <p className="ws-empty-text">
+                  {hasFilters ? "Try a wider date range or clear the filters." : "Generate a chart or use Probe Mode and each LLM call will appear here."}
+                </p>
+              </div>
+            ) : traceView === "timeline" ? (
+              <TraceTimeline traces={traces} onSelect={setSelectedTrace} />
+            ) : (
+              <div className="obs-table-wrap">
+                <table className="obs-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Service</th>
+                      <th>Model</th>
+                      <th className="text-right">Tokens</th>
+                      <th className="text-right">Cost</th>
+                      <th className="text-right">Latency</th>
+                      <th>Status</th>
+                      <th aria-label="Open" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {traces.map((trace) => (
+                      <tr key={trace.id} tabIndex={0} onClick={() => setSelectedTrace(trace)} onKeyDown={(e) => { if (e.key === "Enter") setSelectedTrace(trace); }}>
+                        <td className="text-muted-foreground whitespace-nowrap">{trace.created_at ? timeAgo(trace.created_at) : "—"}</td>
+                        <td><ServiceBadge service={trace.ai_service} /></td>
+                        <td className="font-mono text-[13px]">{trace.model_name ?? "—"}</td>
+                        <td className="text-right font-medium tabular-nums">{formatTokens(trace.total_tokens)}</td>
+                        <td className="text-right tabular-nums">{formatCost(trace.estimated_cost_usd)}</td>
+                        <td className="text-right tabular-nums text-muted-foreground">{formatLatency(trace.latency_ms)}</td>
+                        <td><StatusBadge status={trace.status} /></td>
+                        <td><ChevronRight className="w-4 h-4 text-muted-foreground" aria-hidden="true" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="obs-pager">
+                <span>Page {page} of {totalPages}</span>
+                <div>
+                  <button type="button" disabled={page === 1} onClick={() => setPage((p) => p - 1)} aria-label="Previous page">
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button type="button" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)} aria-label="Next page">
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* ── Usage Analytics ── */}
+        {activeTab === "analytics" && (
+          <>
+            <div className="obs-toolbar obs-toolbar--plain">
+              <label className="obs-field obs-field--date">
+                <span className="obs-field-label">From</span>
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              </label>
+              <label className="obs-field obs-field--date">
+                <span className="obs-field-label">To</span>
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              </label>
+              <button type="button" className="obs-pill-btn is-primary" onClick={fetchAnalytics}>Apply</button>
+            </div>
+
+            {loadingAnalytics ? (
+              <div className="obs-stats">
+                {Array.from({ length: 4 }, (_, i) => <div key={i} className="home-skel" style={{ height: 132, borderRadius: 22 }} />)}
+              </div>
+            ) : !analytics || !summary ? (
+              <div className="ws-empty">
+                <span className="ws-empty-icon"><BarChart2 className="w-7 h-7" aria-hidden="true" /></span>
+                <p className="ws-empty-title">No usage data yet</p>
+                <p className="ws-empty-text">Usage appears here once VizAI has made LLM calls in this period.</p>
               </div>
             ) : (
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-background/95 backdrop-blur border-b border-border">
-                  <tr>
-                    <th className="text-left px-6 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Time</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Service</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Model</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Tokens</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Cost</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Latency</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
-                    <th className="px-4 py-3" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {traces.map((trace) => (
-                    <tr
-                      key={trace.id}
-                      className="hover:bg-muted/20 cursor-pointer transition-colors group"
-                      onClick={() => setSelectedTrace(trace)}
-                    >
-                      <td className="px-6 py-3 text-muted-foreground whitespace-nowrap">
-                        {trace.created_at ? timeAgo(trace.created_at) : "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <ServiceBadge service={trace.ai_service} />
-                      </td>
-                      <td className="px-4 py-3 text-foreground font-mono text-xs">
-                        {trace.model_name ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right text-foreground font-medium">
-                        {formatTokens(trace.total_tokens)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-foreground">
-                        {formatCost(trace.estimated_cost_usd)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-muted-foreground">
-                        {trace.latency_ms != null ? `${trace.latency_ms}ms` : "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={trace.status} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+              <>
+                <div className="obs-stats">
+                  <StatCard
+                    label="LLM calls"
+                    value={(summary.total_calls ?? 0).toLocaleString()}
+                    sub={`${summary.error_rate ?? 0}% error rate`}
+                    icon={Zap}
+                    accent
+                  />
+                  <StatCard
+                    label="Tokens"
+                    value={formatTokens(summary.total_tokens ?? 0)}
+                    sub={`${formatTokens(summary.total_prompt_tokens ?? 0)} prompt · ${formatTokens(summary.total_completion_tokens ?? 0)} completion`}
+                    icon={Cpu}
+                  />
+                  <StatCard
+                    label="Estimated cost"
+                    value={`$${Number(summary.total_cost_usd ?? 0).toFixed(4)}`}
+                    sub="USD, all services"
+                    icon={DollarSign}
+                  />
+                  <StatCard
+                    label="Avg latency"
+                    value={formatLatency(summary.avg_latency_ms ?? null)}
+                    sub={`${summary.error_count ?? 0} errors`}
+                    icon={Clock}
+                  />
+                </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="px-6 py-3 border-t border-border flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">
-                Page {page} of {totalPages}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  disabled={page === 1}
-                  onClick={() => setPage((p) => p - 1)}
-                  className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  disabled={page === totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                  className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+                <div className="obs-analytics-grid">
+                  {dailyCost.length > 0 && (
+                    <section className="obs-card obs-card--wide">
+                      <div className="obs-card-head">
+                        <h3>Daily cost</h3>
+                        <span>Last {dailyCost.length} days · USD</span>
+                      </div>
+                      <ChartCard type="area" data={dailyCost} dataKeys={["cost"]} xAxisKey="day" height={240} showLegend={false} />
+                    </section>
+                  )}
 
-      {/* ── Usage Analytics ─────────────────────────────────────────────── */}
-      {activeTab === "analytics" && (
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-          {/* Date filters */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <Filter className="w-4 h-4 text-muted-foreground" />
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="text-sm bg-muted/40 border border-border rounded-lg px-3 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-            />
-            <span className="text-muted-foreground text-sm">to</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="text-sm bg-muted/40 border border-border rounded-lg px-3 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-            />
-            <button
-              onClick={fetchAnalytics}
-              className="px-3 py-1.5 text-sm rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
-            >
-              Apply
-            </button>
-          </div>
+                  {(analytics.service_breakdown ?? []).length > 0 && (
+                    <section className="obs-card">
+                      <div className="obs-card-head"><h3>By service</h3></div>
+                      <div className="obs-breakdown">
+                        {(analytics.service_breakdown ?? []).map((row) => {
+                          const totalCost = Number(summary.total_cost_usd) || 1;
+                          const pct = Math.min(100, (Number(row.cost_usd) / totalCost) * 100);
+                          return (
+                            <div key={row.ai_service} className="obs-breakdown-row">
+                              <div className="obs-breakdown-top">
+                                <ServiceBadge service={row.ai_service} />
+                                <span className="obs-breakdown-cost">{formatCost(Number(row.cost_usd))}</span>
+                              </div>
+                              <div className={`obs-meter obs-tone-${serviceTone(row.ai_service)}`}>
+                                <span style={{ width: `${Math.max(pct, 2)}%` }} />
+                              </div>
+                              <p className="obs-breakdown-meta">
+                                {row.calls.toLocaleString()} calls · {formatTokens(row.tokens)} tokens
+                                {row.errors > 0 && <span className="obs-err"> · {row.errors} errors</span>}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  )}
 
-          {loadingAnalytics ? (
-            <div className="flex items-center justify-center h-40">
-              <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : !analytics ? (
-            <div className="flex flex-col items-center justify-center h-40 text-muted-foreground gap-3">
-              <BarChart2 className="w-8 h-8 opacity-30" />
-              <p className="text-sm">No analytics data yet.</p>
-            </div>
-          ) : (
-            <>
-              {/* Summary stat cards */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <StatCard
-                  label="Total LLM Calls"
-                  value={analytics.summary.total_calls.toLocaleString()}
-                  sub={`${analytics.summary.error_rate}% error rate`}
-                  icon={Zap}
-                  accent
-                />
-                <StatCard
-                  label="Total Tokens"
-                  value={formatTokens(analytics.summary.total_tokens)}
-                  sub={`${formatTokens(analytics.summary.total_prompt_tokens)} prompt / ${formatTokens(analytics.summary.total_completion_tokens)} completion`}
-                  icon={Cpu}
-                />
-                <StatCard
-                  label="Est. Total Cost"
-                  value={`$${analytics.summary.total_cost_usd.toFixed(4)}`}
-                  sub="USD across all services"
-                  icon={DollarSign}
-                />
-                <StatCard
-                  label="Avg Latency"
-                  value={`${analytics.summary.avg_latency_ms}ms`}
-                  sub={`${analytics.summary.error_count} errors`}
-                  icon={Clock}
-                />
-              </div>
-
-              {/* Cost sparkline + per-day table */}
-              {analytics.daily_trend.length > 0 && (
-                <div className="rounded-xl border border-border bg-card p-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-semibold text-foreground">Daily Cost Trend (last 14 days)</h3>
-                    <Sparkline data={dailyCostData} />
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-border">
-                          <th className="text-left py-2 text-muted-foreground font-medium">Date</th>
-                          <th className="text-left py-2 text-muted-foreground font-medium">Service</th>
-                          <th className="text-right py-2 text-muted-foreground font-medium">Calls</th>
-                          <th className="text-right py-2 text-muted-foreground font-medium">Tokens</th>
-                          <th className="text-right py-2 text-muted-foreground font-medium">Cost (USD)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {[...analytics.daily_trend]
-                          .sort((a, b) => b.day.localeCompare(a.day))
-                          .slice(0, 30)
-                          .map((row, i) => (
-                            <tr key={i} className="hover:bg-muted/10">
-                              <td className="py-2 text-muted-foreground font-mono">{row.day}</td>
-                              <td className="py-2"><ServiceBadge service={row.ai_service} /></td>
-                              <td className="py-2 text-right text-foreground">{row.calls.toLocaleString()}</td>
-                              <td className="py-2 text-right text-foreground">{formatTokens(row.tokens)}</td>
-                              <td className="py-2 text-right font-medium text-foreground">{formatCost(Number(row.cost_usd))}</td>
+                  {(analytics.model_breakdown ?? []).length > 0 && (
+                    <section className="obs-card">
+                      <div className="obs-card-head"><h3>By model</h3></div>
+                      <table className="obs-table obs-table--compact">
+                        <thead>
+                          <tr>
+                            <th>Model</th>
+                            <th className="text-right">Calls</th>
+                            <th className="text-right">Tokens</th>
+                            <th className="text-right">Cost</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(analytics.model_breakdown ?? []).map((row, i) => (
+                            <tr key={i}>
+                              <td>
+                                <span className="font-mono text-[13px]">{row.model_name ?? "—"}</span>
+                                <span className="block text-[12px] text-muted-foreground capitalize">{row.llm_provider ?? "—"}</span>
+                              </td>
+                              <td className="text-right tabular-nums">{row.calls.toLocaleString()}</td>
+                              <td className="text-right tabular-nums">{formatTokens(row.tokens)}</td>
+                              <td className="text-right tabular-nums font-semibold">{formatCost(Number(row.cost_usd))}</td>
                             </tr>
                           ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </tbody>
+                      </table>
+                    </section>
+                  )}
                 </div>
-              )}
-
-              {/* Service breakdown */}
-              {analytics.service_breakdown.length > 0 && (
-                <div className="rounded-xl border border-border bg-card p-5">
-                  <h3 className="text-sm font-semibold text-foreground mb-4">Breakdown by AI Service</h3>
-                  <div className="space-y-3">
-                    {analytics.service_breakdown.map((row) => {
-                      const totalCost = analytics.summary.total_cost_usd || 1;
-                      const pct = Math.min(100, (Number(row.cost_usd) / totalCost) * 100);
-                      return (
-                        <div key={row.ai_service}>
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-2">
-                              <ServiceBadge service={row.ai_service} />
-                              <span className="text-xs text-muted-foreground">{row.calls.toLocaleString()} calls</span>
-                            </div>
-                            <div className="flex items-center gap-4 text-xs">
-                              <span className="text-muted-foreground">{formatTokens(row.tokens)} tokens</span>
-                              <span className="font-semibold text-foreground">{formatCost(Number(row.cost_usd))}</span>
-                              {row.errors > 0 && (
-                                <span className="text-red-400">{row.errors} errors</span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-primary/60 transition-all duration-500"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Model breakdown */}
-              {analytics.model_breakdown.length > 0 && (
-                <div className="rounded-xl border border-border bg-card p-5">
-                  <h3 className="text-sm font-semibold text-foreground mb-4">Breakdown by Model</h3>
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-border">
-                        <th className="text-left py-2 text-muted-foreground font-medium">Model</th>
-                        <th className="text-left py-2 text-muted-foreground font-medium">Provider</th>
-                        <th className="text-right py-2 text-muted-foreground font-medium">Calls</th>
-                        <th className="text-right py-2 text-muted-foreground font-medium">Tokens</th>
-                        <th className="text-right py-2 text-muted-foreground font-medium">Cost (USD)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {analytics.model_breakdown.map((row, i) => (
-                        <tr key={i} className="hover:bg-muted/10">
-                          <td className="py-2 font-mono text-foreground">{row.model_name ?? "—"}</td>
-                          <td className="py-2 capitalize text-muted-foreground">{row.llm_provider ?? "—"}</td>
-                          <td className="py-2 text-right text-foreground">{row.calls.toLocaleString()}</td>
-                          <td className="py-2 text-right text-foreground">{formatTokens(row.tokens)}</td>
-                          <td className="py-2 text-right font-semibold text-foreground">{formatCost(Number(row.cost_usd))}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+              </>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Trace Detail Drawer */}
       {selectedTrace && (

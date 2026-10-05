@@ -9,6 +9,7 @@ import { ChartContainer } from "../../ui/chart";
 import type { ChartCardProps, ChartType } from "./core/chartTypes";
 import { buildChartOption, resolveSeriesKeys } from "./core/buildChartOption";
 import { ensureWorldMapRegistered } from "./core/mapRegister";
+import { applyChartTheme } from "./core/chartTheme";
 import { buildBarOption } from "./renderers/BarChartRenderer";
 import { buildLineOption } from "./renderers/LineChartRenderer";
 import { buildAreaOption } from "./renderers/AreaChartRenderer";
@@ -148,18 +149,8 @@ export function ChartCard(props: ChartCardProps) {
       }
       // Compose rendererProps inside useMemo so all deps are captured correctly
       const rendererProps: ChartCardProps = { ...props, axisConfig, isDark };
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console -- temporary scatter pipeline debug
-        console.log("[ChartCard] rendering", {
-          type,
-          xAxisKey: props.xAxisKey,
-          dataKeys: props.dataKeys,
-          axisConfig,
-          rowCount: data?.length,
-        });
-      }
       try {
-        return builder(rendererProps);
+        return applyChartTheme(builder(rendererProps), { isDark, compact });
       } catch (err) {
         console.error("[ChartCard] option builder threw:", type, err);
         return {};
@@ -414,8 +405,8 @@ export function ChartCard(props: ChartCardProps) {
 
   // ── Multi Y-Axis — horizontal scroll when many categories ────────────────
   if (type === "multiyaxischart") {
-    const needsHorizontal = data.length > 15;
-    const minW = needsHorizontal ? Math.max(600, data.length * 56) : undefined;
+    const needsHorizontal = false;
+    const minW: number | undefined = undefined;
     return (
       <div 
         className="w-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent" 
@@ -466,9 +457,11 @@ export function ChartCard(props: ChartCardProps) {
 
   // ── Line, Bar, Area, StackedLineChart — pan only when many points need extra width ──
   const pointCount = data.length;
-  const pitch = type === "bar" ? 80 : 60;
+  // Labels are short now (dates are formatted), so pan only for long series
+  const pitch = type === "bar" ? 36 : 24;
   const minWDesired = Math.max(400, pointCount * pitch);
-  const needsHorizontalPan = minWDesired > CARTESIAN_PAN_WIDTH_PX;
+  // Long category axes get a zoom window from applyChartTheme instead of a scrollbar
+  const needsHorizontalPan = false && minWDesired > CARTESIAN_PAN_WIDTH_PX;
 
   if (!needsHorizontalPan) {
     return (

@@ -1,3 +1,5 @@
+import { humanizeKey } from "./core/labels";
+
 /**
  * Pure formatters for ECharts tooltips (parity with previous Recharts tooltip behavior).
  */
@@ -45,19 +47,26 @@ export function formatExtraFieldsBlock(
   row: Record<string, unknown> | undefined,
   seriesKeys: Set<string>,
   extraFieldKeys?: string[],
+  /** Values already shown in the tooltip (e.g. the category name) — not repeated. */
+  skipValues?: Set<string>,
 ): string {
   let entries = getTooltipExtraFieldEntries(row, seriesKeys);
   if (extraFieldKeys?.length) {
     const allow = new Set(extraFieldKeys);
     entries = entries.filter(([k]) => allow.has(k));
   }
+  if (skipValues?.size) {
+    entries = entries.filter(([, v]) => !skipValues.has(String(v)));
+  }
   if (entries.length === 0) return "";
-  const lines = entries.map(
+  const shown = entries.slice(0, 6);
+  // CSS variables resolve against <html>, so these follow the light/dark theme.
+  const lines = shown.map(
     ([k, v]) =>
-      `<div style="font-size:11px;color:#D1D5DB;margin:0">${k}: ${formatScalarForTooltip(v)}</div>`,
+      `<div style="display:flex;justify-content:space-between;gap:16px;font-size:12px;line-height:1.6"><span style="color:var(--muted-foreground)">${humanizeKey(k)}</span><span style="color:var(--foreground);font-weight:500">${formatScalarForTooltip(v)}</span></div>`,
   );
-  return `
-    <div style="margin-top:6px;padding-top:6px;border-top:1px solid #4B5563;font-size:11px;color:#9CA3AF">Other fields</div>
-    ${lines.join("")}
-  `;
+  const more = entries.length > shown.length
+    ? `<div style="font-size:11px;color:var(--muted-foreground);margin-top:2px">+${entries.length - shown.length} more</div>`
+    : "";
+  return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">${lines.join("")}${more}</div>`;
 }

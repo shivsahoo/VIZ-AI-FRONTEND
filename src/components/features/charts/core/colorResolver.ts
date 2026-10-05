@@ -20,30 +20,21 @@ export interface ChartAxisColors {
 export function getChartAxisColors(isDark: boolean): ChartAxisColors {
   if (isDark) {
     return {
-      labelColor: "rgba(255,255,255,0.65)",
-      splitLineColor: "rgba(255,255,255,0.08)",
-      axisLineColor: "rgba(255,255,255,0.15)",
+      labelColor: "#a1a1a6",
+      splitLineColor: "rgba(255,255,255,0.07)",
+      axisLineColor: "rgba(255,255,255,0.14)",
       barLabelColor: "rgba(255,255,255,0.92)",
     };
   }
   return {
-    labelColor: "rgba(30,30,46,0.75)",
-    splitLineColor: "rgba(0,0,0,0.08)",
-    axisLineColor: "rgba(0,0,0,0.15)",
-    barLabelColor: "rgba(30,30,46,0.85)",
+    labelColor: "#6e6e73",
+    splitLineColor: "rgba(0,0,0,0.06)",
+    axisLineColor: "rgba(0,0,0,0.12)",
+    barLabelColor: "#1d1d1f",
   };
 }
 
-const DEFAULT_PALETTE = [
-  "#7c6af7",
-  "#06b6d4",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#8b5cf6",
-  "#ec4899",
-  "#14b8a6",
-];
+const DEFAULT_PALETTE = DEFAULT_SERIES_COLORS;
 
 /**
  * Series color for a keyed metric — matches previous ChartCard `pickColor` behavior.

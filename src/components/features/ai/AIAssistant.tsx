@@ -1,16 +1,13 @@
 import { useState, useEffect, useRef } from "react";
-import { Sparkles, X, Send, BarChart3, LineChart, PieChart, AreaChart, ChartScatter, Grid3x3, Funnel, Globe, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw, Microscope } from "lucide-react";
-import { Button } from "../../ui/button";
-import { Card } from "../../ui/card";
-import { Badge } from "../../ui/badge";
-import { GradientButton } from "../../shared/GradientButton";
+import { Sparkles, X, ArrowUp, BarChart3, LineChart, PieChart, AreaChart, ChartScatter, Grid3x3, Funnel, Globe, ChevronDown, ChevronUp, Code, Database, Check, RotateCcw, Microscope, Eye, ChevronsUpDown } from "lucide-react";
 import { ChartPreviewDialog } from "../charts/ChartPreviewDialog";
 import { ProbeModeDialog } from "../charts/ProbeModeDialog";
 import { getDashboards, getDatabases, getCurrentUser, getLatestOntology, type Chart as SavedChart } from "../../../services/api";
 import { loadDatabaseMetadata, storeDatabaseMetadata, type DatabaseMetadataEntry } from "../../../utils/databaseMetadata";
 import { VizAIWebSocket, WebSocketResponse, type ChartSpec } from "../../../services/websocket";
 import { toast } from "sonner";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "motion/react";
+import "./AIAssistant.css";
 import { useChartGenerationStore } from "../../../store/chartGenerationStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../ui/dialog";
 import type { ChartAxisConfig, ChartType } from "../charts/core/chartTypes";
@@ -166,6 +163,9 @@ const buildOntologyConstraints = (ontology: Record<string, any> | undefined) => 
 
 interface AIAssistantProps {
   isOpen: boolean;
+  /** Question typed elsewhere (e.g. the home page) — pre-filled, not auto-sent. */
+  initialPrompt?: string | null;
+  onInitialPromptConsumed?: () => void;
   onOpenChange: (isOpen: boolean) => void;
   projectId?: number | string;
   currentTab?: string;
@@ -201,21 +201,18 @@ const chartTypeIcons = {
   multiyaxischart: BarChart3,
 };
 
-const chartTypeColors = {
-  line: "bg-blue-500/10 text-blue-500 border-blue-500/20",
-  bar: "bg-purple-500/10 text-purple-500 border-purple-500/20",
-  pie: "bg-green-500/10 text-green-500 border-green-500/20",
-  donut: "bg-teal-500/10 text-teal-500 border-teal-500/20",
-  area: "bg-orange-500/10 text-orange-500 border-orange-500/20",
-  scatter: "bg-cyan-500/10 text-cyan-500 border-cyan-500/20",
-  heatmap: "bg-pink-500/10 text-pink-500 border-pink-500/20",
-  funnel: "bg-violet-500/10 text-violet-500 border-violet-500/20",
-  map: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
-  stackedlinechart: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
-  stackedhorizontalbar: "bg-amber-500/10 text-amber-500 border-amber-500/20",
-  clustering: "bg-sky-500/10 text-sky-500 border-sky-500/20",
-  multiyaxischart: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
+// Tone slot per chart family (see .tone-N in AppShell.css)
+const chartTypeTone: Record<string, number> = {
+  line: 0, stackedlinechart: 0, bar: 1, stackedhorizontalbar: 1, multiyaxischart: 1, funnel: 1,
+  scatter: 2, clustering: 2, area: 3, pie: 4, donut: 4, heatmap: 4, map: 5,
 };
+
+const STARTER_PROMPTS = [
+  "Show the monthly trend of our key metric",
+  "Top 10 items by revenue",
+  "Compare this year with last year",
+  "Break down totals by category",
+];
 
 const mapDatabaseMetadataToAssistantState = (entry: DatabaseMetadataEntry) => ({
   id: entry.id,
@@ -281,7 +278,7 @@ const ensureSchemaString = (schema?: string | null): string => {
   }
 };
 
-export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onChartCreated, editingChart }: AIAssistantProps) {
+export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onChartCreated, editingChart, initialPrompt, onInitialPromptConsumed }: AIAssistantProps) {
   const {
     messages: storeMessages,
     selectedDatabase: storeSelectedDatabase,
@@ -295,6 +292,13 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
 
   const [messages, setMessages] = useState<Message[]>(storeMessages);
   const [input, setInput] = useState("");
+
+  useEffect(() => {
+    if (isOpen && initialPrompt) {
+      setInput(initialPrompt);
+      onInitialPromptConsumed?.();
+    }
+  }, [isOpen, initialPrompt, onInitialPromptConsumed]);
   const [selectedDatabase, setSelectedDatabase] = useState(storeSelectedDatabase);
   const [expandedSuggestion, setExpandedSuggestion] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(storeIsGenerating);
@@ -829,7 +833,7 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
         {
           id: prev.length + 1,
           type: 'ai',
-          content: "Now you can generate charts by giving prompts or click the button below to auto-generate charts using AI."
+          content: `You're connected to ${selectedDb?.label ?? "your data"}. What would you like to see?`
         }
       ]);
     }, 800);
@@ -1270,341 +1274,298 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent
-          className="w-full p-0 flex flex-col overflow-hidden"
-          style={{ maxWidth: '65vw', maxHeight: '90vh', height: '85vh' }}
-          hideCloseButton={true}
-        >
-          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-5 h-5 text-white" />
+        <DialogContent className="ai-dialog p-0 flex flex-col overflow-hidden gap-0" hideCloseButton={true}>
+          {(() => {
+            const currentDb = availableDatabases.find((db) => db.value === selectedDatabase || db.id === selectedDatabase);
+            const connected = Boolean(wsClient && wsClient.isConnected());
+            return (
+              <DialogHeader className="ai-header shrink-0">
+                <div className="ai-header-icon" aria-hidden="true">
+                  <Sparkles className="w-5 h-5" />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <DialogTitle className="text-lg font-semibold text-foreground">VizAI Assistant</DialogTitle>
-                  <p className="text-xs text-muted-foreground mt-0.5">Ready to help you get started.</p>
+                <div className="flex-1 min-w-0 text-left">
+                  <DialogTitle className="ai-title">VizAI Assistant</DialogTitle>
+                  <p className="ai-subtitle">
+                    <span className={`ai-status-dot${currentDb && connected ? " is-live" : ""}`} aria-hidden="true" />
+                    {currentDb
+                      ? `${connected ? "Connected to" : "Connecting to"} ${currentDb.label}`
+                      : "Choose a data source to start"}
+                  </p>
                 </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onOpenChange(false)}
-                className="h-9 w-9 flex-shrink-0"
-              >
-                <X className="w-5 h-5" />
-              </Button>
-            </div>
-          </DialogHeader>
+                <button type="button" className="ai-icon-btn" onClick={() => onOpenChange(false)} aria-label="Close assistant">
+                  <X className="w-5 h-5" />
+                </button>
+              </DialogHeader>
+            );
+          })()}
 
           {editingChart && (
-            <div className="px-6 py-4 bg-muted/50 border-b border-border shrink-0">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${chartTypeColors[editingChart.type]} border`}>
-                  {(() => {
-                    const Icon = chartTypeIcons[editingChart.type];
-                    return <Icon className="w-5 h-5" />;
-                  })()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <p className="text-xs text-muted-foreground">Editing Chart</p>
-                    <Badge variant="outline" className="text-xs h-5">
-                      {editingChart.type}
-                    </Badge>
-                  </div>
-                  <h4 className="text-sm text-foreground truncate">{editingChart.name}</h4>
-                  {editingChart.description && (
-                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{editingChart.description}</p>
-                  )}
-                </div>
+            <div className="ai-editing shrink-0">
+              <span className={`app-tile tone-${chartTypeTone[editingChart.type] ?? 0}`} aria-hidden="true">
+                {(() => {
+                  const Icon = chartTypeIcons[editingChart.type];
+                  return <Icon className="w-[18px] h-[18px]" />;
+                })()}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="ai-editing-label">Editing chart · <span className="capitalize">{editingChart.type}</span></p>
+                <p className="ai-editing-name">{editingChart.name}</p>
               </div>
-              <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
-                All chart modifications will be applied to this chart. Ask me to change the chart type, update data, or modify styling.
-              </p>
+              <p className="ai-editing-hint">Ask to change the type, data or styling.</p>
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4 bg-background min-h-0">
-            {connectionError && (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-                {connectionError}
-              </div>
-            )}
-            <AnimatePresence>
-              {messages.map((message) => (
-                <div key={message.id}>
-                  {message.type === 'user' && (
-                    <div className="flex justify-end">
-                      <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-gradient-to-r from-primary to-accent text-white">
-                        <p className="text-sm leading-relaxed">{message.content}</p>
+          <div className="ai-thread flex-1 overflow-y-auto min-h-0">
+            <div className="ai-thread-inner">
+              {connectionError && (
+                <div className="ai-error" role="alert">{connectionError}</div>
+              )}
+              <AnimatePresence initial={false}>
+                {messages.map((message) => (
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, ease: [0.28, 0.11, 0.32, 1] }}
+                  >
+                    {message.type === 'user' && (
+                      <div className="ai-row ai-row--user">
+                        <div className="ai-bubble ai-bubble--user">{message.content}</div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {(message.type === 'ai' || message.type === 'database-prompt') && (() => {
-                    const { hasQuestions, parts } = parseQuestions(message.content);
-
-                    return (
-                      <div className="flex justify-start items-start gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
-                          <Sparkles className="w-4 h-4 text-white" />
-                        </div>
-                        <div className="max-w-[85%] space-y-3">
-                          {hasQuestions ? (
-                            parts.map((part, idx) => {
-                              if (part.type === 'question') {
-                                return (
-                                  <div
-                                    key={idx}
-                                    className="rounded-xl px-4 py-3 bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/20 text-foreground"
-                                  >
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <div className="w-6 h-6 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0">
-                                        <span className="text-xs font-semibold text-white">{part.questionNumber}</span>
-                                      </div>
-                                      <p className="text-sm font-medium text-foreground flex-1">
-                                        Question {part.questionNumber}:
-                                      </p>
-                                    </div>
-                                    <p className="text-sm leading-relaxed text-foreground ml-8">
-                                      {part.content}
-                                    </p>
+                    {(message.type === 'ai' || message.type === 'database-prompt') && (() => {
+                      const { hasQuestions, parts } = parseQuestions(message.content);
+                      return (
+                        <div className="ai-row">
+                          <span className="ai-avatar" aria-hidden="true"><Sparkles className="w-4 h-4" /></span>
+                          <div className="ai-stack">
+                            {hasQuestions ? (
+                              parts.map((part, idx) =>
+                                part.type === 'question' ? (
+                                  <div key={idx} className="ai-question">
+                                    <span className="ai-question-num">{part.questionNumber}</span>
+                                    <p>{part.content}</p>
                                   </div>
-                                );
-                              } else {
-                                return part.content ? (
-                                  <div
-                                    key={idx}
-                                    className="rounded-2xl px-4 py-3 bg-card border border-border text-foreground"
-                                  >
-                                    <p className="text-sm leading-relaxed whitespace-pre-line">{part.content}</p>
-                                  </div>
-                                ) : null;
-                              }
-                            })
-                          ) : (
-                            <div className="rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
-                              <p className="text-sm leading-relaxed whitespace-pre-line">{message.content}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {message.type === 'chart-suggestions' && (
-                    <div className="space-y-3">
-                      <div className="flex justify-start items-start gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
-                          <Sparkles className="w-4 h-4 text-white" />
-                        </div>
-                        <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
-                          <p className="text-sm leading-relaxed">{message.content}</p>
-                        </div>
-                      </div>
-
-                      {message.chartSuggestions && message.chartSuggestions.length > 0 && (
-                        <div className="space-y-3">
-                          {message.chartSuggestions.map((suggestion) => {
-                            const Icon = chartTypeIcons[suggestion.type];
-                            const isExpanded = expandedSuggestion === suggestion.id;
-
-                            return (
-                              <Card key={suggestion.id} className="border-border p-3">
-                                <div className="space-y-3">
-                                  <div className="flex items-start gap-3">
-                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${chartTypeColors[suggestion.type]}`}>
-                                      <Icon className="w-5 h-5" />
-                                    </div>
-
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <h4 className="text-sm text-foreground">{suggestion.name}</h4>
-                                        <Badge variant="outline" className="capitalize text-xs">
-                                          {suggestion.type}
-                                        </Badge>
-                                      </div>
-                                      <p className="text-xs text-muted-foreground">{suggestion.description}</p>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex flex-col gap-2">
-                                    <div className="flex gap-2">
-                                      <button
-                                        onClick={() => toggleSuggestionExpand(suggestion.id)}
-                                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors border border-border rounded-lg hover:bg-muted/50"
-                                      >
-                                        <Code className="w-3.5 h-3.5" />
-                                        {isExpanded ? 'Hide' : 'View'} Details
-                                        {isExpanded ? (
-                                          <ChevronUp className="w-3.5 h-3.5" />
-                                        ) : (
-                                          <ChevronDown className="w-3.5 h-3.5" />
-                                        )}
-                                      </button>
-
-                                      <GradientButton
-                                        onClick={() => handleCreateChart(suggestion)}
-                                        size="sm"
-                                        className="gap-2"
-                                      >
-                                        Preview
-                                      </GradientButton>
-
-                                      {suggestion.query && (
-                                        <GradientButton
-                                          onClick={() => handleOpenProbeMode(suggestion)}
-                                          size="sm"
-                                          className="gap-2 shadow-md glow hover:shadow-xl transition-all"
-                                        >
-                                          <Microscope className="w-3.5 h-3.5" />
-                                          Probe Mode
-                                        </GradientButton>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {isExpanded && (
-                                    <div className="space-y-3 pt-2 border-t border-border">
-                                      <div>
-                                        <p className="text-xs text-muted-foreground mb-2">AI Reasoning:</p>
-                                        <p className="text-xs text-foreground bg-muted/50 p-2 rounded-lg">
-                                          {suggestion.reasoning}
-                                        </p>
-                                      </div>
-                                      <div>
-                                        <p className="text-xs text-muted-foreground mb-2">SQL Query:</p>
-                                        <pre className="text-xs bg-muted/50 p-2 rounded-lg overflow-x-auto">
-                                          <code className="text-foreground">{suggestion.query}</code>
-                                        </pre>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              </Card>
-                            );
-                          })}
-
-                          <div className="flex justify-center pt-2">
-                            <Button
-                              onClick={handleRegenerateCharts}
-                              disabled={isGenerating || !wsClient || !wsClient.isConnected()}
-                              size="sm"
-                              className="gap-2 bg-gradient-to-r from-accent to-primary hover:opacity-90 text-white shadow-md transition-all disabled:opacity-50"
-                            >
-                              <RotateCcw className="w-4 h-4" />
-                              Let AI Generate Charts
-                            </Button>
+                                ) : part.content ? (
+                                  <div key={idx} className="ai-bubble">{part.content}</div>
+                                ) : null,
+                              )
+                            ) : (
+                              <div className="ai-bubble">{message.content}</div>
+                            )}
                           </div>
                         </div>
-                      )}
+                      );
+                    })()}
+
+                    {message.type === 'chart-suggestions' && (
+                      <div className="ai-suggestions-block">
+                        <div className="ai-row">
+                          <span className="ai-avatar" aria-hidden="true"><Sparkles className="w-4 h-4" /></span>
+                          <div className="ai-bubble">{message.content}</div>
+                        </div>
+
+                        {message.chartSuggestions && message.chartSuggestions.length > 0 && (
+                          <>
+                            <div className="ai-suggestions">
+                              {message.chartSuggestions.map((suggestion, i) => {
+                                const Icon = chartTypeIcons[suggestion.type] ?? BarChart3;
+                                const isExpanded = expandedSuggestion === suggestion.id;
+                                return (
+                                  <motion.div
+                                    key={suggestion.id}
+                                    className={`ai-suggestion${isExpanded ? " is-expanded" : ""}`}
+                                    initial={{ opacity: 0, y: 12 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ duration: 0.35, delay: 0.05 * i, ease: [0.28, 0.11, 0.32, 1] }}
+                                  >
+                                    <div className="ai-suggestion-head">
+                                      <span className={`app-tile tone-${chartTypeTone[suggestion.type] ?? 0}`} aria-hidden="true">
+                                        <Icon className="w-[18px] h-[18px]" />
+                                      </span>
+                                      <div className="min-w-0 flex-1">
+                                        <p className="ai-suggestion-name">{suggestion.name}</p>
+                                        <span className="ai-suggestion-type">{suggestion.type}</span>
+                                      </div>
+                                    </div>
+                                    <p className="ai-suggestion-desc">{suggestion.description}</p>
+
+                                    {isExpanded && (
+                                      <div className="ai-suggestion-details">
+                                        {suggestion.reasoning && (
+                                          <>
+                                            <p className="ai-detail-label">Why this chart</p>
+                                            <p className="ai-detail-text">{suggestion.reasoning}</p>
+                                          </>
+                                        )}
+                                        {suggestion.query && (
+                                          <>
+                                            <p className="ai-detail-label">SQL</p>
+                                            <pre className="ai-code"><code>{suggestion.query}</code></pre>
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    <div className="ai-suggestion-actions">
+                                      <button type="button" className="ai-btn ai-btn--primary" onClick={() => handleCreateChart(suggestion)}>
+                                        <Eye className="w-4 h-4" aria-hidden="true" />
+                                        Preview
+                                      </button>
+                                      {suggestion.query && (
+                                        <button type="button" className="ai-btn" onClick={() => handleOpenProbeMode(suggestion)}>
+                                          <Microscope className="w-4 h-4" aria-hidden="true" />
+                                          Probe
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="ai-btn ai-btn--ghost"
+                                        onClick={() => toggleSuggestionExpand(suggestion.id)}
+                                        aria-expanded={isExpanded}
+                                      >
+                                        <Code className="w-4 h-4" aria-hidden="true" />
+                                        {isExpanded ? "Hide" : "Why & SQL"}
+                                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                      </button>
+                                    </div>
+                                  </motion.div>
+                                );
+                              })}
+                            </div>
+
+                            <div className="ai-center">
+                              <button
+                                type="button"
+                                className="ai-btn"
+                                onClick={handleRegenerateCharts}
+                                disabled={isGenerating || !wsClient || !wsClient.isConnected()}
+                              >
+                                <RotateCcw className="w-4 h-4" aria-hidden="true" />
+                                Suggest different charts
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+
+              {(isGenerating || isSettingUp) && (
+                <div className="ai-row" aria-live="polite">
+                  <span className="ai-avatar" aria-hidden="true"><Sparkles className="w-4 h-4" /></span>
+                  <div className="ai-bubble ai-typing">
+                    <span /><span /><span />
+                    {isGenerating && <em>Building your charts…</em>}
+                  </div>
+                </div>
+              )}
+
+              {showWelcomeScreen && messages.length > 0 && messages[0].type === 'ai' && (
+                <div className="ai-center">
+                  <button type="button" className="ai-btn ai-btn--primary ai-btn--lg" onClick={handleGetStarted}>
+                    <Sparkles className="w-5 h-5" aria-hidden="true" />
+                    Let's get started
+                  </button>
+                </div>
+              )}
+
+              {/* Data source picker — part of the conversation, not a footer chip */}
+              {showDatabaseSelection && (
+                <motion.div
+                  className="ai-picker"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35, delay: 0.1 }}
+                >
+                  <p className="ai-picker-title">
+                    <Database className="w-4 h-4" aria-hidden="true" />
+                    Choose a data source
+                  </p>
+                  {isLoadingDatabases ? (
+                    <div className="ai-picker-grid">
+                      {[0, 1].map((i) => <div key={i} className="home-skel" style={{ height: 64, borderRadius: 16 }} />)}
+                    </div>
+                  ) : availableDatabases.length === 0 ? (
+                    <p className="ai-picker-empty">No database connections yet. Add one from the Databases page to start.</p>
+                  ) : (
+                    <div className="ai-picker-grid" role="radiogroup" aria-label="Data source">
+                      {availableDatabases.map((db) => {
+                        const active = selectedDatabase === db.value;
+                        return (
+                          <button
+                            key={db.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            className={`ai-source${active ? " is-active" : ""}`}
+                            onClick={() => handleDatabaseSelect(db.value)}
+                          >
+                            <span className="ai-source-icon"><Database className="w-5 h-5" aria-hidden="true" /></span>
+                            <span className="min-w-0 flex-1 text-left">
+                              <span className="ai-source-name">{db.label}</span>
+                              <span className="ai-source-type">{({ postgresql: "PostgreSQL", postgres: "PostgreSQL", mysql: "MySQL", mssql: "SQL Server", sqlserver: "SQL Server", snowflake: "Snowflake", bigquery: "BigQuery" } as Record<string, string>)[String(db.type || "").toLowerCase()] ?? (db.type || "Database")}</span>
+                            </span>
+                            <span className="ai-source-check" aria-hidden="true">{active && <Check className="w-3.5 h-3.5" />}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
-                </div>
-              ))}
-            </AnimatePresence>
+                </motion.div>
+              )}
 
-            {isGenerating && (
-              <div className="flex justify-start items-start gap-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
-                  <Sparkles className="w-4 h-4 text-white" />
-                </div>
-                <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
-                    <span className="text-sm text-muted-foreground ml-2">Generating charts...</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {isSettingUp && (
-              <div className="flex justify-start items-start gap-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-primary to-accent flex items-center justify-center flex-shrink-0 mt-1">
-                  <Sparkles className="w-4 h-4 text-white" />
-                </div>
-                <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {showWelcomeScreen && messages.length > 0 && messages[0].type === 'ai' && (
-              <div className="flex justify-center pt-4 pb-6">
-                <GradientButton
-                  onClick={handleGetStarted}
-                  className="w-full max-w-md h-12 text-base font-medium gap-2"
-                >
-                  <Sparkles className="w-5 h-5" />
-                  Let's Get Started
-                </GradientButton>
-              </div>
-            )}
-
-            {selectedDatabase && !showWelcomeScreen && !showDatabaseSelection && !messages.some(m => m.type === 'chart-suggestions') && !isGenerating && (
-              <div className="flex justify-center pt-4 pb-6">
-                <Button
-                  onClick={handleRegenerateCharts}
-                  disabled={isGenerating || !wsClient || !wsClient.isConnected()}
-                  className="gap-2 bg-gradient-to-r from-accent to-primary hover:opacity-90 text-white shadow-md transition-all disabled:opacity-50"
-                >
-                  <Sparkles className="w-5 h-5" />
-                  Let AI Generate Charts
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {showDatabaseSelection && (
-            <div className="px-6 pb-4 border-t border-border bg-background shrink-0">
-              <div className="space-y-2.5 pt-4">
-                <label className="text-xs text-muted-foreground flex items-center gap-2">
-                  <Database className="w-3.5 h-3.5" />
-                  Select Database
-                </label>
-                {isLoadingDatabases ? (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-                    <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                    <span>Loading databases...</span>
-                  </div>
-                ) : availableDatabases.length === 0 ? (
-                  <div className="text-xs text-muted-foreground py-2">
-                    No database connections available. Please add a database connection to get started.
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {availableDatabases.map((db) => (
+              {selectedDatabase && !showWelcomeScreen && !showDatabaseSelection && !messages.some(m => m.type === 'chart-suggestions') && !isGenerating && (
+                <motion.div className="ai-start" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}>
+                  <button
+                    type="button"
+                    className="ai-auto"
+                    onClick={handleRegenerateCharts}
+                    disabled={!wsClient || !wsClient.isConnected()}
+                  >
+                    <span className="ai-auto-icon"><Sparkles className="w-5 h-5" aria-hidden="true" /></span>
+                    <span className="text-left">
+                      <span className="ai-auto-title">Let AI suggest charts</span>
+                      <span className="ai-auto-sub">VizAI looks at your schema and proposes the most useful views.</span>
+                    </span>
+                  </button>
+                  <p className="ai-or">or ask for something specific</p>
+                  <div className="ai-prompts">
+                    {STARTER_PROMPTS.map((p) => (
                       <button
-                        key={db.value}
-                        onClick={() => handleDatabaseSelect(db.value)}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all ${selectedDatabase === db.value
-                          ? 'bg-gradient-to-r from-primary to-accent text-white shadow-sm'
-                          : 'bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground border border-border'
-                          }`}
+                        key={p}
+                        type="button"
+                        className="ai-prompt"
+                        onClick={() => {
+                          setInput(p);
+                          inputRef.current?.focus();
+                        }}
                       >
-                        {selectedDatabase === db.value && (
-                          <Check className="w-3 h-3" />
-                        )}
-                        <Database className="w-3 h-3" />
-                        {db.label}
+                        {p}
                       </button>
                     ))}
                   </div>
-                )}
-              </div>
+                </motion.div>
+              )}
             </div>
-          )}
+          </div>
 
           {selectedDatabase && !showWelcomeScreen && (
-            <div className="p-6 border-t border-border bg-background shrink-0">
-              <div className="flex gap-3">
+            <div className="ai-composer-wrap shrink-0">
+              <div className={`ai-composer${isGenerating ? " is-busy" : ""}`}>
+                <button
+                  type="button"
+                  className="ai-source-chip"
+                  onClick={() => setShowDatabaseSelection(true)}
+                  title="Change data source"
+                >
+                  <Database className="w-3.5 h-3.5" aria-hidden="true" />
+                  {availableDatabases.find((db) => db.value === selectedDatabase || db.id === selectedDatabase)?.label ?? "Source"}
+                  <ChevronsUpDown className="w-3 h-3 opacity-60" aria-hidden="true" />
+                </button>
                 <input
                   ref={inputRef}
                   value={input}
@@ -1615,13 +1576,16 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                       handleSend();
                     }
                   }}
-                  placeholder="Describe the charts you need..."
+                  placeholder={editingChart ? "Describe the change…" : "Ask a question about your data…"}
+                  aria-label="Message VizAI"
                   disabled={isGenerating}
-                  className="flex-1 px-4 py-3 bg-background border border-border rounded-lg outline-none focus:ring-2 focus:ring-accent text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
                   autoFocus
                 />
-                <GradientButton
+                <button
+                  type="button"
+                  className="ai-send"
                   onClick={handleSend}
+                  aria-label="Send"
                   disabled={
                     !input.trim() ||
                     isGenerating ||
@@ -1629,12 +1593,13 @@ export function AIAssistant({ isOpen, onOpenChange, projectId, currentTab, onCha
                     !selectedDatabase ||
                     !(wsClient && wsClient.isConnected())
                   }
-                  size="icon"
-                  className="flex-shrink-0 h-11 w-11"
                 >
-                  <Send className="w-5 h-5" />
-                </GradientButton>
+                  <ArrowUp className="w-5 h-5" />
+                </button>
               </div>
+              <p className="ai-hint">
+                {wsClient && wsClient.isConnected() ? "Press Enter to send" : isConnecting ? "Connecting…" : "Reconnecting to VizAI…"}
+              </p>
             </div>
           )}
         </DialogContent>

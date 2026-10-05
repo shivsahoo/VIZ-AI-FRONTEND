@@ -1,9 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import type { MouseEvent } from "react";
-import { Pin, TrendingUp, TrendingDown, BarChart3, Lightbulb, Plus, ArrowRight, Clock, Star, LayoutDashboard } from "lucide-react";
+import { Pin, TrendingUp, TrendingDown, BarChart3, Lightbulb, Plus, ArrowRight, ArrowUpRight, Clock, Star, Sparkles } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
 import { GradientButton } from "../components/shared/GradientButton";
 import { ChartPreviewDialog } from "../components/features/charts/ChartPreviewDialog";
 import { toast } from "sonner";
@@ -27,13 +24,6 @@ const chartTypeIcons = {
   area: TrendingUp
 };
 
-const chartTypeColors = {
-  line: 'text-[#06B6D4] bg-[#06B6D4]/10',
-  bar: 'text-[#8B5CF6] bg-[#8B5CF6]/10',
-  pie: 'text-[#10B981] bg-[#10B981]/10',
-  area: 'text-[#F59E0B] bg-[#F59E0B]/10'
-};
-
 // Extended interface to store original API chart ID
 interface FavoriteChartData extends PinnedChartData {
   originalId: string; // Store the original UUID from API
@@ -55,7 +45,7 @@ interface FavoriteChartDataStatus {
   error?: string;
 }
 
-export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
+export function HomeDashboardView({ onNavigate, onOpenAIAssistant }: HomeDashboardViewProps) {
   const [favoriteCharts, setFavoriteCharts] = useState<FavoriteChartData[]>([]);
   const [favoriteDashboards, setFavoriteDashboards] = useState<FavoriteDashboard[]>([]);
   const [isLoadingCharts, setIsLoadingCharts] = useState(true);
@@ -359,7 +349,7 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
     const error = status?.error;
 
     return (
-      <div className="relative h-full bg-gradient-to-br from-muted/20 to-muted/5 rounded-xl border border-border/60 flex items-center justify-center p-6">
+      <div className="relative h-full flex items-center justify-center">
         {isLoading && hasQueryAndConnection && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/90 backdrop-blur-md rounded-xl z-10">
             {/* Three dot loader */}
@@ -415,441 +405,250 @@ export function HomeDashboardView({ onNavigate }: HomeDashboardViewProps) {
           />
         )}
 
-        {status?.metadata && !isLoading && !error && (
-          <div className="absolute bottom-4 right-4 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-            {typeof status.metadata.executionTime === 'number' && status.metadata.executionTime > 0 && (
-              <span className="px-2 py-1 rounded-md border border-border/60 bg-background/60">
-                {status.metadata.executionTime} ms
-              </span>
-            )}
-            {status.metadata.cachedAt && (
-              <span className="px-2 py-1 rounded-md border border-border/60 bg-background/60">
-                Cached {new Date(status.metadata.cachedAt).toLocaleString()}
-              </span>
-            )}
-          </div>
-        )}
       </div>
     );
   }, [favoriteChartDataStatus]);
 
+  const skeletonCards = (count: number, tall: boolean) => (
+    <div className="ws-grid">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="home-skel" style={{ height: tall ? 380 : 160, borderRadius: 22 }} />
+      ))}
+    </div>
+  );
+
   return (
-    <div className="h-full overflow-auto bg-background">
-      <div className="max-w-[1600px] mx-auto p-10 space-y-10">
-        {/* Header */}
-        <div className="flex items-center justify-between">
+    <div className="min-h-full">
+      <div className="ws-page">
+        <header className="ws-header">
           <div>
-            <h1 className="text-foreground mb-2">Home</h1>
-            <p className="text-muted-foreground">
-              Your pinned charts and insights at a glance
-            </p>
+            <h1 className="ws-title">Overview</h1>
+            <p className="ws-subtitle">Your pinned charts and saved insights at a glance.</p>
           </div>
-          <div className="flex items-center gap-3">
-            <Button 
-              variant="outline"
-              size="sm"
-              onClick={() => onNavigate?.('charts')}
-              className="group gap-2 hover:bg-muted/50 hover:text-foreground hover:border-primary/30 transition-all duration-200 ease-in-out"
-            >
-              <Plus className="w-4 h-4 transition-transform duration-200 ease-in-out group-hover:rotate-90" />
-              New Chart
+          <div className="ws-actions">
+            <Button variant="outline" onClick={() => onNavigate?.('charts')} className="ws-primary-btn">
+              <Plus className="w-4 h-4" />
+              New chart
             </Button>
-            <Button 
-              variant="outline"
-              size="sm"
-              onClick={() => onNavigate?.('dashboards')}
-              className="group gap-2 hover:bg-muted/50 hover:text-foreground hover:border-primary/30 transition-all duration-200 ease-in-out"
-            >
-              <Plus className="w-4 h-4 transition-transform duration-200 ease-in-out group-hover:rotate-90" />
-              New Dashboard
-            </Button>
-            {/* <Button 
-              onClick={onOpenAIAssistant}
-              className="gradient-primary hover:opacity-90 text-white shadow-lg hover:shadow-xl transition-smooth gap-2"
-            >
-              <Sparkles className="w-4 h-4" />
-              Ask VizAI
-            </Button> */}
+            <GradientButton onClick={() => onNavigate?.('dashboards')} className="ws-primary-btn">
+              <Plus className="w-4 h-4" />
+              New dashboard
+            </GradientButton>
           </div>
+        </header>
+
+        {/* Summary row */}
+        <div className="ov-top">
+          <section className="ov-hero">
+            <span className="ov-hero-icon" aria-hidden="true">
+              <Sparkles className="w-5 h-5" />
+            </span>
+            <h2 className="ov-hero-title">
+              Ask your data <span>anything</span>.
+            </h2>
+            <p className="ov-hero-text">Type a question in plain language. VizAI writes the query, picks the chart, and you pin it here.</p>
+            {onOpenAIAssistant && (
+              <button type="button" className="ov-hero-btn" onClick={onOpenAIAssistant}>
+                Ask a question
+                <ArrowUpRight className="w-4 h-4" aria-hidden="true" />
+              </button>
+            )}
+          </section>
+          <button type="button" className="ov-stat" onClick={() => onNavigate?.('charts')}>
+            <span className="ov-stat-icon"><Pin className="w-4 h-4" aria-hidden="true" /></span>
+            <span className="ov-stat-label">Pinned charts</span>
+            <span className="ov-stat-value">{isLoadingCharts ? "–" : favoriteCharts.length}</span>
+            <span className="ov-stat-link">Browse charts <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" /></span>
+          </button>
+          <button type="button" className="ov-stat ov-stat--dark" onClick={() => onNavigate?.('insights')}>
+            <span className="ov-stat-icon"><Lightbulb className="w-4 h-4" aria-hidden="true" /></span>
+            <span className="ov-stat-label">Saved insights</span>
+            <span className="ov-stat-value">{isLoadingInsights ? "–" : displayedInsights.length}</span>
+            <span className="ov-stat-link">Open insights <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" /></span>
+          </button>
         </div>
 
         {/* Pinned Charts */}
-        <div className="space-y-5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-foreground">Pinned Charts</h2>
-            <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5">
-              {favoriteCharts.length} charts
-            </Badge>
+        <section className="ws-section">
+          <div className="ws-section-head">
+            <h2 className="ws-section-title">
+              Pinned charts
+              {!isLoadingCharts && <span className="ws-count">{favoriteCharts.length}</span>}
+            </h2>
           </div>
 
           {isLoadingCharts ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[1, 2, 3].map((i) => (
-                <Card key={i} className="p-6 border-2 border-border card-shadow">
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-muted/50 animate-pulse" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 bg-muted/50 rounded animate-pulse w-3/4" />
-                        <div className="h-3 bg-muted/30 rounded animate-pulse w-1/2" />
+            skeletonCards(3, true)
+          ) : favoriteCharts.length === 0 ? (
+            <div className="ws-empty">
+              <span className="ws-empty-icon">
+                <Star className="w-7 h-7" aria-hidden="true" />
+              </span>
+              <p className="ws-empty-title">No pinned charts yet</p>
+              <p className="ws-empty-text">Pin the charts you check most often and they'll show up here.</p>
+              <Button variant="outline" onClick={() => onNavigate?.('charts')} className="ws-primary-btn">
+                Browse charts
+              </Button>
+            </div>
+          ) : (
+            <div className="ws-grid">
+              {favoriteCharts.map((chart) => {
+                const Icon = chartTypeIcons[chart.chartType as keyof typeof chartTypeIcons] ?? BarChart3;
+                const tone = ({ line: 0, bar: 1, pie: 4, donut: 4, area: 3 } as Record<string, number>)[chart.chartType] ?? 0;
+                const chartName = chart.name?.trim() || "Untitled Chart";
+
+                return (
+                  <div
+                    key={chart.id}
+                    className="ws-chart-card group"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open ${chartName}`}
+                    onClick={() => setSelectedChart(chart)}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+                        e.preventDefault();
+                        setSelectedChart(chart);
+                      }
+                    }}
+                  >
+                    <div className="ws-chart-head">
+                      <span className={`app-tile tone-${tone}`} aria-hidden="true">
+                        <Icon className="w-[18px] h-[18px]" />
+                      </span>
+                      <div className="ws-chart-titles">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <h3 className="ws-chart-title">{chartName}</h3>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" align="start" className="max-w-xs whitespace-normal break-words">
+                            {chartName}
+                          </TooltipContent>
+                        </Tooltip>
+                        <div className="ws-chart-meta">
+                          <span>{chart.dashboardName}</span>
+                          <span aria-hidden="true">·</span>
+                          <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
+                          <span className="whitespace-nowrap">{chart.lastUpdated}</span>
+                        </div>
+                      </div>
+                      <div className="ws-chart-tools">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => handleUnpinChart(chart.id, chart.name, e)}
+                          aria-label={`Unpin ${chartName}`}
+                          className="text-primary"
+                        >
+                          <Pin className="w-4 h-4 fill-primary/20 rotate-45" />
+                        </Button>
                       </div>
                     </div>
-                    <div className="h-48 bg-muted/30 rounded-lg animate-pulse" />
-                    <div className="flex items-center justify-between pt-4 border-t border-border">
-                      <div className="h-3 bg-muted/30 rounded animate-pulse w-24" />
-                      <div className="flex gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-muted/30 animate-pulse" />
-                        <div className="w-8 h-8 rounded-lg bg-muted/30 animate-pulse" />
+                    <div className="ws-chart-body">
+                      <div className="ws-chart-canvas" style={{ height: 300 }}>
+                        {renderFavoriteChartPreview(chart)}
                       </div>
+                    </div>
+                    <div className="ws-chart-foot">
+                      <span className="ws-type-chip">{chart.chartType}</span>
+                      <span className="ov-open-link">
+                        View details <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                      </span>
                     </div>
                   </div>
-                </Card>
-              ))}
-            </div>
-          ) : favoriteCharts.length === 0 ? (
-            <Card className="p-12 border-2 border-dashed border-border card-shadow">
-              <div className="flex flex-col items-center justify-center text-center">
-                <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center mb-5">
-                  <Star className="w-10 h-10 text-muted-foreground" />
-                </div>
-                <h3 className="text-foreground mb-2">No pinned charts yet</h3>
-                <p className="text-muted-foreground mb-6 max-w-md">
-                  Pin your most important charts here for quick access from any dashboard
-                </p>
-                <Button 
-                  onClick={() => onNavigate?.('charts')}
-                  variant="outline"
-                  className="hover:bg-muted/50"
-                >
-                  Browse Charts
-                </Button>
-              </div>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {favoriteCharts.map((chart) => {
-                const Icon = chartTypeIcons[chart.chartType];
-                const colorClass = chartTypeColors[chart.chartType];
-                const chartName = chart.name?.trim() || "Untitled Chart";
-                
-                return (
-                  <Card 
-                    key={chart.id}
-                    className="overflow-hidden border-2 border-border hover:border-primary/30 hover:shadow-xl transition-smooth cursor-pointer group hover-lift card-shadow relative"
-                    onClick={() => setSelectedChart(chart)}
-                  >
-                    {/* Compact Header - Overlaid on chart */}
-                    <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-card via-card/95 to-transparent pb-8">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                          <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${colorClass} transition-smooth group-hover:scale-110`}>
-                            <Icon className="w-4 h-4" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <h3 className="text-foreground line-clamp-1 mb-1.5">
-                                  {chartName}
-                                </h3>
-                              </TooltipTrigger>
-                              <TooltipContent
-                                side="top"
-                                align="start"
-                                className="bg-card text-foreground border border-border shadow-lg whitespace-normal break-words max-w-xs"
-                              >
-                                {chartName}
-                              </TooltipContent>
-                            </Tooltip>
-                            <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
-                              <span className="line-clamp-1">{chart.dashboardName}</span>
-                              <span>•</span>
-                              <div className="flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                <span>{chart.lastUpdated}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <button
-                          onClick={(e) => handleUnpinChart(chart.id, chart.name, e)}
-                          className="flex-shrink-0 mt-0.5 p-1 -m-1 rounded-lg hover:bg-primary/10 transition-smooth group/pin"
-                          title="Unpin chart"
-                        >
-                          <Pin className="w-4 h-4 text-primary fill-primary/20 rotate-45 group-hover/pin:fill-primary/40 transition-smooth" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Chart Visualization - Takes up most of the space */}
-                    <div className="h-[420px] px-4 pt-32 pb-6">
-                      {renderFavoriteChartPreview(chart)}
-                    </div>
-
-                    {/* Hover Action Button */}
-                    <div className="absolute bottom-4 right-4 z-10">
-                      <GradientButton 
-                        size="sm"
-                        className="h-8 text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                        onClick={(e: MouseEvent) => {
-                          e.stopPropagation();
-                          setSelectedChart(chart);
-                        }}
-                      >
-                        View Details <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                      </GradientButton>
-                    </div>
-                  </Card>
                 );
               })}
             </div>
           )}
-        </div>
+        </section>
 
-        {/* Favorite Dashboards */}
-        {/* <div className="space-y-5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-foreground">Favorite Dashboards</h2>
-            <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5">
-              {favoriteDashboards.length} dashboards
-            </Badge>
-          </div>
-
-          {isLoadingDashboards ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[1, 2, 3].map((i) => (
-                <Card key={i} className="p-6 border-2 border-border card-shadow">
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-muted/50 animate-pulse" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 bg-muted/50 rounded animate-pulse w-3/4" />
-                        <div className="h-3 bg-muted/30 rounded animate-pulse w-1/2" />
-                      </div>
-                    </div>
-                    <div className="h-32 bg-muted/30 rounded-lg animate-pulse" />
-                  </div>
-                </Card>
-              ))}
-            </div>
-          ) : favoriteDashboards.length === 0 ? (
-            <Card className="p-12 border-2 border-dashed border-border card-shadow">
-              <div className="flex flex-col items-center justify-center text-center">
-                <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center mb-5">
-                  <LayoutDashboard className="w-10 h-10 text-muted-foreground" />
-                </div>
-                <h3 className="text-foreground mb-2">No favorite dashboards yet</h3>
-                <p className="text-muted-foreground mb-6 max-w-md">
-                  Mark dashboards as favorites to access them quickly from your home page
-                </p>
-                <Button 
-                  onClick={() => onNavigate?.('dashboards')}
-                  variant="outline"
-                  className="hover:bg-muted/50"
-                >
-                  Browse Dashboards
-                </Button>
-              </div>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {favoriteDashboards.map((dashboard) => (
-                <Card 
-                  key={dashboard.id}
-                  className="overflow-hidden border-2 border-border hover:border-primary/30 hover:shadow-xl transition-smooth cursor-pointer group hover-lift card-shadow"
-                  onClick={() => onNavigate?.('dashboards')}
-                >
-                  <div className="p-6">
-                    <div className="flex items-start gap-4 mb-4">
-                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center flex-shrink-0 shadow-md">
-                        <LayoutDashboard className="w-6 h-6 text-white" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-foreground group-hover:text-primary transition-colors mb-2 line-clamp-1">
-                          {dashboard.name}
-                        </h3>
-                        <p className="text-sm text-muted-foreground line-clamp-2">
-                          {dashboard.description || 'No description available'}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between pt-4 border-t border-border">
-                      <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5">
-                        Favorite
-                      </Badge>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onNavigate?.('dashboards');
-                        }}
-                        className="text-primary hover:text-primary hover:bg-primary/10"
-                      >
-                        View <ArrowRight className="w-3.5 h-3.5 ml-1" />
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </div> */}
-
-        {/* AI Insights Preview */}
-        <div className="space-y-5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-foreground">Saved Insights</h2>
-            <Button 
-              variant="ghost" 
-              size="sm"
-              onClick={() => onNavigate?.('insights')}
-              className="text-primary hover:text-primary hover:bg-primary/10"
-            >
-              View All <ArrowRight className="w-4 h-4 ml-1.5" />
+        {/* Saved insights */}
+        <section className="ws-section">
+          <div className="ws-section-head">
+            <h2 className="ws-section-title">
+              Saved insights
+              {!isLoadingInsights && <span className="ws-count">{displayedInsights.length}</span>}
+            </h2>
+            <Button variant="ghost" onClick={() => onNavigate?.('insights')} className="text-primary hover:text-primary">
+              View all <ArrowRight className="w-4 h-4" aria-hidden="true" />
             </Button>
           </div>
 
           {isLoadingInsights ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {[1, 2, 3].map((i) => (
-                <Card key={i} className="p-6 border-2 border-border card-shadow">
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-muted/50 animate-pulse" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 bg-muted/50 rounded animate-pulse w-3/4" />
-                        <div className="h-3 bg-muted/30 rounded animate-pulse w-1/2" />
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
+            skeletonCards(3, false)
           ) : displayedInsights.length === 0 ? (
-            <Card className="p-12 border-2 border-dashed border-border card-shadow">
-              <div className="flex flex-col items-center justify-center text-center">
-                <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center mb-5">
-                  <Lightbulb className="w-10 h-10 text-muted-foreground" />
-                </div>
-                <h3 className="text-foreground mb-2">No saved insights yet</h3>
-                <p className="text-muted-foreground mb-6 max-w-md">
-                  Save important insights from the Insights page to see them here for quick access
-                </p>
-                <Button 
-                  onClick={() => onNavigate?.('insights')}
-                  variant="outline"
-                  className="hover:bg-muted/50"
-                >
-                  Browse Insights
-                </Button>
-              </div>
-            </Card>
+            <div className="ws-empty">
+              <span className="ws-empty-icon">
+                <Lightbulb className="w-7 h-7" aria-hidden="true" />
+              </span>
+              <p className="ws-empty-title">No saved insights yet</p>
+              <p className="ws-empty-text">Save insights from the Insights page to keep them one click away.</p>
+              <Button variant="outline" onClick={() => onNavigate?.('insights')} className="ws-primary-btn">
+                Browse insights
+              </Button>
+            </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="ws-grid">
               {displayedInsights.map((insight) => {
                 const typeConfig = {
-                  positive: {
-                    icon: TrendingUp,
-                    color: 'text-success',
-                    bg: 'bg-success/10',
-                    border: 'border-success/30'
-                  },
-                  negative: {
-                    icon: TrendingDown,
-                    color: 'text-destructive',
-                    bg: 'bg-destructive/10',
-                    border: 'border-destructive/30'
-                  },
-                  opportunity: {
-                    icon: Lightbulb,
-                    color: 'text-warning',
-                    bg: 'bg-warning/10',
-                    border: 'border-warning/30'
-                  }
+                  positive: { icon: TrendingUp, cls: "is-positive", label: "Positive" },
+                  negative: { icon: TrendingDown, cls: "is-negative", label: "Risk" },
+                  opportunity: { icon: Lightbulb, cls: "is-opportunity", label: "Opportunity" },
                 };
-
-                const config = typeConfig[insight.insight_type as keyof typeof typeConfig];
+                const config =
+                  typeConfig[insight.insight_type as keyof typeof typeConfig] ?? typeConfig.opportunity;
                 const Icon = config.icon;
-                
-                // Format the created_at timestamp as time ago
                 const timeAgo = formatTimeAgo(insight.created_at);
-                
                 const isExpanded = expandedInsights.has(insight.id);
 
                 return (
-                  <Card 
+                  <article
                     key={insight.id}
-                    className={`p-6 border-2 ${config.border} hover:shadow-xl transition-smooth cursor-pointer group hover-lift card-shadow relative`}
+                    className={`ov-insight ${config.cls}`}
                     onClick={() => onNavigate?.('insights')}
                   >
-                    <div className="flex items-start gap-4 mb-4">
-                      <div className={`w-12 h-12 rounded-xl ${config.bg} ${config.color} flex items-center justify-center flex-shrink-0 transition-smooth group-hover:scale-110`}>
-                        <Icon className="w-6 h-6" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2 mb-2">
-                          <div className="flex-1 min-w-0">
-                            <h3 className={`text-foreground font-semibold group-hover:text-primary transition-colors ${!isExpanded ? 'line-clamp-1' : ''}`}>
-                              {insight.title}
-                            </h3>
-                            {!isExpanded && insight.title.length > 60 && (
-                              <button
-                                onClick={(e) => toggleInsightExpansion(insight.id, e)}
-                                className="text-xs text-primary hover:underline mt-0.5"
-                              >
-                                View more
-                              </button>
-                            )}
-                          </div>
-                          <button
-                            onClick={(e) => handleUnpinInsight(insight.id, insight.title, e)}
-                            className="flex-shrink-0 mt-0.5 p-1 -m-1 rounded-lg hover:bg-primary/10 transition-smooth group/pin"
-                            title="Remove from Saved Insights"
-                          >
-                            <Pin className="w-4 h-4 text-primary fill-primary/20 rotate-45 group-hover/pin:fill-primary/40 transition-smooth" />
-                          </button>
-                        </div>
-                        <div>
-                          <p className={`text-sm text-muted-foreground leading-relaxed ${!isExpanded ? 'line-clamp-2' : ''}`}>
-                          {insight.description}
-                        </p>
-                          {insight.description.length > 120 && (
-                            <button
-                              onClick={(e) => toggleInsightExpansion(insight.id, e)}
-                              className="text-xs text-primary hover:underline mt-0.5"
-                            >
-                              {isExpanded ? 'View less' : 'View more'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
+                    <div className="ov-insight-head">
+                      <span className="ov-insight-chip">
+                        <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                        {config.label}
+                      </span>
+                      <span className="ov-insight-time">{timeAgo}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => handleUnpinInsight(insight.id, insight.title, e)}
+                        aria-label="Remove from saved insights"
+                        className="text-primary -mr-2"
+                      >
+                        <Pin className="w-4 h-4 fill-primary/20 rotate-45" />
+                      </Button>
                     </div>
-
-                    <div className="flex items-center justify-between pt-4 border-t border-border">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          {insight.category}
-                        </Badge>
-                        <Badge 
-                          variant="outline" 
-                          className={`text-xs ${insight.impact === 'High' ? 'border-destructive/30 text-destructive' : 'border-warning/30 text-warning'}`}
-                        >
-                          {insight.impact}
-                        </Badge>
-                        {insight.source && (
-                          <Badge variant="outline" className="text-xs">
-                            {insight.source}
-                          </Badge>
-                        )}
-                      </div>
-                      <span className="text-xs text-muted-foreground">{timeAgo}</span>
+                    <h3 className={`ov-insight-title ${!isExpanded ? 'line-clamp-2' : ''}`}>{insight.title}</h3>
+                    <p className={`ov-insight-text ${!isExpanded ? 'line-clamp-3' : ''}`}>{insight.description}</p>
+                    {(insight.description.length > 140 || insight.title.length > 80) && (
+                      <button
+                        type="button"
+                        onClick={(e) => toggleInsightExpansion(insight.id, e)}
+                        className="ov-insight-more"
+                      >
+                        {isExpanded ? 'Show less' : 'Show more'}
+                      </button>
+                    )}
+                    <div className="ov-insight-tags">
+                      {insight.category && <span className="ws-type-chip">{insight.category}</span>}
+                      {insight.impact && (
+                        <span className={`ws-type-chip ${insight.impact === 'High' ? 'is-high' : ''}`}>
+                          {insight.impact} impact
+                        </span>
+                      )}
+                      {insight.source && <span className="ws-type-chip">{insight.source}</span>}
                     </div>
-                  </Card>
+                  </article>
                 );
               })}
             </div>
           )}
-        </div>
+        </section>
       </div>
 
       {/* Chart Preview Dialog */}
